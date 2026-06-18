@@ -78,7 +78,7 @@ export async function executeWorkflow(
       nodeType: "start",
       nodeLabel: "Start",
       status: "error",
-      message: "No Start node found in the workflow.",
+      message: "No se encontró un nodo Inicio en el flujo.",
     });
     return {
       status: "failed",
@@ -105,7 +105,7 @@ export async function executeWorkflow(
       nodeType: node.type as NodeType,
       nodeLabel: label,
       status: "started",
-      message: `Executing ${label}`,
+      message: `Ejecutando ${label}`,
     });
 
     let nextHandle: string | null = "out";
@@ -121,7 +121,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "info",
-            message: `Workflow triggered via ${trigger}.`,
+            message: `Fluj disparado vía ${trigger}.`,
           });
           nextHandle = "out";
           break;
@@ -129,7 +129,7 @@ export async function executeWorkflow(
 
         case "message": {
           const message = resolveTemplate(
-            String(data.message || "Hello!"),
+            String(data.message || "¡Hola!"),
             ctx.variables
           );
           ctx.variables["last_message"] = message;
@@ -138,7 +138,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `Message prepared: "${message.slice(0, 80)}${message.length > 80 ? "…" : ""}"`,
+            message: `Mensaje preparado: "${message.slice(0, 80)}${message.length > 80 ? "…" : ""}"`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = "out";
@@ -147,7 +147,7 @@ export async function executeWorkflow(
 
         case "question": {
           const question = resolveTemplate(
-            String(data.question || "Please respond."),
+            String(data.question || "Por favor responde."),
             ctx.variables
           );
           const variable = String(data.variable || "user_response");
@@ -156,7 +156,7 @@ export async function executeWorkflow(
             override ??
             (data.defaultResponse
               ? resolveTemplate(String(data.defaultResponse), ctx.variables)
-              : "yes");
+              : "sí");
           ctx.variables[variable] = response;
           // Also push the inbound reply into the WhatsApp simulator if we have a phone context.
           if (ctx.whatsappMessages.length > 0) {
@@ -175,7 +175,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `Asked: "${question}" → captured "${response}" into {{${variable}}}`,
+            message: `Preguntado: "${question}" → capturado "${response}" en {{${variable}}}`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = "out";
@@ -193,7 +193,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `Condition {{${variable}}} (${JSON.stringify(left)}) ${operator} "${value}" → ${result}`,
+            message: `Condición {{${variable}}} (${JSON.stringify(left)}) ${operator} "${value}" → ${result}`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = result ? "true" : "false";
@@ -206,7 +206,7 @@ export async function executeWorkflow(
             ctx.variables
           );
           const message = resolveTemplate(
-            String(data.message || "Hello from PayFlow SMT!"),
+            String(data.message || "¡Hola desde PayFlow SMT!"),
             ctx.variables
           );
           ctx.whatsappMessages.push({
@@ -224,7 +224,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `WhatsApp message sent to ${phone}: "${message.slice(0, 80)}${message.length > 80 ? "…" : ""}"`,
+            message: `Mensaje de WhatsApp enviado a ${phone}: "${message.slice(0, 80)}${message.length > 80 ? "…" : ""}"`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = "out";
@@ -235,7 +235,7 @@ export async function executeWorkflow(
           const amount = Number(data.amount ?? 0);
           const currency = String(data.currency || "USD");
           const description = resolveTemplate(
-            String(data.description || "Payment"),
+            String(data.description || "Pago"),
             ctx.variables
           );
           const outcome = mockPaymentOutcome(options.forcePaymentOutcome);
@@ -245,18 +245,18 @@ export async function executeWorkflow(
           ctx.variables["payment_currency"] = currency;
           const statusMsg =
             outcome === "payment_success"
-              ? `Payment of ${amount} ${currency} succeeded.`
+              ? `Pago de ${amount} ${currency} exitoso.`
               : outcome === "payment_failed"
-              ? `Payment of ${amount} ${currency} was declined.`
+              ? `Pago de ${amount} ${currency} rechazado.`
               : outcome === "payment_pending"
-              ? `Payment of ${amount} ${currency} is pending.`
-              : `Payment processor error for ${amount} ${currency}.`;
+              ? `Pago de ${amount} ${currency} pendiente.`
+              : `Error del procesador de pagos para ${amount} ${currency}.`;
           log(ctx, {
             nodeId: node.id,
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: outcome === "error" ? "error" : "success",
-            message: `${statusMsg} (description: "${description}") → branching to ${outcome}`,
+            message: `${statusMsg} (descripción: "${description}") → bifurcación a ${outcome}`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = outcome;
@@ -265,13 +265,13 @@ export async function executeWorkflow(
 
         case "ai_agent": {
           const systemPrompt =
-            String(data.systemPrompt || "You are a helpful assistant.");
+            String(data.systemPrompt || "Eres un asistente útil.");
           const inputVar = String(data.inputVariable || "");
           const inputText = inputVar ? ctx.variables[inputVar] : undefined;
           const prompt = resolveTemplate(
-            String(data.prompt || "Hello"),
+            String(data.prompt || "Hola"),
             ctx.variables
-          ) + (inputText ? `\n\nInput: ${String(inputText)}` : "");
+          ) + (inputText ? `\n\nEntrada: ${String(inputText)}` : "");
           const outputVariable = String(data.outputVariable || "ai_response");
           let aiContent = "";
           try {
@@ -287,13 +287,13 @@ export async function executeWorkflow(
             });
             aiContent = completion.choices[0]?.message?.content || "";
           } catch (err) {
-            aiContent = `[AI error: ${err instanceof Error ? err.message : "unknown"}]`;
+            aiContent = `[Error de IA: ${err instanceof Error ? err.message : "desconocido"}]`;
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "error",
-              message: `AI Agent call failed: ${err instanceof Error ? err.message : String(err)}`,
+              message: `Falló la llamada al Agente IA: ${err instanceof Error ? err.message : String(err)}`,
               durationMs: Date.now() - startedAt,
             });
           }
@@ -304,7 +304,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `AI Agent responded (${aiContent.length} chars) → stored in {{${outputVariable}}}`,
+            message: `El Agente IA respondió (${aiContent.length} caracteres) → guardado en {{${outputVariable}}}`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = "out";
@@ -354,7 +354,7 @@ export async function executeWorkflow(
             });
           } catch (err) {
             ctx.variables[outputVariable] = null;
-            errorMsg = `API request failed: ${err instanceof Error ? err.message : String(err)}`;
+            errorMsg = `Falló la petición API: ${err instanceof Error ? err.message : String(err)}`;
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
@@ -370,7 +370,7 @@ export async function executeWorkflow(
 
         case "end": {
           const message = resolveTemplate(
-            String(data.message || "Workflow ended."),
+            String(data.message || "Fluj finalizado."),
             ctx.variables
           );
           log(ctx, {
@@ -378,7 +378,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `Workflow ended. ${message}`,
+            message: `Fluj finalizado. ${message}`,
             durationMs: Date.now() - startedAt,
           });
           shouldStop = true;
@@ -391,7 +391,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "error",
-            message: `Unknown node type: ${node.type}`,
+            message: `Tipo de nodo desconocido: ${node.type}`,
           });
           shouldStop = true;
         }
@@ -402,7 +402,7 @@ export async function executeWorkflow(
         nodeType: node.type as NodeType,
         nodeLabel: label,
         status: "error",
-        message: `Unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+        message: `Error inesperado: ${err instanceof Error ? err.message : String(err)}`,
         durationMs: Date.now() - startedAt,
       });
       return {
@@ -439,7 +439,7 @@ export async function executeWorkflow(
         nodeType: node.type as NodeType,
         nodeLabel: label,
         status: "info",
-        message: `No outgoing connection from handle "${nextHandle}". Workflow finished.`,
+        message: `No hay conexión saliente desde el conector "${nextHandle}". Fluj finalizado.`,
       });
       return {
         status: "success",
@@ -455,16 +455,16 @@ export async function executeWorkflow(
     log(ctx, {
       nodeId: "—",
       nodeType: "end",
-      nodeLabel: "Engine",
+      nodeLabel: "Motor",
       status: "error",
-      message: `Execution stopped: reached max steps (${maxSteps}). Possible infinite loop.`,
+      message: `Ejecución detenida: se alcanzó el máximo de pasos (${maxSteps}). Posible bucle infinito.`,
     });
     return {
       status: "stopped",
       entries: ctx.log,
       variables: ctx.variables,
       whatsappMessages: ctx.whatsappMessages,
-      error: "Max steps reached",
+      error: "Máximo de pasos alcanzado",
     };
   }
 

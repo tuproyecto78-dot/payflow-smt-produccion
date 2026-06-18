@@ -21,6 +21,7 @@ import {
   Variable,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import type { LogEntry, NodeType } from "@/lib/workflow-types";
 
@@ -37,6 +38,18 @@ interface ExecutionDetail extends ExecutionListItem {
   entries: LogEntry[];
   variables: Record<string, unknown>;
 }
+
+const NODE_TYPE_LABELS: Record<string, string> = {
+  start: "Inicio",
+  message: "Mensaje",
+  question: "Pregunta",
+  condition: "Condición",
+  whatsapp: "WhatsApp",
+  payment: "Pago",
+  ai_agent: "Agente IA",
+  api: "API",
+  end: "Fin",
+};
 
 export function ExecutionsView() {
   const [list, setList] = useState<ExecutionListItem[]>([]);
@@ -76,26 +89,26 @@ export function ExecutionsView() {
 
   return (
     <div className="flex-1 overflow-hidden flex">
-      {/* List */}
-      <div className="w-full md:w-96 border-r border-border flex flex-col">
+      {/* Lista */}
+      <div className="w-full md:w-96 border-r border-border flex flex-col min-h-0">
         <div className="p-5 border-b border-border">
           <h1 className="text-xl font-bold flex items-center gap-2">
             <History className="size-5 text-primary" />
-            Execution history
+            Historial de ejecuciones
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Every workflow run is logged here.
+            Cada ejecución de flujo se registra aquí.
           </p>
         </div>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin mr-2" /> Loading…
+              <Loader2 className="size-4 animate-spin mr-2" /> Cargando…
             </div>
           ) : list.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground text-sm px-6">
-              No executions yet. Run a workflow from the editor to see logs
-              here.
+              Aún no hay ejecuciones. Ejecuta un flujo desde el editor para ver
+              los registros aquí.
             </div>
           ) : (
             <div className="p-2 space-y-1">
@@ -118,6 +131,7 @@ export function ExecutionsView() {
                     <Clock />
                     {formatDistanceToNow(new Date(ex.startedAt), {
                       addSuffix: true,
+                      locale: es,
                     })}
                   </div>
                 </button>
@@ -127,16 +141,16 @@ export function ExecutionsView() {
         </ScrollArea>
       </div>
 
-      {/* Detail */}
-      <div className="hidden md:flex flex-1 flex-col overflow-hidden">
+      {/* Detalle */}
+      <div className="hidden md:flex flex-1 flex-col overflow-hidden min-h-0">
         {loadingDetail ? (
           <div className="flex items-center justify-center h-full text-muted-foreground">
-            <Loader2 className="size-5 animate-spin mr-2" /> Loading execution…
+            <Loader2 className="size-5 animate-spin mr-2" /> Cargando ejecución…
           </div>
         ) : !selected ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <History className="size-10 mb-3 opacity-40" />
-            <p className="text-sm">Select an execution to view its logs.</p>
+            <p className="text-sm">Selecciona una ejecución para ver sus registros.</p>
           </div>
         ) : (
           <ExecutionDetailPanel detail={selected} />
@@ -153,22 +167,22 @@ function Clock() {
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
     success: {
-      label: "Success",
+      label: "Éxito",
       cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
       icon: <CheckCircle2 className="size-3" />,
     },
     failed: {
-      label: "Failed",
+      label: "Fallido",
       cls: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400",
       icon: <XCircle className="size-3" />,
     },
     running: {
-      label: "Running",
+      label: "En curso",
       cls: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400",
       icon: <Loader2 className="size-3 animate-spin" />,
     },
     stopped: {
-      label: "Stopped",
+      label: "Detenido",
       cls: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
       icon: <Square className="size-3" />,
     },
@@ -188,13 +202,13 @@ function StatusBadge({ status }: { status: string }) {
 
 function ExecutionDetailPanel({ detail }: { detail: ExecutionDetail }) {
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="flex-1 min-h-0">
       <div className="p-6 lg:p-8 max-w-4xl">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
           <div>
             <h2 className="text-lg font-bold">{detail.workflowName}</h2>
             <p className="text-sm text-muted-foreground">
-              Started {format(new Date(detail.startedAt), "PPpp")}
+              Iniciado {format(new Date(detail.startedAt), "PPpp", { locale: es })}
             </p>
           </div>
           <StatusBadge status={detail.status} />
@@ -206,7 +220,7 @@ function ExecutionDetailPanel({ detail }: { detail: ExecutionDetail }) {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Variable className="size-4 text-primary" />
-                Final variables
+                Variables finales
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -229,10 +243,10 @@ function ExecutionDetailPanel({ detail }: { detail: ExecutionDetail }) {
           </Card>
         )}
 
-        {/* Log entries timeline */}
+        {/* Registros */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Execution log</CardTitle>
+            <CardTitle className="text-sm">Registro de ejecución</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <ol className="relative">
@@ -263,7 +277,7 @@ function LogRow({ entry, isLast }: { entry: LogEntry; isLast: boolean }) {
       <div className="flex-1 min-w-0 pb-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {entry.nodeType}
+            {NODE_TYPE_LABELS[entry.nodeType] || entry.nodeType}
           </span>
           <span className="text-sm font-medium">{entry.nodeLabel}</span>
           {entry.durationMs !== undefined && (

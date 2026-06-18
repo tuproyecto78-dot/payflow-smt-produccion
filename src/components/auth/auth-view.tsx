@@ -32,13 +32,13 @@ export function AuthView() {
         ? await login(email, password)
         : await signup(email, password, name);
     if (!result.ok) {
-      setError(result.error || "Something went wrong");
+      setError(result.error || "Algo salió mal");
     }
   }
 
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-background">
-      {/* Branding panel */}
+      {/* Panel de marca */}
       <div className="relative lg:w-1/2 bg-sidebar text-sidebar-foreground p-8 lg:p-14 flex flex-col justify-between overflow-hidden">
         <div
           className="absolute inset-0 opacity-[0.07] pointer-events-none"
@@ -58,19 +58,19 @@ export function AuthView() {
 
         <div className="relative space-y-6 max-w-md">
           <h1 className="text-3xl lg:text-4xl font-bold leading-tight">
-            Build WhatsApp automation &amp; payment workflows visually.
+            Crea flujos de automatización de WhatsApp y pagos visualmente.
           </h1>
           <p className="text-sidebar-foreground/70 text-base lg:text-lg">
-            Drag, drop, and connect nodes to design powerful automations — no
-            code required. Run AI agents, process payments, and trigger
-            webhooks from one canvas.
+            Arrastra, suelta y conecta nodos para diseñar automatizaciones
+            potentes — sin código. Ejecuta agentes de IA, procesa pagos y
+            dispara webhooks desde un solo lienzo.
           </p>
           <div className="grid grid-cols-2 gap-3 pt-2">
             {[
-              { icon: MessageCircle, label: "WhatsApp messaging" },
-              { icon: CreditCard, label: "Payment flows" },
-              { icon: Bot, label: "AI agents" },
-              { icon: Zap, label: "API & webhooks" },
+              { icon: MessageCircle, label: "Mensajería WhatsApp" },
+              { icon: CreditCard, label: "Flujos de pago" },
+              { icon: Bot, label: "Agentes de IA" },
+              { icon: Zap, label: "API y webhooks" },
             ].map(({ icon: Icon, label }) => (
               <div
                 key={label}
@@ -85,28 +85,28 @@ export function AuthView() {
 
         <div className="relative flex items-center gap-2 text-sm text-sidebar-foreground/60">
           <CheckCircle2 className="size-4 text-primary" />
-          MVP build · Visual workflow builder
+          Versión MVP · Constructor visual de flujos
         </div>
       </div>
 
-      {/* Form panel */}
+      {/* Panel de formulario */}
       <div className="lg:w-1/2 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <h2 className="text-2xl font-bold tracking-tight">
-              {mode === "login" ? "Welcome back" : "Create your account"}
+              {mode === "login" ? "Bienvenido de nuevo" : "Crea tu cuenta"}
             </h2>
             <p className="text-muted-foreground text-sm mt-1">
               {mode === "login"
-                ? "Sign in to open your workflow dashboard."
-                : "Start building automation workflows in minutes."}
+                ? "Inicia sesión para abrir tu panel de flujos."
+                : "Comienza a crear flujos de automatización en minutos."}
             </p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4">
             {mode === "signup" && (
               <div className="space-y-2">
-                <Label htmlFor="name">Full name</Label>
+                <Label htmlFor="name">Nombre completo</Label>
                 <Input
                   id="name"
                   value={name}
@@ -117,19 +117,19 @@ export function AuthView() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Correo electrónico</Label>
               <Input
                 id="email"
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
+                placeholder="tu@empresa.com"
                 autoComplete="email"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Contraseña</Label>
               <Input
                 id="password"
                 type="password"
@@ -143,7 +143,7 @@ export function AuthView() {
               />
               {mode === "signup" && (
                 <p className="text-xs text-muted-foreground">
-                  At least 6 characters.
+                  Mínimo 6 caracteres.
                 </p>
               )}
             </div>
@@ -161,14 +161,14 @@ export function AuthView() {
               disabled={loading}
             >
               {loading && <Loader2 className="size-4 mr-2 animate-spin" />}
-              {mode === "login" ? "Sign in" : "Create account"}
+              {mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-sm text-muted-foreground">
             {mode === "login" ? (
               <>
-                Don&apos;t have an account?{" "}
+                ¿No tienes una cuenta?{" "}
                 <button
                   className="text-primary font-medium hover:underline"
                   onClick={() => {
@@ -176,12 +176,12 @@ export function AuthView() {
                     setError(null);
                   }}
                 >
-                  Sign up
+                  Regístrate
                 </button>
               </>
             ) : (
               <>
-                Already have an account?{" "}
+                ¿Ya tienes una cuenta?{" "}
                 <button
                   className="text-primary font-medium hover:underline"
                   onClick={() => {
@@ -189,7 +189,7 @@ export function AuthView() {
                     setError(null);
                   }}
                 >
-                  Sign in
+                  Inicia sesión
                 </button>
               </>
             )}
@@ -199,19 +199,19 @@ export function AuthView() {
             <div className="mt-6 rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-500/10 p-3 text-xs">
               <div className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300 mb-1">
                 <ShieldCheck className="size-3.5" />
-                Administrator access
+                Acceso de administrador
               </div>
               <div className="text-amber-800/80 dark:text-amber-200/70 space-y-0.5 font-mono text-[11px]">
-                <div>Email: admin@payflow.smt</div>
-                <div>Password: admin123</div>
+                <div>Correo: admin@payflow.smt</div>
+                <div>Contraseña: admin123</div>
               </div>
             </div>
           )}
 
           {mode === "signup" && (
             <div className="mt-6 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Demo tip:</span> we
-              create a starter project with a workflow for you automatically.
+              <span className="font-medium text-foreground">Consejo:</span> te
+              creamos un proyecto inicial con un flujo automáticamente.
             </div>
           )}
         </div>

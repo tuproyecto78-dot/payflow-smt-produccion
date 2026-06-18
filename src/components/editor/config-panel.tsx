@@ -59,15 +59,15 @@ export function ConfigPanel({
 }) {
   if (!node) {
     return (
-      <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col">
-        <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold">Configuration</h3>
+      <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col min-h-0">
+        <div className="px-4 py-3 border-b border-border shrink-0">
+          <h3 className="text-sm font-semibold">Configuración</h3>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6 text-muted-foreground">
           <Settings2 className="size-8 mb-3 opacity-40" />
-          <p className="text-sm font-medium">No node selected</p>
+          <p className="text-sm font-medium">Ningún nodo seleccionado</p>
           <p className="text-xs mt-1">
-            Click a node on the canvas to edit its settings.
+            Haz clic en un nodo del lienzo para editar sus ajustes.
           </p>
         </div>
       </div>
@@ -83,8 +83,8 @@ export function ConfigPanel({
   };
 
   return (
-    <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
+    <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col min-h-0">
+      <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2.5">
           <div
             className="size-8 rounded-md flex items-center justify-center text-white shrink-0"
@@ -101,10 +101,10 @@ export function ConfigPanel({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="node-label" className="text-xs">Node label</Label>
+            <Label htmlFor="node-label" className="text-xs">Etiqueta del nodo</Label>
             <Input
               id="node-label"
               value={String(data.label || "")}
@@ -118,7 +118,7 @@ export function ConfigPanel({
 
           {node.type === "start" && (
             <div className="space-y-1.5">
-              <Label className="text-xs">Trigger type</Label>
+              <Label className="text-xs">Tipo de disparador</Label>
               <Select
                 value={String(data.trigger || "manual")}
                 onValueChange={(v) => set("trigger", v)}
@@ -129,24 +129,24 @@ export function ConfigPanel({
                 <SelectContent>
                   <SelectItem value="manual">Manual</SelectItem>
                   <SelectItem value="webhook">Webhook</SelectItem>
-                  <SelectItem value="schedule">Schedule</SelectItem>
+                  <SelectItem value="schedule">Programado</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-[10px] text-muted-foreground">
-                How this workflow is started.
+                Cómo se inicia este flujo.
               </p>
             </div>
           )}
 
           {node.type === "message" && (
             <Field
-              label="Message"
-              hint="Static text sent in the flow. Use {{variable}} to interpolate."
+              label="Mensaje"
+              hint="Texto fijo enviado en el flujo. Usa {{variable}} para interpolar."
             >
               <Textarea
                 value={String(data.message || "")}
                 onChange={(e) => set("message", e.target.value)}
-                placeholder="Hi {{name}}, your order is confirmed!"
+                placeholder="¡Hola {{nombre}}, tu pedido está confirmado!"
                 rows={4}
                 className="text-sm"
               />
@@ -155,31 +155,31 @@ export function ConfigPanel({
 
           {node.type === "question" && (
             <>
-              <Field label="Question" hint="Text shown to the user.">
+              <Field label="Pregunta" hint="Texto que se muestra al usuario.">
                 <Textarea
                   value={String(data.question || "")}
                   onChange={(e) => set("question", e.target.value)}
-                  placeholder="What size would you like?"
+                  placeholder="¿Qué talla deseas?"
                   rows={3}
                   className="text-sm"
                 />
               </Field>
-              <Field label="Variable name" hint="Where the reply is stored.">
+              <Field label="Nombre de variable" hint="Donde se guarda la respuesta.">
                 <Input
                   value={String(data.variable || "")}
                   onChange={(e) => set("variable", e.target.value)}
-                  placeholder="size"
+                  placeholder="talla"
                   className="h-8 text-sm"
                 />
               </Field>
               <Field
-                label="Default response"
-                hint="Mock reply used during execution."
+                label="Respuesta por defecto"
+                hint="Respuesta simulada durante la ejecución."
               >
                 <Input
                   value={String(data.defaultResponse || "")}
                   onChange={(e) => set("defaultResponse", e.target.value)}
-                  placeholder="medium"
+                  placeholder="mediana"
                   className="h-8 text-sm"
                 />
               </Field>
@@ -188,7 +188,7 @@ export function ConfigPanel({
 
           {node.type === "condition" && (
             <>
-              <Field label="Variable" hint="Variable to evaluate.">
+              <Field label="Variable" hint="Variable a evaluar.">
                 <Input
                   value={String(data.variable || "")}
                   onChange={(e) => set("variable", e.target.value)}
@@ -196,7 +196,7 @@ export function ConfigPanel({
                   className="h-8 text-sm font-mono"
                 />
               </Field>
-              <Field label="Operator">
+              <Field label="Operador">
                 <Select
                   value={String(data.operator || "equals")}
                   onValueChange={(v) => set("operator", v)}
@@ -205,15 +205,15 @@ export function ConfigPanel({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="equals">equals (=)</SelectItem>
-                    <SelectItem value="not_equals">not equals (≠)</SelectItem>
-                    <SelectItem value="contains">contains</SelectItem>
-                    <SelectItem value="greater_than">greater than (&gt;)</SelectItem>
-                    <SelectItem value="less_than">less than (&lt;)</SelectItem>
+                    <SelectItem value="equals">igual a (=)</SelectItem>
+                    <SelectItem value="not_equals">distinto de (≠)</SelectItem>
+                    <SelectItem value="contains">contiene</SelectItem>
+                    <SelectItem value="greater_than">mayor que (&gt;)</SelectItem>
+                    <SelectItem value="less_than">menor que (&lt;)</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Value">
+              <Field label="Valor">
                 <Input
                   value={String(data.value ?? "")}
                   onChange={(e) => set("value", e.target.value)}
@@ -223,10 +223,10 @@ export function ConfigPanel({
               </Field>
               <div className="flex gap-2">
                 <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-                  True →
+                  Verdadero →
                 </Badge>
                 <Badge className="bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400">
-                  False →
+                  Falso →
                 </Badge>
               </div>
             </>
@@ -234,7 +234,7 @@ export function ConfigPanel({
 
           {node.type === "whatsapp" && (
             <>
-              <Field label="Phone number" hint="E.164 format recommended.">
+              <Field label="Número de teléfono" hint="Formato E.164 recomendado.">
                 <Input
                   value={String(data.phoneNumber || "")}
                   onChange={(e) => set("phoneNumber", e.target.value)}
@@ -242,20 +242,20 @@ export function ConfigPanel({
                   className="h-8 text-sm"
                 />
               </Field>
-              <Field label="Message" hint="Supports {{variable}} interpolation.">
+              <Field label="Mensaje" hint="Admite interpolación {{variable}}.">
                 <Textarea
                   value={String(data.message || "")}
                   onChange={(e) => set("message", e.target.value)}
-                  placeholder="Hello! Your code is {{code}}"
+                  placeholder="¡Hola! Tu código es {{code}}"
                   rows={4}
                   className="text-sm"
                 />
               </Field>
-              <Field label="Template name (optional)">
+              <Field label="Nombre de plantilla (opcional)">
                 <Input
                   value={String(data.templateName || "")}
                   onChange={(e) => set("templateName", e.target.value)}
-                  placeholder="order_confirmation"
+                  placeholder="confirmacion_pedido"
                   className="h-8 text-sm"
                 />
               </Field>
@@ -265,7 +265,7 @@ export function ConfigPanel({
           {node.type === "payment" && (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Amount">
+                <Field label="Monto">
                   <Input
                     type="number"
                     value={String(data.amount ?? "")}
@@ -276,7 +276,7 @@ export function ConfigPanel({
                     className="h-8 text-sm"
                   />
                 </Field>
-                <Field label="Currency">
+                <Field label="Moneda">
                   <Select
                     value={String(data.currency || "USD")}
                     onValueChange={(v) => set("currency", v)}
@@ -294,15 +294,15 @@ export function ConfigPanel({
                   </Select>
                 </Field>
               </div>
-              <Field label="Description">
+              <Field label="Descripción">
                 <Input
                   value={String(data.description || "")}
                   onChange={(e) => set("description", e.target.value)}
-                  placeholder="Pro plan subscription"
+                  placeholder="Suscripción plan Pro"
                   className="h-8 text-sm"
                 />
               </Field>
-              <Field label="Merchant name (optional)">
+              <Field label="Nombre del comercio (opcional)">
                 <Input
                   value={String(data.merchantName || "")}
                   onChange={(e) => set("merchantName", e.target.value)}
@@ -311,7 +311,7 @@ export function ConfigPanel({
                 />
               </Field>
               <div>
-                <Label className="text-xs mb-1.5 block">Possible outputs</Label>
+                <Label className="text-xs mb-1.5 block">Resultados posibles</Label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {meta.outputs.map((o) => (
                     <Badge
@@ -329,25 +329,25 @@ export function ConfigPanel({
 
           {node.type === "ai_agent" && (
             <>
-              <Field label="System prompt">
+              <Field label="Prompt del sistema">
                 <Textarea
                   value={String(data.systemPrompt || "")}
                   onChange={(e) => set("systemPrompt", e.target.value)}
-                  placeholder="You are a helpful sales assistant."
+                  placeholder="Eres un asistente de ventas útil."
                   rows={3}
                   className="text-sm"
                 />
               </Field>
-              <Field label="User prompt" hint="Supports {{variable}} interpolation.">
+              <Field label="Prompt del usuario" hint="Admite interpolación {{variable}}.">
                 <Textarea
                   value={String(data.prompt || "")}
                   onChange={(e) => set("prompt", e.target.value)}
-                  placeholder="Suggest a product for a customer who said: {{user_response}}"
+                  placeholder="Sugiere un producto para un cliente que dijo: {{user_response}}"
                   rows={3}
                   className="text-sm"
                 />
               </Field>
-              <Field label="Input variable (optional)">
+              <Field label="Variable de entrada (opcional)">
                 <Input
                   value={String(data.inputVariable || "")}
                   onChange={(e) => set("inputVariable", e.target.value)}
@@ -355,7 +355,7 @@ export function ConfigPanel({
                   className="h-8 text-sm font-mono"
                 />
               </Field>
-              <Field label="Output variable">
+              <Field label="Variable de salida">
                 <Input
                   value={String(data.outputVariable || "")}
                   onChange={(e) => set("outputVariable", e.target.value)}
@@ -368,7 +368,7 @@ export function ConfigPanel({
 
           {node.type === "api" && (
             <>
-              <Field label="Method">
+              <Field label="Método">
                 <Select
                   value={String(data.method || "GET")}
                   onValueChange={(v) => set("method", v)}
@@ -385,33 +385,33 @@ export function ConfigPanel({
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="URL" hint="Supports {{variable}} interpolation.">
+              <Field label="URL" hint="Admite interpolación {{variable}}.">
                 <Input
                   value={String(data.url || "")}
                   onChange={(e) => set("url", e.target.value)}
-                  placeholder="https://api.example.com/orders"
+                  placeholder="https://api.ejemplo.com/pedidos"
                   className="h-8 text-sm font-mono"
                 />
               </Field>
-              <Field label="Headers (JSON)">
+              <Field label="Cabeceras (JSON)">
                 <Textarea
                   value={String(data.headers || "")}
                   onChange={(e) => set("headers", e.target.value)}
-                  placeholder={'{"Authorization": "Bearer xxx"}'}
+                  placeholder='{"Authorization": "Bearer xxx"}'
                   rows={3}
                   className="text-xs font-mono"
                 />
               </Field>
-              <Field label="Body (optional)">
+              <Field label="Cuerpo (opcional)">
                 <Textarea
                   value={String(data.body || "")}
                   onChange={(e) => set("body", e.target.value)}
-                  placeholder='{"product": "pro"}'
+                  placeholder='{"producto": "pro"}'
                   rows={3}
                   className="text-xs font-mono"
                 />
               </Field>
-              <Field label="Output variable">
+              <Field label="Variable de salida">
                 <Input
                   value={String(data.outputVariable || "")}
                   onChange={(e) => set("outputVariable", e.target.value)}
@@ -423,11 +423,11 @@ export function ConfigPanel({
           )}
 
           {node.type === "end" && (
-            <Field label="End message (optional)">
+            <Field label="Mensaje de cierre (opcional)">
               <Input
                 value={String(data.message || "")}
                 onChange={(e) => set("message", e.target.value)}
-                placeholder="Workflow complete"
+                placeholder="Flujo completado"
                 className="h-8 text-sm"
               />
             </Field>
@@ -435,7 +435,7 @@ export function ConfigPanel({
         </div>
       </ScrollArea>
 
-      <div className="p-3 border-t border-border">
+      <div className="p-3 border-t border-border shrink-0">
         <Button
           variant="outline"
           size="sm"
@@ -443,7 +443,7 @@ export function ConfigPanel({
           onClick={() => onDelete(node.id)}
         >
           <Trash2 className="size-4 mr-2" />
-          Delete node
+          Eliminar nodo
         </Button>
       </div>
     </div>

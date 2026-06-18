@@ -50,13 +50,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await res.json();
       if (!res.ok) {
         set({ loading: false });
-        return { ok: false, error: data.error || "Login failed" };
+        return { ok: false, error: data.error || "Error al iniciar sesión" };
       }
       set({ user: data.user, initialized: true });
       return { ok: true };
     } catch {
       set({ loading: false });
-      return { ok: false, error: "Network error" };
+      return { ok: false, error: "Error de red" };
     } finally {
       set({ loading: false });
     }
@@ -72,13 +72,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await res.json();
       if (!res.ok) {
         set({ loading: false });
-        return { ok: false, error: data.error || "Signup failed" };
+        return { ok: false, error: data.error || "Error al crear la cuenta" };
       }
       set({ user: data.user, initialized: true });
       return { ok: true };
     } catch {
       set({ loading: false });
-      return { ok: false, error: "Network error" };
+      return { ok: false, error: "Error de red" };
     } finally {
       set({ loading: false });
     }

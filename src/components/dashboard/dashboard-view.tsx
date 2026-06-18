@@ -45,6 +45,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { es } from "date-fns/locale";
 import { toast } from "sonner";
 
 interface ProjectWithWorkflows extends ProjectSummary {
@@ -67,7 +68,6 @@ export function DashboardView() {
       const res = await fetch("/api/projects");
       const data = await res.json();
       const base = (data.projects || []) as ProjectSummary[];
-      // Load workflows per project
       const withWorkflows: ProjectWithWorkflows[] = await Promise.all(
         base.map(async (p) => {
           const r = await fetch(`/api/projects/${p.id}`);
@@ -77,7 +77,7 @@ export function DashboardView() {
       );
       setProjects(withWorkflows);
     } catch {
-      toast.error("Failed to load projects");
+      toast.error("Error al cargar los proyectos");
     } finally {
       setLoading(false);
     }
@@ -95,10 +95,10 @@ export function DashboardView() {
     });
     if (!res.ok) {
       const d = await res.json();
-      toast.error(d.error || "Failed to create project");
+      toast.error(d.error || "Error al crear el proyecto");
       return;
     }
-    toast.success("Project created");
+    toast.success("Proyecto creado");
     setNewProjectOpen(false);
     await loadProjects();
   }
@@ -110,10 +110,10 @@ export function DashboardView() {
       body: JSON.stringify({ projectId, name }),
     });
     if (!res.ok) {
-      toast.error("Failed to create workflow");
+      toast.error("Error al crear el flujo");
       return;
     }
-    toast.success("Workflow created");
+    toast.success("Flujo creado");
     setNewWorkflowFor(null);
     await loadProjects();
   }
@@ -124,11 +124,11 @@ export function DashboardView() {
       method: "DELETE",
     });
     if (res.ok) {
-      toast.success("Project deleted");
+      toast.success("Proyecto eliminado");
       setDeleteProject(null);
       await loadProjects();
     } else {
-      toast.error("Failed to delete project");
+      toast.error("Error al eliminar el proyecto");
     }
   }
 
@@ -138,11 +138,11 @@ export function DashboardView() {
       method: "DELETE",
     });
     if (res.ok) {
-      toast.success("Workflow deleted");
+      toast.success("Flujo eliminado");
       setDeleteWorkflow(null);
       await loadProjects();
     } else {
-      toast.error("Failed to delete workflow");
+      toast.error("Error al eliminar el flujo");
     }
   }
 
@@ -153,37 +153,40 @@ export function DashboardView() {
       body: JSON.stringify({ name, description }),
     });
     if (res.ok) {
-      toast.success("Project updated");
+      toast.success("Proyecto actualizado");
       setEditProject(null);
       await loadProjects();
     } else {
-      toast.error("Failed to update project");
+      toast.error("Error al actualizar el proyecto");
     }
   }
+
+  const fmt = (date: string, addSuffix = true) =>
+    formatDistanceToNow(new Date(date), { addSuffix, locale: es });
 
   return (
     <div className="flex-1 overflow-y-auto pf-scroll">
       <div className="max-w-6xl mx-auto p-6 lg:p-10">
-        {/* Header */}
+        {/* Encabezado */}
         <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
           <div>
             <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">
-              Projects
+              Proyectos
             </h1>
             <p className="text-muted-foreground mt-1">
-              Organize your WhatsApp, payment &amp; AI workflows into projects.
+              Organiza tus flujos de WhatsApp, pagos e IA en proyectos.
             </p>
           </div>
           <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="size-4 mr-2" />
-                New project
+                Nuevo proyecto
               </Button>
             </DialogTrigger>
             <ProjectFormDialog
-              title="Create project"
-              description="A project groups related automation workflows."
+              title="Crear proyecto"
+              description="Un proyecto agrupa flujos de automatización relacionados."
               onSubmit={createProject}
               onCancel={() => setNewProjectOpen(false)}
             />
@@ -192,7 +195,7 @@ export function DashboardView() {
 
         {loading ? (
           <div className="flex items-center justify-center py-24 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin mr-2" /> Loading projects…
+            <Loader2 className="size-5 animate-spin mr-2" /> Cargando proyectos…
           </div>
         ) : projects.length === 0 ? (
           <EmptyState onCreate={() => setNewProjectOpen(true)} />
@@ -212,10 +215,7 @@ export function DashboardView() {
                         </CardTitle>
                         <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
                           <Clock className="size-3" />
-                          Updated{" "}
-                          {formatDistanceToNow(new Date(project.updatedAt), {
-                            addSuffix: true,
-                          })}
+                          Actualizado {fmt(project.updatedAt)}
                         </div>
                       </div>
                     </div>
@@ -248,7 +248,7 @@ export function DashboardView() {
                 <CardContent className="flex-1 space-y-2">
                   {project.workflows.length === 0 ? (
                     <p className="text-sm text-muted-foreground py-4 text-center">
-                      No workflows yet.
+                      Aún no hay flujos.
                     </p>
                   ) : (
                     project.workflows.map((wf) => (
@@ -264,9 +264,7 @@ export function DashboardView() {
                           {wf.name}
                         </button>
                         <Badge variant="secondary" className="text-[10px] hidden sm:inline-flex">
-                          {formatDistanceToNow(new Date(wf.updatedAt), {
-                            addSuffix: false,
-                          })}
+                          {fmt(wf.updatedAt, false)}
                         </Badge>
                         <Button
                           variant="ghost"
@@ -297,7 +295,7 @@ export function DashboardView() {
                     onClick={() => setNewWorkflowFor(project.id)}
                   >
                     <Plus className="size-4 mr-2" />
-                    New workflow
+                    Nuevo flujo
                   </Button>
                 </CardFooter>
               </Card>
@@ -306,7 +304,7 @@ export function DashboardView() {
         )}
       </div>
 
-      {/* New workflow dialog */}
+      {/* Diálogo nuevo flujo */}
       <Dialog open={!!newWorkflowFor} onOpenChange={(o) => !o && setNewWorkflowFor(null)}>
         <WorkflowFormDialog
           onSubmit={(name) => newWorkflowFor && createWorkflow(newWorkflowFor, name)}
@@ -314,60 +312,60 @@ export function DashboardView() {
         />
       </Dialog>
 
-      {/* Edit project dialog */}
+      {/* Editar proyecto */}
       <Dialog open={!!editProject} onOpenChange={(o) => !o && setEditProject(null)}>
         {editProject && (
           <ProjectFormDialog
-            title="Edit project"
-            description="Update your project details."
+            title="Editar proyecto"
+            description="Actualiza los detalles de tu proyecto."
             initialName={editProject.name}
             initialDescription={editProject.description || ""}
-            submitLabel="Save changes"
+            submitLabel="Guardar cambios"
             onSubmit={(name, desc) => updateProject(editProject.id, name, desc)}
             onCancel={() => setEditProject(null)}
           />
         )}
       </Dialog>
 
-      {/* Delete project confirm */}
+      {/* Confirmar eliminar proyecto */}
       <AlertDialog open={!!deleteProject} onOpenChange={(o) => !o && setDeleteProject(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar proyecto?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes &ldquo;{deleteProject?.name}&rdquo; and all
-              its workflows and execution logs. This cannot be undone.
+              Esto elimina permanentemente “{deleteProject?.name}” y todos sus
+              flujos y registros de ejecución. No se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteProject}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Delete workflow confirm */}
+      {/* Confirmar eliminar flujo */}
       <AlertDialog open={!!deleteWorkflow} onOpenChange={(o) => !o && setDeleteWorkflow(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete workflow?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar flujo?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes &ldquo;{deleteWorkflow?.wf.name}&rdquo; and
-              its execution history.
+              Esto elimina permanentemente “{deleteWorkflow?.wf.name}” y su
+              historial de ejecución.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteWorkflow}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -383,14 +381,14 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <div className="size-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
           <FolderKanban className="size-7 text-primary" />
         </div>
-        <h3 className="text-lg font-semibold">No projects yet</h3>
+        <h3 className="text-lg font-semibold">Aún no hay proyectos</h3>
         <p className="text-muted-foreground text-sm mt-1 max-w-sm">
-          Create your first project to start building WhatsApp, payment, and AI
-          automation workflows.
+          Crea tu primer proyecto para empezar a construir flujos de WhatsApp,
+          pagos e IA.
         </p>
         <Button className="mt-5" onClick={onCreate}>
           <Plus className="size-4 mr-2" />
-          Create project
+          Crear proyecto
         </Button>
       </CardContent>
     </Card>
@@ -404,7 +402,7 @@ function ProjectFormDialog({
   onCancel,
   initialName = "",
   initialDescription = "",
-  submitLabel = "Create",
+  submitLabel = "Crear",
 }: {
   title: string;
   description: string;
@@ -424,28 +422,28 @@ function ProjectFormDialog({
       </DialogHeader>
       <div className="space-y-4 py-2">
         <div className="space-y-2">
-          <Label htmlFor="proj-name">Name</Label>
+          <Label htmlFor="proj-name">Nombre</Label>
           <Input
             id="proj-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="My automation project"
+            placeholder="Mi proyecto de automatización"
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="proj-desc">Description (optional)</Label>
+          <Label htmlFor="proj-desc">Descripción (opcional)</Label>
           <Textarea
             id="proj-desc"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
-            placeholder="What is this project about?"
+            placeholder="¿De qué trata este proyecto?"
             rows={3}
           />
         </div>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          Cancelar
         </Button>
         <Button
           onClick={() => name.trim() && onSubmit(name.trim(), desc.trim())}
@@ -469,30 +467,30 @@ function WorkflowFormDialog({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>New workflow</DialogTitle>
+        <DialogTitle>Nuevo flujo</DialogTitle>
         <DialogDescription>
-          Give your workflow a name. You can rename it later.
+          Ponle un nombre a tu flujo. Puedes renombrarlo después.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-2 py-2">
-        <Label htmlFor="wf-name">Workflow name</Label>
+        <Label htmlFor="wf-name">Nombre del flujo</Label>
         <Input
           id="wf-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Order confirmation flow"
+          placeholder="Flujo de confirmación de pedido"
           autoFocus
         />
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          Cancelar
         </Button>
         <Button
           onClick={() => name.trim() && onSubmit(name.trim())}
           disabled={!name.trim()}
         >
-          Create workflow
+          Crear flujo
         </Button>
       </DialogFooter>
     </DialogContent>

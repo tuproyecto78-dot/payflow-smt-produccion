@@ -12,6 +12,7 @@ import {
   Bot,
   Webhook,
   Square,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { NODE_METADATA, type NodeType } from "@/lib/workflow-types";
@@ -37,17 +38,17 @@ export interface PayFlowNodeData {
 function getNodeSummary(type: NodeType, data: PayFlowNodeData): string {
   switch (type) {
     case "start":
-      return `Trigger: ${data.trigger || "manual"}`;
+      return `Disparador: ${data.trigger || "manual"}`;
     case "message":
-      return data.message ? String(data.message).slice(0, 40) : "Empty message";
+      return data.message ? String(data.message).slice(0, 40) : "Mensaje vacío";
     case "question":
       return data.question
-        ? `→ {{${data.variable || "response"}}}`
-        : "No question set";
+        ? `→ {{${data.variable || "respuesta"}}}`
+        : "Sin pregunta";
     case "condition":
       return `${data.variable || "?"} ${data.operator || "=="} "${data.value || ""}"`;
     case "whatsapp":
-      return data.phoneNumber ? `To ${data.phoneNumber}` : "No recipient";
+      return data.phoneNumber ? `A ${data.phoneNumber}` : "Sin destinatario";
     case "payment": {
       const amt = data.amount ?? 0;
       const cur = data.currency || "USD";
@@ -56,9 +57,9 @@ function getNodeSummary(type: NodeType, data: PayFlowNodeData): string {
     case "ai_agent":
       return data.outputVariable ? `→ {{${data.outputVariable}}}` : "→ {{ai_response}}";
     case "api":
-      return data.method ? `${data.method} ${data.url ? String(data.url).slice(0, 24) : ""}` : "No request";
+      return data.method ? `${data.method} ${data.url ? String(data.url).slice(0, 24) : ""}` : "Sin petición";
     case "end":
-      return data.message ? String(data.message).slice(0, 40) : "End of flow";
+      return data.message ? String(data.message).slice(0, 40) : "Fin del flujo";
     default:
       return "";
   }
@@ -75,10 +76,19 @@ function PayFlowNodeInner({ id, type, data, selected }: NodeProps) {
   const showTarget = type !== "start";
   const outputs = meta?.outputs || [];
 
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("payflow:delete-node", { detail: { id } })
+      );
+    }
+  }
+
   return (
     <div
       className={cn(
-        "relative min-w-[180px] max-w-[240px] rounded-xl border bg-card shadow-sm transition-all",
+        "relative min-w-[180px] max-w-[240px] rounded-xl border bg-card shadow-sm transition-all group",
         selected
           ? "border-primary ring-2 ring-primary/20 shadow-md"
           : "border-border hover:border-primary/40",
@@ -96,7 +106,18 @@ function PayFlowNodeInner({ id, type, data, selected }: NodeProps) {
         />
       )}
 
-      {/* Header */}
+      {/* Botón eliminar (X) — visible al seleccionar o al pasar el cursor */}
+      {type !== "start" && (
+        <button
+          onClick={handleDelete}
+          title="Eliminar nodo"
+          className="absolute -top-2.5 -right-2.5 size-6 rounded-full bg-destructive text-destructive-foreground shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity hover:scale-110 z-10"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+
+      {/* Cabecera */}
       <div
         className="flex items-center gap-2 px-3 py-2 rounded-t-xl"
         style={{ backgroundColor: `${meta?.color}14` }}
@@ -123,14 +144,13 @@ function PayFlowNodeInner({ id, type, data, selected }: NodeProps) {
         )}
       </div>
 
-      {/* Body */}
+      {/* Cuerpo */}
       <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border/60">
         <p className="truncate">{getNodeSummary(type as NodeType, nodeData)}</p>
       </div>
 
-      {/* Source handles */}
+      {/* Conectores de salida */}
       {outputs.map((out, idx) => {
-        // Position multiple handles vertically on the right edge.
         const top =
           outputs.length === 1
             ? "50%"

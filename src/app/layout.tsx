@@ -14,15 +14,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PayFlow SMT — Visual Workflow Builder",
+  title: "PayFlow SMT — Constructor Visual de Flujos",
   description:
-    "PayFlow SMT is a visual workflow builder for WhatsApp automation, payments, AI agents, and API/webhook integrations.",
+    "PayFlow SMT es un constructor visual de flujos para automatización de WhatsApp, pagos, agentes de IA e integraciones API/webhook.",
   keywords: [
     "PayFlow SMT",
-    "workflow builder",
-    "WhatsApp automation",
-    "payments",
-    "AI agents",
+    "constructor de flujos",
+    "automatización WhatsApp",
+    "pagos",
+    "agentes IA",
     "webhooks",
   ],
   authors: [{ name: "PayFlow SMT" }],

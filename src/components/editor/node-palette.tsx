@@ -28,11 +28,11 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
-  trigger: "Triggers",
-  flow: "Conversation",
-  channel: "Channels",
-  logic: "Logic",
-  integration: "Integrations",
+  trigger: "Disparadores",
+  flow: "Conversación",
+  channel: "Canales",
+  logic: "Lógica",
+  integration: "Integraciones",
 };
 
 export function NodePalette({
@@ -40,7 +40,6 @@ export function NodePalette({
 }: {
   onAddNode: (type: NodeType) => void;
 }) {
-  // Group nodes by category preserving palette order.
   const groups: { category: string; items: NodeType[] }[] = [];
   for (const type of NODE_PALETTE_ORDER) {
     const meta = NODE_METADATA[type];
@@ -53,14 +52,14 @@ export function NodePalette({
   }
 
   return (
-    <div className="w-56 shrink-0 border-r border-border bg-card/50 flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
-        <h3 className="text-sm font-semibold">Nodes</h3>
+    <div className="w-56 shrink-0 border-r border-border bg-card/50 flex flex-col min-h-0">
+      <div className="px-4 py-3 border-b border-border shrink-0">
+        <h3 className="text-sm font-semibold">Nodos</h3>
         <p className="text-[11px] text-muted-foreground mt-0.5">
-          Click to add to canvas
+          Haz clic para añadir al lienzo
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto pf-scroll p-2 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto pf-scroll p-2 space-y-4">
         {groups.map((group) => (
           <div key={group.category}>
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 mb-1.5">
@@ -99,10 +98,10 @@ export function NodePalette({
           </div>
         ))}
       </div>
-      <div className="p-3 border-t border-border text-[10px] text-muted-foreground leading-relaxed">
-        <span className="font-medium text-foreground">Tip:</span> Drag from any
-        node&apos;s right handle to another node&apos;s left handle to connect
-        them.
+      <div className="p-3 border-t border-border text-[10px] text-muted-foreground leading-relaxed shrink-0">
+        <span className="font-medium text-foreground">Consejo:</span> arrastra
+        desde el conector derecho de un nodo hacia el conector izquierdo de otro
+        para conectarlos.
       </div>
     </div>
   );

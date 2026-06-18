@@ -52,23 +52,23 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
       </button>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1">
+      <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1 min-h-0 overflow-y-auto pf-scroll">
         <NavItem
           icon={<LayoutDashboard className="size-5" />}
-          label="Dashboard"
+          label="Panel"
           active={activeNav === "dashboard"}
           onClick={() => onNavigate("dashboard")}
         />
         <NavItem
           icon={<History className="size-5" />}
-          label="Executions"
+          label="Ejecuciones"
           active={activeNav === "executions"}
           onClick={() => onNavigate("executions")}
         />
         {activeWorkflow && (
           <div className="hidden lg:block pt-4 mt-4 border-t border-sidebar-border">
             <div className="px-3 text-[11px] uppercase tracking-wider text-sidebar-foreground/40 mb-2">
-              Active workflow
+              Flujo activo
             </div>
             <div className="px-3 py-2 rounded-md bg-sidebar-accent/60 text-xs">
               <div className="font-medium truncate">{activeWorkflow.name}</div>
@@ -76,7 +76,7 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
                 onClick={goDashboard}
                 className="mt-1 flex items-center gap-1 text-primary hover:underline"
               >
-                Back to dashboard <ChevronRight className="size-3" />
+                Volver al panel <ChevronRight className="size-3" />
               </button>
             </div>
           </div>
@@ -100,7 +100,7 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
           </Avatar>
           <div className="hidden lg:block flex-1 min-w-0">
             <div className="text-sm font-medium truncate flex items-center gap-1.5">
-              {user?.name || "User"}
+              {user?.name || "Usuario"}
               {isAdmin && (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300 leading-none">
                   <ShieldCheck className="size-2.5" />
@@ -117,7 +117,7 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
             size="icon"
             onClick={logout}
             className="hidden lg:flex size-8 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-            title="Sign out"
+            title="Cerrar sesión"
           >
             <LogOut className="size-4" />
           </Button>
@@ -129,7 +129,7 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
           className="lg:hidden w-full text-sidebar-foreground/70 hover:text-sidebar-foreground"
         >
           <LogOut className="size-4 mr-2" />
-          Sign out
+          Cerrar sesión
         </Button>
       </div>
     </aside>

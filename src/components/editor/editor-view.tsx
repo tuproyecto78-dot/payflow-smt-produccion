@@ -132,10 +132,11 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
   const [visibleMessages, setVisibleMessages] = useState<WhatsAppSimMessage[]>([]);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState<"config" | "run">("config");
   const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
 
-  // Load workflow
+  // Cargar flujo
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -146,7 +147,6 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         const wf = data.workflow;
         setName(wf.name);
         const flowNodes: FlowNode[] = wf.nodes || [];
-        // If empty, seed a Start + End node.
         if (flowNodes.length === 0) {
           const startId = makeId();
           const endId = makeId();
@@ -155,13 +155,13 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
               id: startId,
               type: "payflow",
               position: { x: 80, y: 200 },
-              data: { label: "Start", trigger: "manual", nodeType: "start" },
+              data: { label: "Inicio", trigger: "manual", nodeType: "start" },
             },
             {
               id: endId,
               type: "payflow",
               position: { x: 420, y: 200 },
-              data: { label: "End", message: "Done", nodeType: "end" },
+              data: { label: "Fin", message: "Listo", nodeType: "end" },
             },
           ];
           const seedEdges: Edge[] = [
@@ -189,7 +189,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         }
         setLoaded(true);
       } catch {
-        toast.error("Failed to load workflow");
+        toast.error("Error al cargar el flujo");
         setLoaded(true);
       }
     })();
@@ -199,13 +199,26 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     };
   }, [workflow.id]);
 
-  // Fit view after first load
+  // Ajustar vista tras la primera carga
   useEffect(() => {
     if (loaded && nodes.length > 0) {
       const t = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100);
       return () => clearTimeout(t);
     }
   }, [loaded, nodes.length, fitView]);
+
+  // Listener para el botón eliminar (X) de los nodos
+  useEffect(() => {
+    function handler(e: Event) {
+      const detail = (e as CustomEvent).detail as { id: string };
+      if (detail?.id) {
+        deleteNode(detail.id);
+      }
+    }
+    window.addEventListener("payflow:delete-node", handler as EventListener);
+    return () =>
+      window.removeEventListener("payflow:delete-node", handler as EventListener);
+  }, []);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -239,7 +252,6 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     (type: NodeType) => {
       const meta = NODE_METADATA[type];
       const id = makeId();
-      // Place near center of current viewport with some randomness.
       const center = screenToFlowPosition({
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
@@ -255,28 +267,29 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           label: meta.label,
           nodeType: type,
           ...(type === "start" ? { trigger: "manual" } : {}),
-          ...(type === "message" ? { message: "Hello!" } : {}),
+          ...(type === "message" ? { message: "¡Hola!" } : {}),
           ...(type === "question"
-            ? { question: "How can I help?", variable: "user_response", defaultResponse: "yes" }
+            ? { question: "¿En qué puedo ayudarte?", variable: "user_response", defaultResponse: "sí" }
             : {}),
           ...(type === "condition"
-            ? { variable: "user_response", operator: "equals", value: "yes" }
+            ? { variable: "user_response", operator: "equals", value: "sí" }
             : {}),
           ...(type === "whatsapp"
-            ? { phoneNumber: "+15551234567", message: "Hello from PayFlow SMT!" }
+            ? { phoneNumber: "+15551234567", message: "¡Hola desde PayFlow SMT!" }
             : {}),
           ...(type === "payment"
-            ? { amount: 49.99, currency: "USD", description: "Payment" }
+            ? { amount: 49.99, currency: "USD", description: "Pago" }
             : {}),
           ...(type === "ai_agent"
-            ? { systemPrompt: "You are a helpful assistant.", prompt: "Hello", outputVariable: "ai_response" }
+            ? { systemPrompt: "Eres un asistente útil.", prompt: "Hola", outputVariable: "ai_response" }
             : {}),
           ...(type === "api" ? { method: "GET", url: "", outputVariable: "api_response" } : {}),
-          ...(type === "end" ? { message: "Workflow complete" } : {}),
+          ...(type === "end" ? { message: "Flujo completado" } : {}),
         },
       };
       setNodes((nds) => nds.concat(newNode));
       setSelectedId(id);
+      setActiveTab("config");
       setDirty(true);
     },
     [screenToFlowPosition, setNodes]
@@ -309,8 +322,9 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     (id: string) => {
       setNodes((nds) => nds.filter((n) => n.id !== id));
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
-      setSelectedId(null);
+      setSelectedId((cur) => (cur === id ? null : cur));
       setDirty(true);
+      toast.success("Nodo eliminado");
     },
     [setNodes, setEdges]
   );
@@ -328,13 +342,13 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         }),
       });
       if (!res.ok) {
-        toast.error("Failed to save workflow");
+        toast.error("Error al guardar el flujo");
         return;
       }
       setDirty(false);
-      toast.success("Workflow saved");
+      toast.success("Flujo guardado");
     } catch {
-      toast.error("Network error while saving");
+      toast.error("Error de red al guardar");
     } finally {
       setSaving(false);
     }
@@ -376,6 +390,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     setResult(null);
     setVisibleEntries([]);
     setVisibleMessages([]);
+    setActiveTab("run");
     resetNodeFlags();
     try {
       const res = await fetch(`/api/workflows/${workflow.id}/execute`, {
@@ -390,31 +405,29 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error || "Execution failed");
+        toast.error(data.error || "La ejecución falló");
         setRunning(false);
         return;
       }
       const r: RunResult = data.result;
-      // Replay entries with animation.
       await replay(r);
       setResult(r);
       setSimOpen(true);
       if (r.status === "success") {
-        toast.success("Workflow completed");
+        toast.success("Flujo completado");
       } else if (r.status === "failed") {
-        toast.error("Workflow failed");
+        toast.error("El flujo falló");
       } else {
-        toast.warning("Workflow stopped");
+        toast.warning("Ejecución detenida");
       }
     } catch {
-      toast.error("Network error during execution");
+      toast.error("Error de red durante la ejecución");
     } finally {
       setRunning(false);
     }
   }
 
   async function replay(r: RunResult) {
-    // Clear flags first
     setNodes((nds) =>
       nds.map((n) => {
         const d = { ...n.data } as Record<string, unknown>;
@@ -426,44 +439,35 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     );
     for (let i = 0; i < r.entries.length; i++) {
       const entry = r.entries[i];
-      // Mark the node running when "started"
       if (entry.status === "started" && entry.nodeId !== "—") {
         markNode(entry.nodeId, "__running");
       }
-      // Push to visible entries
       setVisibleEntries((prev) => [...prev, entry]);
-      // Reveal WhatsApp messages whose nodeId matches up to this entry
       const upto = r.whatsappMessages.filter(
         (m) => new Date(m.timestamp).getTime() <= new Date(entry.timestamp).getTime()
       );
       setVisibleMessages(upto);
-      // If next entry is for a different node (started), mark current done
       const next = r.entries[i + 1];
       if (entry.nodeId !== "—" && (!next || next.nodeId !== entry.nodeId)) {
-        // finalize this node
         const finalEntry = entry.status === "error";
         if (entry.nodeId !== "—") {
           markNode(entry.nodeId, finalEntry ? "__error" : "__done", true);
         }
       }
-      // Small delay for animation feel
       await new Promise((resolve) => {
         replayTimer.current = setTimeout(resolve, 280);
       });
     }
-    // Reveal remaining WhatsApp messages
     setVisibleMessages(r.whatsappMessages);
   }
 
-  const selectedNavTab = selectedNode ? "config" : "whatsapp";
-
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Toolbar */}
+    <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+      {/* Barra de herramientas */}
       <header className="h-14 shrink-0 border-b border-border bg-card flex items-center gap-3 px-3 lg:px-4">
         <Button variant="ghost" size="sm" onClick={goDashboard} className="shrink-0">
           <ArrowLeft className="size-4 mr-1" />
-          <span className="hidden sm:inline">Back</span>
+          <span className="hidden sm:inline">Volver</span>
         </Button>
         <div className="h-6 w-px bg-border" />
         <Input
@@ -476,7 +480,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         />
         {dirty && (
           <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
-            unsaved
+            sin guardar
           </Badge>
         )}
         <div className="flex-1" />
@@ -487,7 +491,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           className="hidden md:inline-flex"
         >
           <Smartphone className="size-4 mr-1.5" />
-          Simulator
+          Simulador
         </Button>
         <Button
           variant="outline"
@@ -501,7 +505,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           ) : (
             <Save className="size-4 mr-1.5" />
           )}
-          Save
+          Guardar
         </Button>
         <Button size="sm" onClick={() => setRunOpen(true)} disabled={running} className="shrink-0">
           {running ? (
@@ -509,23 +513,26 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           ) : (
             <Play className="size-4 mr-1.5" />
           )}
-          Run
+          Ejecutar
         </Button>
       </header>
 
-      {/* Main editor area */}
+      {/* Área principal del editor */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         <NodePalette onAddNode={addNode} />
 
-        {/* Canvas */}
-        <div className="flex-1 relative min-w-0">
+        {/* Lienzo */}
+        <div className="flex-1 relative min-w-0 min-h-0">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChangeWrapped}
             onEdgesChange={onEdgesChangeWrapped}
             onConnect={onConnect}
-            onNodeClick={(_, n) => setSelectedId(n.id)}
+            onNodeClick={(_, n) => {
+              setSelectedId(n.id);
+              setActiveTab("config");
+            }}
             onPaneClick={() => setSelectedId(null)}
             nodeTypes={nodeTypes}
             fitView
@@ -535,6 +542,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
               style: { stroke: "#94a3b8", strokeWidth: 2 },
             }}
             connectionLineType={"smoothstep" as never}
+            deleteKeyCode={["Backspace", "Delete"]}
             proOptions={{ hideAttribution: true }}
             className="bg-background"
           >
@@ -550,14 +558,14 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
             />
           </ReactFlow>
 
-          {/* Floating execution status */}
+          {/* Estado de ejecución flotante */}
           {(running || result) && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
               <StatusPill running={running} status={result?.status} />
             </div>
           )}
 
-          {/* Floating quick tabs on mobile */}
+          {/* Pestañas rápidas en móvil */}
           <div className="md:hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-2">
             <Button
               size="sm"
@@ -571,43 +579,55 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => setSelectedId(selectedId ?? "")}
+              onClick={() => setActiveTab("run")}
               className="shadow-lg"
             >
               <Terminal className="size-4 mr-1.5" />
-              Logs
+              Registros
             </Button>
           </div>
         </div>
 
-        {/* Right panel: config + logs/simulator */}
-        <div className="w-80 shrink-0 border-l border-border bg-card/50 flex-col hidden md:flex">
-          <Tabs defaultValue={selectedNavTab} value={selectedNavTab} className="flex-1 flex flex-col">
-            <TabsList className="grid grid-cols-2 m-2 mb-0">
-              <TabsTrigger value="config" onClick={() => {}}>
+        {/* Panel derecho: configuración + registros */}
+        <div className="w-80 shrink-0 border-l border-border bg-card/50 flex-col hidden md:flex min-h-0">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as "config" | "run")}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <TabsList className="grid grid-cols-2 m-2 mb-0 shrink-0">
+              <TabsTrigger value="config">
                 <Terminal className="size-3.5 mr-1.5" /> Config
               </TabsTrigger>
-              <TabsTrigger value="run" onClick={() => setSelectedId(null)}>
-                <Play className="size-3.5 mr-1.5" /> Run
+              <TabsTrigger value="run">
+                <Play className="size-3.5 mr-1.5" /> Ejecutar
               </TabsTrigger>
             </TabsList>
-            <TabsContent value="config" className="flex-1 m-0 data-[state=active]:flex flex-col">
+            <TabsContent
+              value="config"
+              className="flex-1 m-0 mt-0 data-[state=active]:flex flex-col min-h-0 overflow-hidden"
+            >
               <ConfigPanel
                 node={selectedNode}
                 onChange={updateNodeData}
                 onDelete={deleteNode}
               />
             </TabsContent>
-            <TabsContent value="run" className="flex-1 m-0 data-[state=active]:flex flex-col overflow-hidden">
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <ExecutionLog entries={visibleEntries} running={running} result={result} />
-              </div>
+            <TabsContent
+              value="run"
+              className="flex-1 m-0 data-[state=active]:flex flex-col min-h-0 overflow-hidden"
+            >
+              <ExecutionLog
+                entries={visibleEntries}
+                running={running}
+                result={result}
+              />
             </TabsContent>
           </Tabs>
         </div>
       </div>
 
-      {/* Run dialog */}
+      {/* Diálogo de ejecución */}
       <RunDialog
         open={runOpen}
         onOpenChange={setRunOpen}
@@ -615,13 +635,13 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         running={running}
       />
 
-      {/* Simulator sheet (mobile + accessible) */}
+      {/* Panel del simulador (móvil) */}
       <Sheet open={simOpen} onOpenChange={setSimOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
           <SheetHeader className="px-4 py-3 border-b border-border">
-            <SheetTitle className="text-sm">WhatsApp Simulator</SheetTitle>
+            <SheetTitle className="text-sm">Simulador de WhatsApp</SheetTitle>
           </SheetHeader>
-          <div className="flex-1 p-3 overflow-hidden">
+          <div className="flex-1 p-3 overflow-hidden min-h-0">
             <WhatsAppSimulator messages={visibleMessages} running={running} />
           </div>
         </SheetContent>
@@ -635,7 +655,7 @@ function StatusPill({ running, status }: { running: boolean; status?: string }) 
     return (
       <div className="flex items-center gap-2 rounded-full bg-card border border-border shadow-md px-3 py-1.5 text-xs font-medium">
         <Loader2 className="size-3.5 animate-spin text-primary" />
-        Running workflow…
+        Ejecutando flujo…
       </div>
     );
   }
@@ -643,7 +663,7 @@ function StatusPill({ running, status }: { running: boolean; status?: string }) 
     return (
       <div className="flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 shadow-md px-3 py-1.5 text-xs font-medium">
         <Check className="size-3.5" />
-        Completed successfully
+        Completado con éxito
       </div>
     );
   }
@@ -651,7 +671,7 @@ function StatusPill({ running, status }: { running: boolean; status?: string }) 
     return (
       <div className="flex items-center gap-2 rounded-full bg-red-50 border border-red-200 text-red-700 shadow-md px-3 py-1.5 text-xs font-medium">
         <AlertTriangle className="size-3.5" />
-        {status === "failed" ? "Execution failed" : "Execution stopped"}
+        {status === "failed" ? "La ejecución falló" : "Ejecución detenida"}
       </div>
     );
   }
@@ -675,15 +695,15 @@ function RunDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Run workflow</DialogTitle>
+          <DialogTitle>Ejecutar flujo</DialogTitle>
           <DialogDescription>
-            Execute the workflow on the canvas. Mock nodes will simulate
-            WhatsApp, payments, and AI responses.
+            Ejecuta el flujo del lienzo. Los nodos simulados imitarán
+            WhatsApp, pagos y respuestas de IA.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label className="text-sm">Payment outcome (mock)</Label>
+            <Label className="text-sm">Resultado del pago (simulado)</Label>
             <Select
               value={outcome}
               onValueChange={(v) => setOutcome(v as PaymentOutcome | "random")}
@@ -692,7 +712,7 @@ function RunDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="random">Random (weighted)</SelectItem>
+                <SelectItem value="random">Aleatorio (ponderado)</SelectItem>
                 <SelectItem value="payment_success">payment_success</SelectItem>
                 <SelectItem value="payment_failed">payment_failed</SelectItem>
                 <SelectItem value="payment_pending">payment_pending</SelectItem>
@@ -700,22 +720,21 @@ function RunDialog({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Forces the payment node result. Use this to test all branches.
+              Fuerza el resultado del nodo de pago. Úsalo para probar todas las
+              ramas.
             </p>
           </div>
           <div className="rounded-md bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
-            Question nodes will use their configured default response. WhatsApp
-            messages and AI agent calls are simulated.
+            Los nodos de pregunta usarán su respuesta por defecto configurada.
+            Los mensajes de WhatsApp y las llamadas al agente de IA se simulan.
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            Cancelar
           </Button>
           <Button
-            onClick={() =>
-              onRun(outcome === "random" ? undefined : outcome)
-            }
+            onClick={() => onRun(outcome === "random" ? undefined : outcome)}
             disabled={running}
           >
             {running ? (
@@ -723,7 +742,7 @@ function RunDialog({
             ) : (
               <Play className="size-4 mr-2" />
             )}
-            Run now
+            Ejecutar ahora
           </Button>
         </DialogFooter>
       </DialogContent>
