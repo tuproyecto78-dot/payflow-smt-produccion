@@ -1,0 +1,61 @@
+// PayFlow SMT - Prisma schema
+// Visual workflow builder for WhatsApp automation, payments, AI agents, and API/webhook integrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  projects     Project[]
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflows   Workflow[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model Workflow {
+  id         String          @id @default(cuid())
+  name       String
+  projectId  String
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nodesJson  String          @default("[]")
+  edgesJson  String          @default("[]")
+  executions ExecutionLog[]
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([projectId])
+}
+
+model ExecutionLog {
+  id            String    @id @default(cuid())
+  workflowId    String
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status        String    @default("running") // running | success | failed | stopped
+  entriesJson   String    @default("[]") // array of { nodeId, nodeType, nodeLabel, status, message, timestamp, durationMs }
+  variablesJson String    @default("{}") // final variable context
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([workflowId])
+}
