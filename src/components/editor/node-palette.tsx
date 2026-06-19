@@ -1,6 +1,12 @@
 "use client";
 
-import { NODE_METADATA, NODE_PALETTE_ORDER, type NodeType } from "@/lib/workflow-types";
+import {
+  NODE_METADATA,
+  NODE_PALETTE_ORDER,
+  PALETTE_CATEGORY_ORDER,
+  type NodeCategory,
+  type NodeType,
+} from "@/lib/workflow-types";
 import {
   Play,
   MessageSquare,
@@ -8,6 +14,11 @@ import {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
@@ -22,17 +33,30 @@ const ICONS: Record<string, LucideIcon> = {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  trigger: "Disparadores",
-  flow: "Conversación",
+const CATEGORY_LABELS: Record<NodeCategory, string> = {
   channel: "Canales",
-  logic: "Lógica",
+  payment: "Pagos",
+  intelligence: "Inteligencia",
   integration: "Integraciones",
+  flow: "Flujo",
+};
+
+const CATEGORY_ACCENT: Record<NodeCategory, string> = {
+  channel: "border-l-emerald-400",
+  payment: "border-l-indigo-400",
+  intelligence: "border-l-pink-400",
+  integration: "border-l-teal-400",
+  flow: "border-l-slate-300",
 };
 
 export function NodePalette({
@@ -40,16 +64,14 @@ export function NodePalette({
 }: {
   onAddNode: (type: NodeType) => void;
 }) {
-  const groups: { category: string; items: NodeType[] }[] = [];
-  for (const type of NODE_PALETTE_ORDER) {
-    const meta = NODE_METADATA[type];
-    let group = groups.find((g) => g.category === meta.category);
-    if (!group) {
-      group = { category: meta.category, items: [] };
-      groups.push(group);
-    }
-    group.items.push(type);
-  }
+  // Agrupar nodos por categoría respetando el orden de la paleta.
+  const groups: { category: NodeCategory; items: NodeType[] }[] =
+    PALETTE_CATEGORY_ORDER.map((category) => ({
+      category,
+      items: NODE_PALETTE_ORDER.filter(
+        (t) => NODE_METADATA[t].category === category
+      ),
+    }));
 
   return (
     <div className="w-56 shrink-0 border-r border-border bg-card/50 flex flex-col min-h-0">
@@ -61,9 +83,12 @@ export function NodePalette({
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto pf-scroll p-2 space-y-4">
         {groups.map((group) => (
-          <div key={group.category}>
+          <div
+            key={group.category}
+            className={cn("pl-2 border-l-2", CATEGORY_ACCENT[group.category])}
+          >
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-2 mb-1.5">
-              {CATEGORY_LABELS[group.category] || group.category}
+              {CATEGORY_LABELS[group.category]}
             </div>
             <div className="space-y-1">
               {group.items.map((type) => {

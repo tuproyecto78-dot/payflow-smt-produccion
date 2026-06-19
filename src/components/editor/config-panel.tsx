@@ -22,6 +22,11 @@ import {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
@@ -37,6 +42,11 @@ const ICONS: Record<string, LucideIcon> = {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
@@ -262,8 +272,29 @@ export function ConfigPanel({
             </>
           )}
 
-          {node.type === "payment" && (
+          {(node.type === "payment" || node.type === "create_payment") && (
             <>
+              <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-300">
+                <strong>Módulo de Pagos.</strong> Genera un cobro y se bifurca
+                en 4 resultados. Proveedor predeterminado: Mock.
+              </div>
+              <Field label="Proveedor de pago">
+                <Select
+                  value={String(data.provider || "Mock")}
+                  onValueChange={(v) => set("provider", v)}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Mock">Mock (predeterminado)</SelectItem>
+                    <SelectItem value="Stripe">Stripe</SelectItem>
+                    <SelectItem value="Mercado Pago">Mercado Pago</SelectItem>
+                    <SelectItem value="PayPal">PayPal</SelectItem>
+                    <SelectItem value="API externa">API externa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Monto">
                   <Input
@@ -285,7 +316,7 @@ export function ConfigPanel({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {["USD", "EUR", "GBP", "INR", "BRL", "JPY"].map((c) => (
+                      {["USD", "EUR", "GBP", "INR", "BRL", "JPY", "MXN", "COP", "ARS"].map((c) => (
                         <SelectItem key={c} value={c}>
                           {c}
                         </SelectItem>
@@ -294,7 +325,7 @@ export function ConfigPanel({
                   </Select>
                 </Field>
               </div>
-              <Field label="Descripción">
+              <Field label="Descripción" hint="Admite interpolación {{variable}}.">
                 <Input
                   value={String(data.description || "")}
                   onChange={(e) => set("description", e.target.value)}
@@ -302,12 +333,50 @@ export function ConfigPanel({
                   className="h-8 text-sm"
                 />
               </Field>
-              <Field label="Nombre del comercio (opcional)">
+              <Field label="Cliente" hint="Nombre o identificador del cliente.">
                 <Input
-                  value={String(data.merchantName || "")}
-                  onChange={(e) => set("merchantName", e.target.value)}
-                  placeholder="PayFlow Store"
+                  value={String(data.customer || "")}
+                  onChange={(e) => set("customer", e.target.value)}
+                  placeholder="Ana Pérez"
                   className="h-8 text-sm"
+                />
+              </Field>
+              <Field label="Teléfono WhatsApp" hint="Para notificar el resultado.">
+                <Input
+                  value={String(data.phoneNumber || "")}
+                  onChange={(e) => set("phoneNumber", e.target.value)}
+                  placeholder="+15551234567"
+                  className="h-8 text-sm"
+                />
+              </Field>
+              <Field label="ID de pedido" hint="Admite interpolación {{variable}}.">
+                <Input
+                  value={String(data.orderId || "")}
+                  onChange={(e) => set("orderId", e.target.value)}
+                  placeholder="ord_{{timestamp}}"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+              <Field
+                label="URL de pago generada"
+                hint="Se genera automáticamente al ejecutar el nodo."
+              >
+                <Input
+                  value={String(data.paymentUrl || "")}
+                  onChange={(e) => set("paymentUrl", e.target.value)}
+                  placeholder="https://pay.payflow.smt/ord_…"
+                  className="h-8 text-sm font-mono bg-muted/40"
+                />
+              </Field>
+              <Field
+                label="Estado del pago"
+                hint="Se actualiza al ejecutar. Solo el nodo Pago o un Webhook pueden confirmar éxito."
+              >
+                <Input
+                  value={String(data.paymentStatus || "")}
+                  onChange={(e) => set("paymentStatus", e.target.value)}
+                  placeholder="pendiente hasta ejecutar"
+                  className="h-8 text-sm font-mono bg-muted/40"
                 />
               </Field>
               <div>
@@ -317,13 +386,76 @@ export function ConfigPanel({
                     <Badge
                       key={o.id}
                       variant="outline"
-                      className="justify-center text-[10px]"
+                      className="justify-center text-[10px] border-indigo-300 text-indigo-600 dark:border-indigo-500/50 dark:text-indigo-300"
                     >
                       {o.label}
                     </Badge>
                   ))}
                 </div>
               </div>
+            </>
+          )}
+
+          {node.type === "verify_payment" && (
+            <>
+              <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-300">
+                Consulta el estado actual del pago y lo guarda en una variable.
+              </div>
+              <Field label="ID de pedido" hint="Admite interpolación {{variable}}.">
+                <Input
+                  value={String(data.orderId || "")}
+                  onChange={(e) => set("orderId", e.target.value)}
+                  placeholder="{{payment_order_id}}"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+              <Field label="Variable de salida" hint="Donde se guarda el estado.">
+                <Input
+                  value={String(data.outputVariable || "")}
+                  onChange={(e) => set("outputVariable", e.target.value)}
+                  placeholder="payment_status"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+            </>
+          )}
+
+          {node.type === "wait_confirmation" && (
+            <>
+              <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-300">
+                Pausa el flujo hasta recibir confirmación (típicamente vía
+                webhook).
+              </div>
+              <Field label="Timeout (segundos)" hint="Tiempo máximo de espera simulado.">
+                <Input
+                  type="number"
+                  value={String(data.timeout ?? "")}
+                  onChange={(e) =>
+                    set("timeout", e.target.value ? Number(e.target.value) : 30)
+                  }
+                  placeholder="30"
+                  className="h-8 text-sm"
+                />
+              </Field>
+            </>
+          )}
+
+          {(node.type === "payment_success" ||
+            node.type === "payment_failed" ||
+            node.type === "payment_pending") && (
+            <>
+              <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 px-3 py-2 text-[11px] text-indigo-700 dark:text-indigo-300">
+                Establece explícitamente el estado del pago. Úsalo tras
+                verificar o tras un webhook para fijar el resultado.
+              </div>
+              <Field label="Mensaje interno (opcional)">
+                <Input
+                  value={String(data.message || "")}
+                  onChange={(e) => set("message", e.target.value)}
+                  placeholder="Marcado como exitoso"
+                  className="h-8 text-sm"
+                />
+              </Field>
             </>
           )}
 

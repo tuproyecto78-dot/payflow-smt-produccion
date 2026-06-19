@@ -69,9 +69,11 @@ import {
   Terminal,
   Check,
   AlertTriangle,
+  LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TEMPLATES, type WorkflowTemplate } from "@/lib/templates";
 
 const nodeTypes = { payflow: PayFlowNode };
 
@@ -127,6 +129,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
   const [running, setRunning] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
   const [simOpen, setSimOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [visibleEntries, setVisibleEntries] = useState<LogEntry[]>([]);
   const [visibleMessages, setVisibleMessages] = useState<WhatsAppSimMessage[]>([]);
@@ -272,14 +275,26 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
             ? { question: "¿En qué puedo ayudarte?", variable: "user_response", defaultResponse: "sí" }
             : {}),
           ...(type === "condition"
-            ? { variable: "user_response", operator: "equals", value: "sí" }
+            ? { variable: "payment_outcome", operator: "equals", value: "payment_success" }
             : {}),
           ...(type === "whatsapp"
             ? { phoneNumber: "+15551234567", message: "¡Hola desde PayFlow SMT!" }
             : {}),
-          ...(type === "payment"
-            ? { amount: 49.99, currency: "USD", description: "Pago" }
+          ...(type === "payment" || type === "create_payment"
+            ? {
+                provider: "Mock",
+                amount: 49.99,
+                currency: "USD",
+                description: "Pago",
+                customer: "",
+                phoneNumber: "+15551234567",
+                orderId: "ord_{{timestamp}}",
+              }
             : {}),
+          ...(type === "verify_payment"
+            ? { orderId: "{{payment_order_id}}", outputVariable: "payment_status" }
+            : {}),
+          ...(type === "wait_confirmation" ? { timeout: 30 } : {}),
           ...(type === "ai_agent"
             ? { systemPrompt: "Eres un asistente útil.", prompt: "Hola", outputVariable: "ai_response" }
             : {}),
@@ -327,6 +342,39 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
       toast.success("Nodo eliminado");
     },
     [setNodes, setEdges]
+  );
+
+  const applyTemplate = useCallback(
+    (tpl: WorkflowTemplate) => {
+      const idMap = new Map<string, string>();
+      // Generar nuevos IDs únicos para evitar colisiones.
+      const newNodes: Node[] = tpl.nodes.map((n) => {
+        const newId = makeId();
+        idMap.set(n.id, newId);
+        return {
+          id: newId,
+          type: "payflow",
+          position: n.position,
+          data: { ...n.data, nodeType: n.type },
+        };
+      });
+      const newEdges: Edge[] = tpl.edges.map((e, i) => ({
+        id: `e_tpl_${i}_${makeId()}`,
+        source: idMap.get(e.source) || e.source,
+        target: idMap.get(e.target) || e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
+      }));
+      setNodes(newNodes);
+      setEdges(newEdges);
+      setSelectedId(null);
+      setDirty(true);
+      setName(tpl.name);
+      setTplOpen(false);
+      toast.success(`Plantilla "${tpl.name}" aplicada`);
+      setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 80);
+    },
+    [setNodes, setEdges, fitView]
   );
 
   async function save() {
@@ -487,6 +535,15 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         <Button
           variant="outline"
           size="sm"
+          onClick={() => setTplOpen(true)}
+          className="hidden md:inline-flex"
+        >
+          <LayoutTemplate className="size-4 mr-1.5" />
+          Plantillas
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setSimOpen(true)}
           className="hidden md:inline-flex"
         >
@@ -627,6 +684,13 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         </div>
       </div>
 
+      {/* Diálogo de plantillas */}
+      <TemplateDialog
+        open={tplOpen}
+        onOpenChange={setTplOpen}
+        onApply={applyTemplate}
+      />
+
       {/* Diálogo de ejecución */}
       <RunDialog
         open={runOpen}
@@ -755,5 +819,69 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
     <ReactFlowProvider>
       <EditorInner workflow={workflow} />
     </ReactFlowProvider>
+  );
+}
+
+function TemplateDialog({
+  open,
+  onOpenChange,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onApply: (tpl: WorkflowTemplate) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <LayoutTemplate className="size-5 text-primary" />
+            Plantillas de flujos
+          </DialogTitle>
+          <DialogDescription>
+            Aplica una plantilla preconstruida. Reemplazará el contenido actual
+            del lienzo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pf-scroll">
+          {TEMPLATES.map((tpl) => (
+            <div
+              key={tpl.id}
+              className="rounded-lg border border-border p-3 hover:border-primary/50 hover:bg-accent/40 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-sm font-semibold">{tpl.name}</h4>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {tpl.description}
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <Badge variant="secondary" className="text-[10px]">
+                      {tpl.nodes.length} nodos
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {tpl.edges.length} conexiones
+                    </Badge>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => onApply(tpl)}
+                  className="shrink-0"
+                >
+                  Aplicar
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

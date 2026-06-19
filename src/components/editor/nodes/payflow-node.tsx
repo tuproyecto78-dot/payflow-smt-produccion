@@ -9,6 +9,11 @@ import {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
@@ -25,6 +30,11 @@ const ICONS: Record<string, LucideIcon> = {
   GitBranch,
   MessageCircle,
   CreditCard,
+  Search,
+  Hourglass,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Bot,
   Webhook,
   Square,
@@ -49,11 +59,25 @@ function getNodeSummary(type: NodeType, data: PayFlowNodeData): string {
       return `${data.variable || "?"} ${data.operator || "=="} "${data.value || ""}"`;
     case "whatsapp":
       return data.phoneNumber ? `A ${data.phoneNumber}` : "Sin destinatario";
-    case "payment": {
+    case "payment":
+    case "create_payment": {
       const amt = data.amount ?? 0;
       const cur = data.currency || "USD";
-      return `${amt} ${cur}`;
+      const prov = data.provider || "Mock";
+      return `${amt} ${cur} · ${prov}`;
     }
+    case "verify_payment":
+      return data.orderId
+        ? `Pedido ${String(data.orderId).slice(0, 20)}`
+        : "Verificar estado";
+    case "wait_confirmation":
+      return data.timeout ? `Timeout ${data.timeout}s` : "Esperar webhook";
+    case "payment_success":
+      return "Estado → éxito";
+    case "payment_failed":
+      return "Estado → fallido";
+    case "payment_pending":
+      return "Estado → pendiente";
     case "ai_agent":
       return data.outputVariable ? `→ {{${data.outputVariable}}}` : "→ {{ai_response}}";
     case "api":

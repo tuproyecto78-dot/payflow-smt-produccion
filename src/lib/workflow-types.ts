@@ -1,15 +1,27 @@
 // Shared types for PayFlow SMT workflow nodes & execution engine.
 
 export type NodeType =
+  // Flujo
   | "start"
   | "message"
   | "question"
   | "condition"
+  | "end"
+  // Canales
   | "whatsapp"
-  | "payment"
+  // Pagos (módulo especializado)
+  | "create_payment"
+  | "verify_payment"
+  | "wait_confirmation"
+  | "payment_success"
+  | "payment_failed"
+  | "payment_pending"
+  // Inteligencia
   | "ai_agent"
+  // Integraciones
   | "api"
-  | "end";
+  // Legacy alias (tratado como create_payment en el motor)
+  | "payment";
 
 export interface BaseNodeData {
   label: string;
@@ -43,10 +55,16 @@ export interface WhatsAppNodeData extends BaseNodeData {
 }
 
 export interface PaymentNodeData extends BaseNodeData {
+  provider?: "Mock" | "Stripe" | "Mercado Pago" | "PayPal" | "API externa";
   amount?: number;
   currency?: string;
   description?: string;
   merchantName?: string;
+  customer?: string;
+  phoneNumber?: string;
+  orderId?: string;
+  paymentUrl?: string;
+  paymentStatus?: string;
 }
 
 export interface AIAgentNodeData extends BaseNodeData {
@@ -122,25 +140,45 @@ export interface ExecutionResult {
 }
 
 // Node metadata for the UI palette
+export type NodeCategory =
+  | "flow" // Flujo
+  | "channel" // Canales
+  | "payment" // Pagos
+  | "intelligence" // Inteligencia
+  | "integration"; // Integraciones
+
 export interface NodeMeta {
   type: NodeType;
   label: string;
   description: string;
   icon: string; // lucide icon name
-  category: "trigger" | "flow" | "channel" | "logic" | "integration";
+  category: NodeCategory;
   color: string;
   outputs: { id: string; label: string }[];
 }
 
 export const NODE_METADATA: Record<NodeType, NodeMeta> = {
+  // ── Flujo ──────────────────────────────────────────
   start: {
     type: "start",
     label: "Inicio",
     description: "Punto de entrada del flujo",
     icon: "Play",
-    category: "trigger",
+    category: "flow",
     color: "#10b981",
     outputs: [{ id: "out", label: "Siguiente" }],
+  },
+  condition: {
+    type: "condition",
+    label: "Condición",
+    description: "Bifurcar el flujo según una variable",
+    icon: "GitBranch",
+    category: "flow",
+    color: "#f59e0b",
+    outputs: [
+      { id: "true", label: "Verdadero" },
+      { id: "false", label: "Falso" },
+    ],
   },
   message: {
     type: "message",
@@ -160,59 +198,6 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     color: "#8b5cf6",
     outputs: [{ id: "out", label: "Siguiente" }],
   },
-  condition: {
-    type: "condition",
-    label: "Condición",
-    description: "Bifurcar el flujo según una variable",
-    icon: "GitBranch",
-    category: "logic",
-    color: "#f59e0b",
-    outputs: [
-      { id: "true", label: "Verdadero" },
-      { id: "false", label: "Falso" },
-    ],
-  },
-  whatsapp: {
-    type: "whatsapp",
-    label: "WhatsApp",
-    description: "Enviar un mensaje de WhatsApp a un contacto",
-    icon: "MessageCircle",
-    category: "channel",
-    color: "#22c55e",
-    outputs: [{ id: "out", label: "Siguiente" }],
-  },
-  payment: {
-    type: "payment",
-    label: "Pago",
-    description: "Procesar un pago con 4 resultados posibles",
-    icon: "CreditCard",
-    category: "channel",
-    color: "#ef4444",
-    outputs: [
-      { id: "payment_success", label: "Éxito" },
-      { id: "payment_failed", label: "Fallido" },
-      { id: "payment_pending", label: "Pendiente" },
-      { id: "error", label: "Error" },
-    ],
-  },
-  ai_agent: {
-    type: "ai_agent",
-    label: "Agente IA",
-    description: "Ejecutar un agente de IA para generar una respuesta",
-    icon: "Bot",
-    category: "integration",
-    color: "#ec4899",
-    outputs: [{ id: "out", label: "Siguiente" }],
-  },
-  api: {
-    type: "api",
-    label: "API / Webhook",
-    description: "Hacer una petición HTTP a un servicio externo",
-    icon: "Webhook",
-    category: "integration",
-    color: "#14b8a6",
-    outputs: [{ id: "out", label: "Siguiente" }],
-  },
   end: {
     type: "end",
     label: "Fin",
@@ -222,17 +207,146 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     color: "#64748b",
     outputs: [],
   },
+
+  // ── Canales ────────────────────────────────────────
+  whatsapp: {
+    type: "whatsapp",
+    label: "WhatsApp",
+    description: "Enviar un mensaje de WhatsApp a un contacto",
+    icon: "MessageCircle",
+    category: "channel",
+    color: "#22c55e",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+
+  // ── Pagos (módulo especializado) ──────────────────
+  create_payment: {
+    type: "create_payment",
+    label: "Crear pago",
+    description: "Generar un cobro con 4 resultados posibles",
+    icon: "CreditCard",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [
+      { id: "payment_success", label: "Éxito" },
+      { id: "payment_failed", label: "Fallido" },
+      { id: "payment_pending", label: "Pendiente" },
+      { id: "error", label: "Error" },
+    ],
+  },
+  verify_payment: {
+    type: "verify_payment",
+    label: "Verificar pago",
+    description: "Consultar el estado de un pago existente",
+    icon: "Search",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+  wait_confirmation: {
+    type: "wait_confirmation",
+    label: "Esperar confirmación",
+    description: "Pausar hasta recibir confirmación del webhook",
+    icon: "Hourglass",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+  payment_success: {
+    type: "payment_success",
+    label: "Pago exitoso",
+    description: "Marcar el pago como confirmado",
+    icon: "CheckCircle2",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+  payment_failed: {
+    type: "payment_failed",
+    label: "Pago fallido",
+    description: "Marcar el pago como rechazado",
+    icon: "XCircle",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+  payment_pending: {
+    type: "payment_pending",
+    label: "Pago pendiente",
+    description: "Marcar el pago como pendiente",
+    icon: "Clock",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+
+  // ── Inteligencia ─────────────────────────────────
+  ai_agent: {
+    type: "ai_agent",
+    label: "Agente IA",
+    description: "Ejecutar un agente de IA para generar una respuesta",
+    icon: "Bot",
+    category: "intelligence",
+    color: "#ec4899",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+
+  // ── Integraciones ─────────────────────────────────
+  api: {
+    type: "api",
+    label: "API / Webhook",
+    description: "Hacer una petición HTTP a un servicio externo",
+    icon: "Webhook",
+    category: "integration",
+    color: "#14b8a6",
+    outputs: [{ id: "out", label: "Siguiente" }],
+  },
+
+  // Legacy alias → mismo metadata que create_payment
+  payment: {
+    type: "payment",
+    label: "Crear pago",
+    description: "Generar un cobro con 4 resultados posibles",
+    icon: "CreditCard",
+    category: "payment",
+    color: "#6366f1",
+    outputs: [
+      { id: "payment_success", label: "Éxito" },
+      { id: "payment_failed", label: "Fallido" },
+      { id: "payment_pending", label: "Pendiente" },
+      { id: "error", label: "Error" },
+    ],
+  },
 };
 
+// Orden de la paleta agrupado por categoría.
+export const PALETTE_CATEGORY_ORDER: NodeCategory[] = [
+  "channel",
+  "payment",
+  "intelligence",
+  "integration",
+  "flow",
+];
+
 export const NODE_PALETTE_ORDER: NodeType[] = [
+  // Canales
+  "whatsapp",
+  // Pagos
+  "create_payment",
+  "verify_payment",
+  "wait_confirmation",
+  "payment_success",
+  "payment_failed",
+  "payment_pending",
+  // Inteligencia
+  "ai_agent",
+  // Integraciones
+  "api",
+  // Flujo
   "start",
+  "condition",
   "message",
   "question",
-  "condition",
-  "whatsapp",
-  "payment",
-  "ai_agent",
-  "api",
   "end",
 ];
 

@@ -4,6 +4,7 @@
 // Usage: bun run scripts/seed-admin.ts
 import { db } from "../src/lib/db";
 import bcrypt from "bcryptjs";
+import { TEMPLATES } from "../src/lib/templates";
 
 const ADMIN_EMAIL = "admin@payflow.smt";
 const ADMIN_PASSWORD = "admin123";
@@ -37,7 +38,8 @@ async function main() {
       select: { id: true, email: true, name: true, role: true },
     });
 
-    // Give the admin a starter project so the dashboard isn't empty.
+    // Give the admin a starter project with the payment template pre-applied.
+    const tpl = TEMPLATES[0];
     await db.project.create({
       data: {
         name: "Admin Workspace",
@@ -46,9 +48,9 @@ async function main() {
         workflows: {
           create: [
             {
-              name: "Admin Flow",
-              nodesJson: JSON.stringify([]),
-              edgesJson: JSON.stringify([]),
+              name: tpl.name,
+              nodesJson: JSON.stringify(tpl.nodes),
+              edgesJson: JSON.stringify(tpl.edges),
             },
           ],
         },

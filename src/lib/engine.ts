@@ -231,35 +231,118 @@ export async function executeWorkflow(
           break;
         }
 
-        case "payment": {
+        case "payment":
+        case "create_payment": {
+          const provider = String(data.provider || "Mock");
           const amount = Number(data.amount ?? 0);
           const currency = String(data.currency || "USD");
           const description = resolveTemplate(
             String(data.description || "Pago"),
             ctx.variables
           );
+          const customer = resolveTemplate(
+            String(data.customer || ""),
+            ctx.variables
+          );
+          const phone = resolveTemplate(
+            String(data.phoneNumber || ""),
+            ctx.variables
+          );
+          const orderId = resolveTemplate(
+            String(data.orderId || `ord_${Date.now()}`),
+            ctx.variables
+          );
           const outcome = mockPaymentOutcome(options.forcePaymentOutcome);
           ctx.paymentOutcome = outcome;
+          // Regla: solo el nodo Pago o un Webhook pueden establecer payment_success.
           ctx.variables["payment_outcome"] = outcome;
+          ctx.variables["payment_status"] = outcome;
           ctx.variables["payment_amount"] = amount;
           ctx.variables["payment_currency"] = currency;
+          ctx.variables["payment_order_id"] = orderId;
+          ctx.variables["payment_provider"] = provider;
+          ctx.variables["payment_url"] =
+            outcome === "error"
+              ? ""
+              : `https://pay.payflow.smt/${orderId}`;
           const statusMsg =
             outcome === "payment_success"
-              ? `Pago de ${amount} ${currency} exitoso.`
+              ? `Pago de ${amount} ${currency} exitoso vía ${provider}.`
               : outcome === "payment_failed"
-              ? `Pago de ${amount} ${currency} rechazado.`
+              ? `Pago de ${amount} ${currency} rechazado vía ${provider}.`
               : outcome === "payment_pending"
-              ? `Pago de ${amount} ${currency} pendiente.`
-              : `Error del procesador de pagos para ${amount} ${currency}.`;
+              ? `Pago de ${amount} ${currency} pendiente vía ${provider}.`
+              : `Error del procesador de pagos (${provider}) para ${amount} ${currency}.`;
           log(ctx, {
             nodeId: node.id,
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: outcome === "error" ? "error" : "success",
-            message: `${statusMsg} (descripción: "${description}") → bifurcación a ${outcome}`,
+            message: `${statusMsg} Pedido ${orderId}${customer ? ` · cliente: ${customer}` : ""}${phone ? ` · WhatsApp: ${phone}` : ""} → bifurcación a ${outcome}`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = outcome;
+          break;
+        }
+
+        case "verify_payment": {
+          const orderId = resolveTemplate(
+            String(data.orderId || (ctx.variables["payment_order_id"] as string) || ""),
+            ctx.variables
+          );
+          const currentStatus = (ctx.variables["payment_status"] as string) || "desconocido";
+          const outputVariable = String(data.outputVariable || "payment_status");
+          ctx.variables[outputVariable] = currentStatus;
+          log(ctx, {
+            nodeId: node.id,
+            nodeType: node.type as NodeType,
+            nodeLabel: label,
+            status: "success",
+            message: `Verificación del pedido ${orderId || "(sin ID)"}: estado actual = ${currentStatus}`,
+            durationMs: Date.now() - startedAt,
+          });
+          nextHandle = "out";
+          break;
+        }
+
+        case "wait_confirmation": {
+          const timeout = Number(data.timeout ?? 30);
+          log(ctx, {
+            nodeId: node.id,
+            nodeType: node.type as NodeType,
+            nodeLabel: label,
+            status: "info",
+            message: `Esperando confirmación del webhook (timeout simulado: ${timeout}s). Estado actual: ${ctx.variables["payment_status"] ?? "—"}`,
+            durationMs: Date.now() - startedAt,
+          });
+          ctx.variables["confirmation_waited"] = true;
+          nextHandle = "out";
+          break;
+        }
+
+        case "payment_success":
+        case "payment_failed":
+        case "payment_pending": {
+          const outcome = node.type as PaymentOutcome;
+          // Estos nodos establecen explícitamente el estado del pago.
+          ctx.paymentOutcome = outcome;
+          ctx.variables["payment_outcome"] = outcome;
+          ctx.variables["payment_status"] = outcome;
+          const statusLabel =
+            outcome === "payment_success"
+              ? "exitoso"
+              : outcome === "payment_failed"
+              ? "fallido"
+              : "pendiente";
+          log(ctx, {
+            nodeId: node.id,
+            nodeType: node.type as NodeType,
+            nodeLabel: label,
+            status: "success",
+            message: `Estado del pago establecido en ${statusLabel} (${outcome}).`,
+            durationMs: Date.now() - startedAt,
+          });
+          nextHandle = "out";
           break;
         }
 
@@ -272,7 +355,20 @@ export async function executeWorkflow(
             String(data.prompt || "Hola"),
             ctx.variables
           ) + (inputText ? `\n\nEntrada: ${String(inputText)}` : "");
-          const outputVariable = String(data.outputVariable || "ai_response");
+          let outputVariable = String(data.outputVariable || "ai_response");
+          // Regla: la IA NO puede confirmar pagos. No se le permite escribir
+          // en payment_status ni payment_outcome.
+          const PROTECTED = new Set(["payment_status", "payment_outcome"]);
+          if (PROTECTED.has(outputVariable)) {
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "info",
+              message: `Variable de salida protegida "${outputVariable}". La IA no puede confirmar pagos; redirigiendo a "ai_response".`,
+            });
+            outputVariable = "ai_response";
+          }
           let aiContent = "";
           try {
             const ZAIModule = await import("z-ai-web-dev-sdk");
