@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Trash2,
   Play,
@@ -69,7 +68,7 @@ export function ConfigPanel({
 }) {
   if (!node) {
     return (
-      <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col min-h-0">
+      <div className="w-full h-full bg-card/50 flex flex-col min-h-0">
         <div className="px-4 py-3 border-b border-border shrink-0">
           <h3 className="text-sm font-semibold">Configuración</h3>
         </div>
@@ -93,7 +92,7 @@ export function ConfigPanel({
   };
 
   return (
-    <div className="w-80 shrink-0 border-l border-border bg-card/50 flex flex-col min-h-0">
+    <div className="w-full h-full bg-card/50 flex flex-col min-h-0">
       <div className="px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2.5">
           <div
@@ -111,7 +110,10 @@ export function ConfigPanel({
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0">
+      <div
+        className="flex-1 min-h-0 overflow-y-scroll pf-scroll"
+        style={{ scrollbarGutter: "stable" }}
+      >
         <div className="p-4 space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="node-label" className="text-xs">Etiqueta del nodo</Label>
@@ -565,7 +567,7 @@ export function ConfigPanel({
             </Field>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="p-3 border-t border-border shrink-0">
         <Button
