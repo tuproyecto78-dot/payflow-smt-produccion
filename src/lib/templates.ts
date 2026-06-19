@@ -43,6 +43,8 @@ const COBRO_WHATSAPP_IA_NODES: FlowNode[] = [
       phoneNumber: "+15551234567",
       message:
         "¡Hola! Soy tu asistente de pagos de PayFlow SMT. Para confirmar tu pedido, responde 'sí'.",
+      outputVariable: "user_response",
+      defaultResponse: "sí",
     },
   },
   {
@@ -53,7 +55,8 @@ const COBRO_WHATSAPP_IA_NODES: FlowNode[] = [
       label: "Agente IA de pagos",
       systemPrompt:
         "Eres un agente de cobros por WhatsApp. Confirmas la intención de pago del cliente de forma amable y breve. REGLA: nunca confirmas pagos exitosos, solo confirmas la intención del cliente.",
-      prompt: "Confirma la intención de pago del cliente para su pedido.",
+      prompt:
+        "El cliente respondió: {{user_response}}\n\nConfirma si el cliente tiene intención de pagar.",
       inputVariable: "user_response",
       outputVariable: "ai_confirmation",
     },

@@ -219,14 +219,54 @@ export async function executeWorkflow(
           });
           ctx.variables["last_whatsapp_phone"] = phone;
           ctx.variables["last_whatsapp_message"] = message;
-          log(ctx, {
-            nodeId: node.id,
-            nodeType: node.type as NodeType,
-            nodeLabel: label,
-            status: "success",
-            message: `Mensaje de WhatsApp enviado a ${phone}: "${message.slice(0, 80)}${message.length > 80 ? "…" : ""}"`,
-            durationMs: Date.now() - startedAt,
-          });
+          // Si el nodo WhatsApp tiene una variable de salida configurada,
+          // captura la respuesta simulada/recibida del cliente en esa variable.
+          // Esto permite encadenar WhatsApp → Agente IA pasándole la respuesta.
+          const outputVariable = String(data.outputVariable || "");
+          if (outputVariable) {
+            const override = options.questionResponses?.[outputVariable];
+            const reply =
+              override ??
+              (data.defaultResponse
+                ? resolveTemplate(String(data.defaultResponse), ctx.variables)
+                : "sí");
+            ctx.variables[outputVariable] = reply;
+            // Registrar la respuesta entrante en el simulador de WhatsApp
+            ctx.whatsappMessages.push({
+              id: `${node.id}-in-${Date.now()}`,
+              direction: "inbound",
+              phone,
+              text: reply,
+              timestamp: nowIso(),
+              nodeId: node.id,
+            });
+            ctx.variables["last_user_response"] = reply;
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "info",
+              message: `Respuesta del cliente recibida: "${reply}" → guardada en {{${outputVariable}}}`,
+              durationMs: Date.now() - startedAt,
+            });
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "success",
+              message: `Nodo ejecutado. Enviado: "${message.slice(0, 60)}${message.length > 60 ? "…" : ""}" · {{${outputVariable}}}="${reply.slice(0, 40)}"`,
+              durationMs: Date.now() - startedAt,
+            });
+          } else {
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "success",
+              message: `Nodo ejecutado. Mensaje enviado a ${phone}: "${message.slice(0, 60)}${message.length > 60 ? "…" : ""}"`,
+              durationMs: Date.now() - startedAt,
+            });
+          }
           nextHandle = "out";
           break;
         }
@@ -395,12 +435,23 @@ export async function executeWorkflow(
           }
           ctx.variables[outputVariable] = aiContent;
           ctx.variables["last_ai_response"] = aiContent;
+          // Log detallado: entrada recibida y resultado generado
+          if (inputVar) {
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "info",
+              message: `Entrada recibida: {{${inputVar}}}="${String(inputText ?? "").slice(0, 60)}"`,
+              durationMs: Date.now() - startedAt,
+            });
+          }
           log(ctx, {
             nodeId: node.id,
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `El Agente IA respondió (${aiContent.length} caracteres) → guardado en {{${outputVariable}}}`,
+            message: `Nodo ejecutado. Resultado generado: {{${outputVariable}}}="${aiContent.slice(0, 60)}${aiContent.length > 60 ? "…" : ""}" (${aiContent.length} caracteres)`,
             durationMs: Date.now() - startedAt,
           });
           nextHandle = "out";

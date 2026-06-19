@@ -263,6 +263,28 @@ export function ConfigPanel({
                   className="text-sm"
                 />
               </Field>
+              <Field
+                label="Variable de salida (opcional)"
+                hint="Si la estableces, el nodo captura la respuesta del cliente en esta variable. Úsala para pasar el mensaje a un Agente IA."
+              >
+                <Input
+                  value={String(data.outputVariable || "")}
+                  onChange={(e) => set("outputVariable", e.target.value)}
+                  placeholder="user_response"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+              <Field
+                label="Respuesta simulada (opcional)"
+                hint="Respuesta del cliente usada durante la ejecución de prueba."
+              >
+                <Input
+                  value={String(data.defaultResponse || "")}
+                  onChange={(e) => set("defaultResponse", e.target.value)}
+                  placeholder="sí"
+                  className="h-8 text-sm"
+                />
+              </Field>
               <Field label="Nombre de plantilla (opcional)">
                 <Input
                   value={String(data.templateName || "")}

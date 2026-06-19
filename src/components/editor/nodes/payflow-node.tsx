@@ -57,8 +57,11 @@ function getNodeSummary(type: NodeType, data: PayFlowNodeData): string {
         : "Sin pregunta";
     case "condition":
       return `${data.variable || "?"} ${data.operator || "=="} "${data.value || ""}"`;
-    case "whatsapp":
-      return data.phoneNumber ? `A ${data.phoneNumber}` : "Sin destinatario";
+    case "whatsapp": {
+      const phone = data.phoneNumber ? `A ${data.phoneNumber}` : "Sin destinatario";
+      const out = data.outputVariable ? ` · → {{${data.outputVariable}}}` : "";
+      return phone + out;
+    }
     case "payment":
     case "create_payment": {
       const amt = data.amount ?? 0;
