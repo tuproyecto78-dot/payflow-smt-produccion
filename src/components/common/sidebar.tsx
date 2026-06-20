@@ -11,12 +11,16 @@ import {
   LogOut,
   ChevronRight,
   ShieldCheck,
+  Inbox,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+type NavItem = "dashboard" | "executions" | "subscriptions" | "settings";
+
 interface SidebarProps {
-  activeNav: "dashboard" | "executions";
-  onNavigate: (nav: "dashboard" | "executions") => void;
+  activeNav: NavItem;
+  onNavigate: (nav: NavItem) => void;
 }
 
 export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
@@ -64,6 +68,20 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
           label="Ejecuciones"
           active={activeNav === "executions"}
           onClick={() => onNavigate("executions")}
+        />
+        {isAdmin && (
+          <NavItem
+            icon={<Inbox className="size-5" />}
+            label="Solicitudes"
+            active={activeNav === "subscriptions"}
+            onClick={() => onNavigate("subscriptions")}
+          />
+        )}
+        <NavItem
+          icon={<Lock className="size-5" />}
+          label="Contraseña"
+          active={activeNav === "settings"}
+          onClick={() => onNavigate("settings")}
         />
         {activeWorkflow && (
           <div className="hidden lg:block pt-4 mt-4 border-t border-sidebar-border">

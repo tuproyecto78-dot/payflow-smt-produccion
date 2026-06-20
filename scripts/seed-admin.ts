@@ -16,8 +16,8 @@ import { db } from "../src/lib/db";
 import bcrypt from "bcryptjs";
 import { TEMPLATES } from "../src/lib/templates";
 
-const ADMIN_EMAIL = "admin@payflow.smt";
-const ADMIN_PASSWORD = "admin123";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@payflow.smt";
+const ADMIN_PASSWORD = process.env.ADMIN_INITIAL_PASSWORD || "admin123";
 const ADMIN_NAME = "Administrator";
 const ADMIN_PROJECT_NAME = "Admin Workspace";
 const RESET_TEMPLATE = process.argv.includes("--reset-template");

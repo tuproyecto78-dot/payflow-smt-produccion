@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
+import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,16 +14,24 @@ import {
   Zap,
   CheckCircle2,
   Loader2,
-  ShieldCheck,
+  ArrowLeft,
 } from "lucide-react";
 
 export function AuthView() {
   const { login, signup, loading } = useAuthStore();
+  const { setActiveProject } = useAppStore();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Volver a la landing page pública.
+  function goLanding() {
+    setActiveProject(null);
+    // Reset del estado de auth para mostrar landing.
+    window.location.href = "/";
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,28 +48,34 @@ export function AuthView() {
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-background">
       {/* Panel de marca */}
-      <div className="relative lg:w-1/2 bg-sidebar text-sidebar-foreground p-8 lg:p-14 flex flex-col justify-between overflow-hidden">
+      <div className="relative lg:w-1/2 bg-[#0a1628] text-white p-8 lg:p-14 flex flex-col justify-between overflow-hidden">
         <div
           className="absolute inset-0 opacity-[0.07] pointer-events-none"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 20%, #10b981 0, transparent 40%), radial-gradient(circle at 80% 70%, #22c55e 0, transparent 45%)",
+              "radial-gradient(circle at 20% 20%, #00D084 0, transparent 40%), radial-gradient(circle at 80% 70%, #20E68A 0, transparent 45%)",
           }}
         />
-        <div className="relative flex items-center gap-3">
-          <div className="size-10 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-            <Workflow className="size-6 text-primary-foreground" />
-          </div>
-          <div className="text-xl font-bold tracking-tight">
-            PayFlow <span className="text-primary">SMT</span>
-          </div>
-        </div>
+        {/* Logo clickeable que lleva a la landing */}
+        <button
+          onClick={goLanding}
+          className="relative flex items-center gap-3 group"
+          title="Volver a PayFlow SMT"
+        >
+          <img
+            src="/payflow-logo-dark.png"
+            srcSet="/payflow-logo-dark.png 2x"
+            alt="PayFlow SMT"
+            className="h-10 w-auto object-contain group-hover:opacity-80 transition-opacity"
+            draggable={false}
+          />
+        </button>
 
         <div className="relative space-y-6 max-w-md">
           <h1 className="text-3xl lg:text-4xl font-bold leading-tight">
             Crea flujos de automatización de WhatsApp y pagos visualmente.
           </h1>
-          <p className="text-sidebar-foreground/70 text-base lg:text-lg">
+          <p className="text-white/70 text-base lg:text-lg">
             Arrastra, suelta y conecta nodos para diseñar automatizaciones
             potentes — sin código. Ejecuta agentes de IA, procesa pagos y
             dispara webhooks desde un solo lienzo.
@@ -74,23 +89,32 @@ export function AuthView() {
             ].map(({ icon: Icon, label }) => (
               <div
                 key={label}
-                className="flex items-center gap-2 rounded-lg bg-sidebar-accent/60 px-3 py-2 text-sm"
+                className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm"
               >
-                <Icon className="size-4 text-primary" />
+                <Icon className="size-4 text-emerald-400" />
                 {label}
               </div>
             ))}
           </div>
         </div>
 
-        <div className="relative flex items-center gap-2 text-sm text-sidebar-foreground/60">
-          <CheckCircle2 className="size-4 text-primary" />
-          Versión MVP · Constructor visual de flujos
+        <div className="relative flex items-center gap-2 text-sm text-white/50">
+          <CheckCircle2 className="size-4 text-emerald-400" />
+          Plataforma de automatización de pagos
         </div>
       </div>
 
       {/* Panel de formulario */}
-      <div className="lg:w-1/2 flex items-center justify-center p-6 lg:p-12">
+      <div className="lg:w-1/2 flex items-center justify-center p-6 lg:p-12 relative">
+        {/* Enlace para volver a la landing */}
+        <button
+          onClick={goLanding}
+          className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="size-4" />
+          Volver a PayFlow SMT
+        </button>
+
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <h2 className="text-2xl font-bold tracking-tight">
@@ -194,26 +218,6 @@ export function AuthView() {
               </>
             )}
           </div>
-
-          {mode === "login" && (
-            <div className="mt-6 rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-500/10 p-3 text-xs">
-              <div className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300 mb-1">
-                <ShieldCheck className="size-3.5" />
-                Acceso de administrador
-              </div>
-              <div className="text-amber-800/80 dark:text-amber-200/70 space-y-0.5 font-mono text-[11px]">
-                <div>Correo: admin@payflow.smt</div>
-                <div>Contraseña: admin123</div>
-              </div>
-            </div>
-          )}
-
-          {mode === "signup" && (
-            <div className="mt-6 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Consejo:</span> te
-              creamos un proyecto inicial con un flujo automáticamente.
-            </div>
-          )}
         </div>
       </div>
     </div>

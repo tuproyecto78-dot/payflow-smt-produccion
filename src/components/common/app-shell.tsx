@@ -3,17 +3,23 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
 import { useAppStore } from "@/stores/app-store";
+import { LandingPage } from "@/components/landing/landing-page";
 import { AuthView } from "@/components/auth/auth-view";
 import { Sidebar } from "@/components/common/sidebar";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { ExecutionsView } from "@/components/dashboard/executions-view";
+import { SubscriptionsView } from "@/components/dashboard/subscriptions-view";
+import { ChangePasswordView } from "@/components/dashboard/change-password-view";
 import { EditorView } from "@/components/editor/editor-view";
 import { Loader2, Workflow } from "lucide-react";
+
+type AdminNav = "dashboard" | "executions" | "subscriptions" | "settings";
 
 export function AppShell() {
   const { user, initialized, fetchUser } = useAuthStore();
   const { view, activeWorkflow, goDashboard } = useAppStore();
-  const [nav, setNav] = useState<"dashboard" | "executions">("dashboard");
+  const [nav, setNav] = useState<AdminNav>("dashboard");
+  const [showAuth, setShowAuth] = useState(false);
 
   useEffect(() => {
     fetchUser();
@@ -33,15 +39,19 @@ export function AppShell() {
     );
   }
 
+  // No autenticado → landing page (con opción a abrir auth)
   if (!user) {
-    return <AuthView />;
+    if (showAuth) {
+      return <AuthView />;
+    }
+    return <LandingPage onLogin={() => setShowAuth(true)} />;
   }
 
-  // Editor view takes over the whole screen (no sidebar nav switching)
+  // Editor view takes over the whole screen
   if (view === "editor" && activeWorkflow) {
     return (
       <div className="h-screen flex overflow-hidden">
-        <Sidebar activeNav="dashboard" onNavigate={(n) => { goDashboard(); setNav(n); }} />
+        <Sidebar activeNav="dashboard" onNavigate={(n) => { goDashboard(); setNav(n as AdminNav); }} />
         <EditorView workflow={activeWorkflow} />
       </div>
     );
@@ -51,7 +61,10 @@ export function AppShell() {
     <div className="h-screen flex overflow-hidden">
       <Sidebar activeNav={nav} onNavigate={setNav} />
       <main className="flex-1 flex flex-col overflow-hidden">
-        {nav === "dashboard" ? <DashboardView /> : <ExecutionsView />}
+        {nav === "dashboard" && <DashboardView />}
+        {nav === "executions" && <ExecutionsView />}
+        {nav === "subscriptions" && <SubscriptionsView />}
+        {nav === "settings" && <ChangePasswordView />}
       </main>
     </div>
   );
