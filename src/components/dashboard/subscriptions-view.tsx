@@ -75,6 +75,7 @@ export function SubscriptionsView() {
                         <CardTitle className="text-sm flex items-center gap-2"><User className="size-3.5 text-primary" />{item.fullName}</CardTitle>
                         <div className="flex flex-wrap gap-3 mt-1 text-xs text-muted-foreground">
                           <span><Badge variant="outline" className="text-[10px]">{item.selectedPlan === "anual" ? "Anual $89" : "Trimestral $25"}</Badge></span>
+
                           <span className="flex items-center gap-1"><Mail className="size-3" />{item.email}</span>
                           <span className="flex items-center gap-1"><Phone className="size-3" />+{item.countryCode} {item.phoneNumber}</span>
                           {item.businessName && <span className="flex items-center gap-1"><Building2 className="size-3" />{item.businessName}</span>}

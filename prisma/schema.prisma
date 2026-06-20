@@ -60,3 +60,60 @@ model ExecutionLog {
 
   @@index([workflowId])
 }
+
+model PaymentTransaction {
+  id                 String   @id @default(cuid())
+  userId             String
+  workflowId         String?
+  workflowRunId      String?
+  provider           String
+  providerPaymentId  String?
+  orderId            String?
+  amount             Float
+  currency           String   @default("USD")
+  status             String   @default("payment_pending")
+  paymentLink        String?
+  rawResponse        String   @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId])
+  @@index([workflowId])
+  @@index([provider])
+  @@index([status])
+}
+
+model SubscriptionRequest {
+  id                 String   @id @default(cuid())
+  selectedPlan       String
+  fullName           String
+  countryCode        String
+  phoneNumber        String
+  email              String
+  documentId         String
+  businessName       String?
+  businessType       String?
+  country            String?
+  subscriptionStatus String   @default("pending_review")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([subscriptionStatus])
+  @@index([email])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

@@ -9,12 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, CheckCircle2 } from "lucide-react";
 
-export function SubscriptionForm({ open, onOpenChange, plan }: { open: boolean; onOpenChange: (o: boolean) => void; plan: "semestral" | "anual" }) {
+export function SubscriptionForm({ open, onOpenChange, plan }: { open: boolean; onOpenChange: (o: boolean) => void; plan: "trimestral" | "anual" }) {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
-    selected_plan: plan, full_name: "", country_code: "593", phone_number: "",
+    selected_plan: plan as string, full_name: "", country_code: "593", phone_number: "",
     email: "", document_id: "", business_name: "", business_type: "", country: "Ecuador", terms_accepted: false,
   });
 

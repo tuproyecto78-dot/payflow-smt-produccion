@@ -29,7 +29,7 @@ interface LandingPageProps {
 export function LandingPage({ onLogin }: LandingPageProps) {
   const [activeSection, setActiveSection] = useState<"plataforma" | "precios" | "nosotros">("plataforma");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [subPlan, setSubPlan] = useState<"semestral" | "anual" | null>(null);
+  const [subPlan, setSubPlan] = useState<"trimestral" | "anual" | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useScrollColorTransition(rootRef);
   useLandingAnimations(rootRef);
@@ -188,7 +188,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
                 <p className="text-sm text-slate-500 mt-3">Pago automatización por WhatsApp con IA</p>
               </div>
               <div className="flex-1" />
-              <button onClick={() => setSubPlan("semestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme</button>
+              <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme</button>
             </div>
             <div data-price-card className="rounded-3xl border-2 border-emerald-500 bg-white p-8 flex flex-col relative hover:shadow-xl hover:shadow-emerald-100 transition-all duration-300">
               <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0">Recomendado</Badge>
