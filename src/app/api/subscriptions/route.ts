@@ -37,6 +37,8 @@ export async function POST(req: Request) {
 
     const row = {
       selectedPlan: selected_plan,
+      selectedPlanLabel: body.selected_plan_label || (selected_plan === "anual" ? "Plan Anual" : "Plan Trimestral"),
+      selectedPlanPrice: body.selected_plan_price || (selected_plan === "anual" ? 89 : 25),
       fullName: sanitizeName(full_name),
       countryCode: sanitizeText(country_code),
       phoneNumber: sanitizeText(phone_number),
@@ -87,7 +89,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const requests = await db.subscriptionRequest.findMany({ orderBy: { createdAt: "desc" } });
   return NextResponse.json({ requests: requests.map((r) => ({
-    id: r.id, selectedPlan: r.selectedPlan, fullName: r.fullName, countryCode: r.countryCode,
+    id: r.id, selectedPlan: r.selectedPlan, selectedPlanLabel: r.selectedPlanLabel, selectedPlanPrice: r.selectedPlanPrice, fullName: r.fullName, countryCode: r.countryCode,
     phoneNumber: r.phoneNumber, email: r.email, documentId: r.documentId,
     businessName: r.businessName, businessType: r.businessType, country: r.country,
     subscriptionStatus: r.subscriptionStatus, createdAt: r.createdAt,

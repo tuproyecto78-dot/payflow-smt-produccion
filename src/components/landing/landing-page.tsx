@@ -29,7 +29,7 @@ interface LandingPageProps {
 export function LandingPage({ onLogin }: LandingPageProps) {
   const [activeSection, setActiveSection] = useState<"plataforma" | "precios" | "nosotros">("plataforma");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [subPlan, setSubPlan] = useState<"trimestral" | "anual" | null>(null);
+  const [subPlan, setSubPlan] = useState<"trimestral" | "anual" | "choose" | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useScrollColorTransition(rootRef);
   useLandingAnimations(rootRef);
@@ -75,7 +75,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
           </nav>
           <div className="hidden md:flex items-center gap-2">
             <button onClick={onLogin} className="px-3 py-1.5 rounded-lg text-sm font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors">Iniciar sesión</button>
-            <button onClick={() => setSubPlan("anual")} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-500 hover:bg-emerald-400 text-white shadow-md shadow-emerald-500/30 transition-colors">Suscribirme</button>
+            <button onClick={() => setSubPlan("choose")} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-500 hover:bg-emerald-400 text-white shadow-md shadow-emerald-500/30 transition-colors">Suscribirme</button>
           </div>
           <button className="md:hidden p-2 rounded-lg hover:bg-white/10 text-white" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
             {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
@@ -119,7 +119,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
               ))}
             </div>
             <div className="flex flex-wrap gap-3">
-              <button onClick={() => setSubPlan("anual")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme <ArrowRight className="size-4 ml-2 inline" /></button>
+              <button onClick={() => setSubPlan("choose")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme <ArrowRight className="size-4 ml-2 inline" /></button>
               <button onClick={() => scrollToSection("precios")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-white/10 backdrop-blur-md border border-white/25 text-white hover:bg-white/20 hover:text-white transition-colors">Ver precios</button>
             </div>
           </div>
@@ -139,7 +139,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
               ))}
             </ul>
             <div className="flex flex-wrap gap-3">
-              <button onClick={() => setSubPlan("anual")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme</button>
+              <button onClick={() => setSubPlan("choose")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme</button>
               <button onClick={() => scrollToSection("precios")} className="px-6 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">Ver precios</button>
             </div>
           </div>
@@ -185,20 +185,20 @@ export function LandingPage({ onLogin }: LandingPageProps) {
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Trimestral</h3>
                 <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$25</span><span className="text-sm text-slate-400">/trimestre</span></div>
                 <p className="text-xs text-slate-400 mt-1">Pago mensual</p>
-                <p className="text-sm text-slate-500 mt-3">Pago automatización por WhatsApp con IA</p>
+                <p className="text-sm text-slate-500 mt-3">Flujo de pagos por WhatsApp directamente</p>
               </div>
               <div className="flex-1" />
-              <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme</button>
+              <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme al Plan Trimestral</button>
             </div>
             <div data-price-card className="rounded-3xl border-2 border-emerald-500 bg-white p-8 flex flex-col relative hover:shadow-xl hover:shadow-emerald-100 transition-all duration-300">
               <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0">Recomendado</Badge>
               <div className="mb-8">
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Anual</h3>
                 <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$89</span><span className="text-sm text-slate-400">/año</span></div>
-                <p className="text-sm text-slate-500 mt-3">Pago automatización por WhatsApp con IA</p>
+                <p className="text-sm text-slate-500 mt-3">Automatización completa anual para pagos por WhatsApp</p>
               </div>
               <div className="flex-1" />
-              <button onClick={() => setSubPlan("anual")} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme</button>
+              <button onClick={() => setSubPlan("anual")} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme al Plan Anual</button>
             </div>
           </div>
           <p className="text-xs text-slate-400 text-center mt-10 max-w-2xl mx-auto leading-relaxed">Los valores corresponden al servicio de plataforma y configuración inicial. La activación de integraciones de pago puede requerir credenciales propias del comercio.</p>
@@ -228,7 +228,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
           </div>
           <p className="text-center text-slate-500 leading-relaxed max-w-2xl mx-auto">PayFlow SMT está diseñado para negocios que necesitan cobrar más rápido, reducir procesos manuales y ofrecer una experiencia moderna de pago por WhatsApp.</p>
           <div className="flex flex-wrap justify-center gap-3 mt-10">
-            <button onClick={() => setSubPlan("anual")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme ahora</button>
+            <button onClick={() => setSubPlan("choose")} className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme ahora</button>
             <button onClick={onLogin} className="px-6 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-700 hover:bg-white transition-colors">Iniciar sesión</button>
           </div>
         </div>

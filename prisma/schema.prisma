@@ -86,6 +86,8 @@ model PaymentTransaction {
 model SubscriptionRequest {
   id                 String   @id @default(cuid())
   selectedPlan       String
+  selectedPlanLabel  String?
+  selectedPlanPrice  Float?
   fullName           String
   countryCode        String
   phoneNumber        String
