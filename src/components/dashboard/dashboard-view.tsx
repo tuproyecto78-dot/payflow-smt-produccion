@@ -43,10 +43,12 @@ import {
   Clock,
   Loader2,
   Pencil,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
+import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
 
 interface ProjectWithWorkflows extends ProjectSummary {
   workflows: WorkflowSummary[];
@@ -61,6 +63,7 @@ export function DashboardView() {
   const [deleteProject, setDeleteProject] = useState<ProjectWithWorkflows | null>(null);
   const [deleteWorkflow, setDeleteWorkflow] = useState<{ project: ProjectWithWorkflows; wf: WorkflowSummary } | null>(null);
   const [editProject, setEditProject] = useState<ProjectWithWorkflows | null>(null);
+  const [createFlowOpen, setCreateFlowOpen] = useState(false);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -177,20 +180,29 @@ export function DashboardView() {
               Organiza tus flujos de WhatsApp, pagos e IA en proyectos.
             </p>
           </div>
-          <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="size-4 mr-2" />
-                Nuevo proyecto
-              </Button>
-            </DialogTrigger>
-            <ProjectFormDialog
-              title="Crear proyecto"
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => setCreateFlowOpen(true)}
+              className="bg-purple-500 hover:bg-purple-600 text-white"
+            >
+              <Sparkles className="size-4 mr-2" />
+              Crear flujo automático
+            </Button>
+            <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Plus className="size-4 mr-2" />
+                  Nuevo proyecto
+                </Button>
+              </DialogTrigger>
+              <ProjectFormDialog
+                title="Crear proyecto"
               description="Un proyecto agrupa flujos de automatización relacionados."
               onSubmit={createProject}
               onCancel={() => setNewProjectOpen(false)}
             />
           </Dialog>
+          </div>
         </div>
 
         {loading ? (
@@ -370,6 +382,23 @@ export function DashboardView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Crear flujo automático desde plantilla */}
+      <CreateFlowDialog
+        open={createFlowOpen}
+        onOpenChange={setCreateFlowOpen}
+        onCreated={async (workflowId, _projectId) => {
+          toast.success("Flujo automático creado");
+          await loadProjects();
+          // Find and open the workflow
+          for (const p of projects) {
+            const r = await fetch(`/api/projects/${p.id}`);
+            const d = await r.json();
+            const wf = (d.project?.workflows || []).find((w: WorkflowSummary) => w.id === workflowId);
+            if (wf) { openEditor(p, wf); return; }
+          }
+        }}
+      />
     </div>
   );
 }

@@ -96,6 +96,8 @@ model SubscriptionRequest {
   businessName       String?
   businessType       String?
   country            String?
+  paymentRequired    Boolean  @default(true)
+  paymentProvider    String   @default("payphone") // none | payphone | mock
   subscriptionStatus String   @default("pending_review")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
