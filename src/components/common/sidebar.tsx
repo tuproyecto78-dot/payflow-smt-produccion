@@ -13,10 +13,14 @@ import {
   ShieldCheck,
   Inbox,
   Lock,
+  CreditCard,
+  Bot,
+  Package,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type NavItem = "dashboard" | "executions" | "subscriptions" | "settings";
+type NavItem = "dashboard" | "executions" | "subscriptions" | "payphone" | "agent" | "catalog" | "agenda" | "settings";
 
 interface SidebarProps {
   activeNav: NavItem;
@@ -75,6 +79,38 @@ export function Sidebar({ activeNav, onNavigate }: SidebarProps) {
             label="Solicitudes"
             active={activeNav === "subscriptions"}
             onClick={() => onNavigate("subscriptions")}
+          />
+        )}
+        {isAdmin && (
+          <NavItem
+            icon={<CreditCard className="size-5" />}
+            label="PayPhone"
+            active={activeNav === "payphone"}
+            onClick={() => onNavigate("payphone")}
+          />
+        )}
+        {isAdmin && (
+          <NavItem
+            icon={<Bot className="size-5" />}
+            label="Agente IA"
+            active={activeNav === "agent"}
+            onClick={() => onNavigate("agent")}
+          />
+        )}
+        {isAdmin && (
+          <NavItem
+            icon={<Package className="size-5" />}
+            label="Catálogo"
+            active={activeNav === "catalog"}
+            onClick={() => onNavigate("catalog")}
+          />
+        )}
+        {isAdmin && (
+          <NavItem
+            icon={<CalendarClock className="size-5" />}
+            label="Agenda"
+            active={activeNav === "agenda"}
+            onClick={() => onNavigate("agenda")}
           />
         )}
         <NavItem

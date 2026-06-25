@@ -10,10 +10,14 @@ import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { ExecutionsView } from "@/components/dashboard/executions-view";
 import { SubscriptionsView } from "@/components/dashboard/subscriptions-view";
 import { ChangePasswordView } from "@/components/dashboard/change-password-view";
+import { PayPhoneConfigView } from "@/components/dashboard/payphone-config-view";
+import { CommercialAgentView } from "@/components/dashboard/commercial-agent-view";
+import { CatalogView } from "@/components/dashboard/catalog-view";
+import { AgendaView } from "@/components/dashboard/agenda-view";
 import { EditorView } from "@/components/editor/editor-view";
 import { Loader2, Workflow } from "lucide-react";
 
-type AdminNav = "dashboard" | "executions" | "subscriptions" | "settings";
+type AdminNav = "dashboard" | "executions" | "subscriptions" | "payphone" | "agent" | "catalog" | "agenda" | "settings";
 
 export function AppShell() {
   const { user, initialized, fetchUser } = useAuthStore();
@@ -64,6 +68,10 @@ export function AppShell() {
         {nav === "dashboard" && <DashboardView />}
         {nav === "executions" && <ExecutionsView />}
         {nav === "subscriptions" && <SubscriptionsView />}
+        {nav === "payphone" && <PayPhoneConfigView />}
+        {nav === "agent" && <CommercialAgentView />}
+        {nav === "catalog" && <CatalogView />}
+        {nav === "agenda" && <AgendaView />}
         {nav === "settings" && <ChangePasswordView />}
       </main>
     </div>
