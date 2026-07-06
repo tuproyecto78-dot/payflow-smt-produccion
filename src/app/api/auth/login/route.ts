@@ -5,10 +5,8 @@ import { ROLES } from "@/lib/roles";
 /**
  * POST /api/auth/login
  *
- * Dual-mode authentication:
- *   1. If Supabase is configured → use Supabase Auth (production)
- *   2. If Prisma is available → use local SQLite (development)
- *   3. If neither works → graceful 401/500 without leaking internals
+ * Production auth using Supabase Auth.
+ * Fallback to Prisma (local dev) or env admin credentials.
  *
  * NEVER returns 500 for wrong credentials (returns 401).
  * NEVER logs passwords, tokens, or secrets.
@@ -16,7 +14,8 @@ import { ROLES } from "@/lib/roles";
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { email, password } = body;
     if (!email || !password) {
       return NextResponse.json(
         { error: "Email and password are required." },
@@ -24,22 +23,34 @@ export async function POST(req: Request) {
       );
     }
     const normalizedEmail = String(email).toLowerCase().trim();
+    const passwordStr = String(password);
 
-    // ─── Try Supabase Auth first (production) ────────────────────────
+    // ─── Mode 1: Supabase Auth (production) ──────────────────────────
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (supabaseUrl && supabaseAnonKey) {
       try {
+        // Use createClient from @supabase/supabase-js (not @supabase/ssr)
         const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
 
         const { data, error } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
-          password: String(password),
+          password: passwordStr,
         });
 
-        if (error || !data.user) {
+        if (error) {
+          // Wrong credentials — return 401, not 500
+          return NextResponse.json(
+            { error: "Correo o contraseña incorrectos." },
+            { status: 401 }
+          );
+        }
+
+        if (!data.user) {
           return NextResponse.json(
             { error: "Correo o contraseña incorrectos." },
             { status: 401 }
@@ -48,48 +59,41 @@ export async function POST(req: Request) {
 
         const userId = data.user.id;
         const userEmail = data.user.email || normalizedEmail;
-        const userName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || null;
+        const userName =
+          data.user.user_metadata?.full_name ||
+          data.user.user_metadata?.name ||
+          null;
 
-        // Try to fetch/ensure profile in Supabase
+        // Determine role — check profiles table, fallback to admin check
         let role = ROLES.APPLICANT;
+        const adminEmail = (process.env.ADMIN_EMAIL || "admin@payflow.smt")
+          .toLowerCase()
+          .trim();
+        const isAdminEmail = normalizedEmail === adminEmail;
+
         try {
           const { data: profileData } = await supabase
             .from("profiles")
-            .select("role, status")
+            .select("role, status, client_id")
             .eq("user_id", userId)
             .single();
 
           if (profileData) {
-            role = profileData.role || ROLES.APPLICANT;
+            role = profileData.role || (isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT);
           } else {
-            // Profile doesn't exist — create it
-            // Check if this is the admin email
-            const adminEmail = process.env.ADMIN_EMAIL || "admin@payflow.smt";
-            if (normalizedEmail === adminEmail.toLowerCase().trim()) {
-              role = ROLES.SUPER_ADMIN;
-              await supabase.from("profiles").upsert({
-                user_id: userId,
-                email: userEmail,
-                full_name: userName || "Administrator",
-                role: ROLES.SUPER_ADMIN,
-                status: "active",
-              });
-            } else {
-              await supabase.from("profiles").upsert({
-                user_id: userId,
-                email: userEmail,
-                full_name: userName,
-                role: ROLES.APPLICANT,
-                status: "pending",
-              });
-            }
+            // Create profile if missing
+            role = isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT;
+            await supabase.from("profiles").upsert({
+              user_id: userId,
+              email: userEmail,
+              full_name: userName || (isAdminEmail ? "Administrator" : null),
+              role,
+              status: isAdminEmail ? "active" : "pending",
+            });
           }
         } catch {
-          // Profile table might not exist in Supabase yet — continue with default role
-          const adminEmail = process.env.ADMIN_EMAIL || "admin@payflow.smt";
-          if (normalizedEmail === adminEmail.toLowerCase().trim()) {
-            role = ROLES.SUPER_ADMIN;
-          }
+          // profiles table might not exist — use admin check
+          if (isAdminEmail) role = ROLES.SUPER_ADMIN;
         }
 
         const token = await createSessionToken({
@@ -106,15 +110,23 @@ export async function POST(req: Request) {
             email: userEmail,
             name: userName,
             role,
+            clientId: null,
+            clientStatus: null,
+            modules: [],
+            memberRole: null,
+            memberPermissions: null,
+            active: role === ROLES.SUPER_ADMIN || role === ROLES.ADMIN || role === "active",
           },
         });
       } catch (supabaseErr) {
-        // Supabase auth failed — fall through to Prisma if available
-        console.error("[login] Supabase auth failed, trying Prisma fallback");
+        // Supabase call itself failed (network, config, etc.)
+        // Log safely — no secrets
+        console.error("[login] Supabase auth error:", supabaseErr instanceof Error ? supabaseErr.message : "unknown");
+        // Fall through to next method
       }
     }
 
-    // ─── Fallback: Prisma/SQLite (local development) ─────────────────
+    // ─── Mode 2: Prisma/SQLite (local development) ───────────────────
     try {
       const { db } = await import("@/lib/db");
       const bcrypt = await import("bcryptjs");
@@ -127,7 +139,7 @@ export async function POST(req: Request) {
         );
       }
 
-      const valid = await bcrypt.compare(password, user.passwordHash);
+      const valid = await bcrypt.compare(passwordStr, user.passwordHash);
       if (!valid) {
         return NextResponse.json(
           { error: "Correo o contraseña incorrectos." },
@@ -136,7 +148,6 @@ export async function POST(req: Request) {
       }
 
       const role = user.role || ROLES.APPLICANT;
-
       const token = await createSessionToken({
         userId: user.id,
         email: user.email,
@@ -151,42 +162,58 @@ export async function POST(req: Request) {
           email: user.email,
           name: user.name,
           role,
+          clientId: null,
+          clientStatus: null,
+          modules: [],
+          memberRole: null,
+          memberPermissions: null,
+          active: true,
         },
       });
-    } catch (prismaErr) {
-      // Prisma not available (no DATABASE_URL in production)
-      console.error("[login] Prisma not available");
+    } catch {
+      // Prisma not available — no DATABASE_URL in production
+      console.error("[login] Prisma not available, trying env admin fallback");
+    }
 
-      // Last resort: check admin credentials from env vars
-      const adminEmail = process.env.ADMIN_EMAIL || "admin@payflow.smt";
-      const adminPassword = process.env.ADMIN_INITIAL_PASSWORD || "admin123";
+    // ─── Mode 3: Env admin fallback (last resort) ────────────────────
+    const adminEmail = (process.env.ADMIN_EMAIL || "admin@payflow.smt")
+      .toLowerCase()
+      .trim();
+    const adminPassword = process.env.ADMIN_INITIAL_PASSWORD || "admin123";
 
-      if (normalizedEmail === adminEmail.toLowerCase().trim() && password === adminPassword) {
-        const token = await createSessionToken({
-          userId: "env-admin",
+    if (normalizedEmail === adminEmail && passwordStr === adminPassword) {
+      const token = await createSessionToken({
+        userId: "env-admin",
+        email: adminEmail,
+        name: "Administrator",
+        role: ROLES.SUPER_ADMIN,
+      });
+      await setSessionCookie(token);
+
+      return NextResponse.json({
+        user: {
+          id: "env-admin",
           email: adminEmail,
           name: "Administrator",
           role: ROLES.SUPER_ADMIN,
-        });
-        await setSessionCookie(token);
-
-        return NextResponse.json({
-          user: {
-            id: "env-admin",
-            email: adminEmail,
-            name: "Administrator",
-            role: ROLES.SUPER_ADMIN,
-          },
-        });
-      }
-
-      return NextResponse.json(
-        { error: "Correo o contraseña incorrectos." },
-        { status: 401 }
-      );
+          clientId: null,
+          clientStatus: null,
+          modules: [],
+          memberRole: null,
+          memberPermissions: null,
+          active: true,
+        },
+      });
     }
+
+    // All methods failed
+    return NextResponse.json(
+      { error: "Correo o contraseña incorrectos." },
+      { status: 401 }
+    );
   } catch (err) {
-    console.error("[login] error");
+    // Catch-all: never expose internals
+    console.error("[login] unexpected error");
     return NextResponse.json(
       { error: "Error al iniciar sesión." },
       { status: 500 }

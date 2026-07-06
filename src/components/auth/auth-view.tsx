@@ -39,6 +39,9 @@ export function AuthView() {
         : await signup(email, password, name);
     if (!result.ok) {
       setError(result.error || "Algo salió mal");
+    } else {
+      // Login/signup succeeded — reload to let AppShell pick up the session
+      window.location.href = "/";
     }
   }
 

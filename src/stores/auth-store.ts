@@ -52,7 +52,18 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ loading: false });
         return { ok: false, error: data.error || "Error al iniciar sesión" };
       }
-      set({ user: data.user, initialized: true });
+      // Set user from login response, then re-fetch /api/auth/me for enrichment
+      set({ user: normalizeUser(data.user), initialized: true });
+      // Re-fetch to get full enriched profile (clientId, modules, etc.)
+      try {
+        const meRes = await fetch("/api/auth/me");
+        const meData = await meRes.json();
+        if (meData.user) {
+          set({ user: normalizeUser(meData.user) });
+        }
+      } catch {
+        // Enrichment failed — continue with login response data
+      }
       return { ok: true };
     } catch {
       set({ loading: false });
