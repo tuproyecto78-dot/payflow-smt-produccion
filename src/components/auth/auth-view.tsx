@@ -40,8 +40,8 @@ export function AuthView() {
     if (!result.ok) {
       setError(result.error || "Algo salió mal");
     } else {
-      // Login/signup succeeded — reload to let AppShell pick up the session
-      window.location.href = "/";
+      // Login/signup succeeded — redirect to dashboard
+      window.location.href = "/dashboard";
     }
   }
 
