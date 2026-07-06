@@ -48,7 +48,7 @@ export function AppShell() {
     if (showAuth) {
       return <AuthView />;
     }
-    return <LandingPage onLogin={() => setShowAuth(true)} />;
+    return <LandingPage onLogin={() => window.location.href = "/login"} />;
   }
 
   // Editor view takes over the whole screen
