@@ -137,3 +137,46 @@ async function customApiProvider(input: CreatePaymentInput, base: any): Promise<
     return { payment_id: `api_err_${Date.now()}`, provider_payment_id: null, payment_provider: "API personalizada", payment_status: "error", payment_link: "", ...base, raw_response: { provider: "API personalizada", error: err instanceof Error ? err.message : String(err) } };
   }
 }
+
+/**
+ * Returns the configuration status of all payment providers.
+ * NEVER returns secret values — only booleans and env-var names.
+ */
+export function getAllProviderStatuses() {
+  const providers = [
+    {
+      provider: "Mock",
+      configured: true,
+      mode: "mock",
+      missingVars: [],
+    },
+    {
+      provider: "PayPhone",
+      configured: !!(process.env.PAYPHONE_PRODUCTION_TOKEN || process.env.PAYPHONE_SANDBOX_TOKEN),
+      mode: (process.env.PAYPHONE_ENV || "disabled").toLowerCase(),
+      missingVars: [
+        ...(process.env.PAYPHONE_PRODUCTION_TOKEN ? [] : ["PAYPHONE_PRODUCTION_TOKEN"]),
+        ...(process.env.PAYPHONE_PRODUCTION_STORE_ID ? [] : ["PAYPHONE_PRODUCTION_STORE_ID"]),
+      ].filter((v, i, a) => a.indexOf(v) === i),
+    },
+    {
+      provider: "DEUNA",
+      configured: !!(process.env.DEUNA_API_KEY && process.env.DEUNA_MERCHANT_ID),
+      mode: process.env.DEUNA_API_KEY ? "production" : "not_configured",
+      missingVars: [
+        ...(process.env.DEUNA_API_KEY ? [] : ["DEUNA_API_KEY"]),
+        ...(process.env.DEUNA_MERCHANT_ID ? [] : ["DEUNA_MERCHANT_ID"]),
+      ],
+    },
+    {
+      provider: "Stripe",
+      configured: !!process.env.STRIPE_SECRET_KEY,
+      mode: process.env.STRIPE_SECRET_KEY ? "production" : "not_configured",
+      missingVars: [
+        ...(process.env.STRIPE_SECRET_KEY ? [] : ["STRIPE_SECRET_KEY"]),
+      ],
+    },
+  ];
+
+  return providers;
+}
