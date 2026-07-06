@@ -48,7 +48,7 @@ export function AuthView() {
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-background">
       {/* Panel de marca */}
-      <div className="relative lg:w-1/2 bg-[#0a1628] text-white p-8 lg:p-14 flex flex-col justify-between overflow-hidden">
+      <div className="relative lg:w-1/2 bg-[#0a1628] text-white px-6 py-8 sm:px-8 sm:py-10 lg:p-14 flex flex-col justify-between overflow-hidden shrink-0">
         <div
           className="absolute inset-0 opacity-[0.07] pointer-events-none"
           style={{
@@ -66,16 +66,16 @@ export function AuthView() {
             src="/payflow-logo-dark.png"
             srcSet="/payflow-logo-dark.png 2x"
             alt="PayFlow SMT"
-            className="h-10 w-auto object-contain group-hover:opacity-80 transition-opacity"
+            className="h-8 sm:h-10 w-auto object-contain group-hover:opacity-80 transition-opacity"
             draggable={false}
           />
         </button>
 
-        <div className="relative space-y-6 max-w-md">
-          <h1 className="text-3xl lg:text-4xl font-bold leading-tight">
+        <div className="relative space-y-6 max-w-md py-8">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold leading-tight">
             Crea flujos de automatización de WhatsApp y pagos visualmente.
           </h1>
-          <p className="text-white/70 text-base lg:text-lg">
+          <p className="text-white/70 text-sm sm:text-base lg:text-lg">
             Arrastra, suelta y conecta nodos para diseñar automatizaciones
             potentes — sin código. Ejecuta agentes de IA, procesa pagos y
             dispara webhooks desde un solo lienzo.
@@ -89,9 +89,9 @@ export function AuthView() {
             ].map(({ icon: Icon, label }) => (
               <div
                 key={label}
-                className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm"
+                className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs sm:text-sm"
               >
-                <Icon className="size-4 text-emerald-400" />
+                <Icon className="size-4 text-emerald-400 shrink-0" />
                 {label}
               </div>
             ))}
@@ -105,18 +105,20 @@ export function AuthView() {
       </div>
 
       {/* Panel de formulario */}
-      <div className="lg:w-1/2 flex items-center justify-center p-6 lg:p-12 relative">
-        {/* Enlace para volver a la landing */}
-        <button
-          onClick={goLanding}
-          className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="size-4" />
-          Volver a PayFlow SMT
-        </button>
+      <div className="lg:w-1/2 flex flex-col items-center justify-center px-4 py-8 sm:px-6 sm:py-10 lg:p-12 relative">
+        {/* Enlace para volver a la landing — positioned above form on mobile, absolute on desktop */}
+        <div className="w-full max-w-sm mb-6 lg:absolute lg:top-6 lg:left-6 lg:mb-0 lg:max-w-none">
+          <button
+            onClick={goLanding}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="size-4" />
+            Volver a PayFlow SMT
+          </button>
+        </div>
 
         <div className="w-full max-w-sm">
-          <div className="mb-8">
+          <div className="mb-8 mt-2 lg:mt-0">
             <h2 className="text-2xl font-bold tracking-tight">
               {mode === "login" ? "Bienvenido de nuevo" : "Crea tu cuenta"}
             </h2>
