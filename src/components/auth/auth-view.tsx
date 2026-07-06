@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Workflow,
   MessageCircle,
   CreditCard,
   Bot,
@@ -26,10 +25,8 @@ export function AuthView() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Volver a la landing page pública.
   function goLanding() {
     setActiveProject(null);
-    // Reset del estado de auth para mostrar landing.
     window.location.href = "/";
   }
 
@@ -47,8 +44,8 @@ export function AuthView() {
 
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-background">
-      {/* Panel de marca */}
-      <div className="relative lg:w-1/2 bg-[#0a1628] text-white px-6 pt-8 pb-12 sm:px-8 sm:pt-10 sm:pb-16 lg:p-14 flex flex-col justify-between overflow-hidden shrink-0">
+      {/* ─── Panel de marca ─── */}
+      <div className="relative lg:w-1/2 bg-[#0a1628] text-white px-6 pt-8 pb-10 sm:px-8 sm:pt-10 sm:pb-14 lg:p-14 flex flex-col justify-between overflow-hidden shrink-0">
         <div
           className="absolute inset-0 opacity-[0.07] pointer-events-none"
           style={{
@@ -56,7 +53,8 @@ export function AuthView() {
               "radial-gradient(circle at 20% 20%, #00D084 0, transparent 40%), radial-gradient(circle at 80% 70%, #20E68A 0, transparent 45%)",
           }}
         />
-        {/* Logo clickeable que lleva a la landing */}
+
+        {/* Logo */}
         <button
           onClick={goLanding}
           className="relative flex items-center gap-3 group"
@@ -71,7 +69,8 @@ export function AuthView() {
           />
         </button>
 
-        <div className="relative space-y-6 max-w-md py-8">
+        {/* Texto branding */}
+        <div className="relative space-y-6 max-w-md py-6 sm:py-8">
           <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold leading-tight">
             Crea flujos de automatización de WhatsApp y pagos visualmente.
           </h1>
@@ -98,16 +97,19 @@ export function AuthView() {
           </div>
         </div>
 
+        {/* Footer branding */}
         <div className="relative flex items-center gap-2 text-sm text-white/50">
           <CheckCircle2 className="size-4 text-emerald-400" />
           Plataforma de automatización de pagos
         </div>
       </div>
 
-      {/* Panel de formulario */}
-      <div className="lg:w-1/2 flex flex-col items-center justify-center px-4 pt-10 pb-12 sm:px-6 sm:pt-12 sm:pb-16 lg:p-12 relative">
-        {/* Enlace para volver a la landing — positioned above form on mobile, absolute on desktop */}
-        <div className="w-full max-w-sm mb-6 lg:absolute lg:top-6 lg:left-6 lg:mb-0 lg:max-w-none">
+      {/* ─── Panel de formulario ─── */}
+      {/* Mobile: single column, no absolute positioning, clean flow */}
+      {/* Desktop: side by side, link is absolute top-left */}
+      <div className="lg:w-1/2 flex flex-col items-center justify-center px-6 pt-12 pb-12 sm:px-8 sm:pt-14 sm:pb-16 lg:p-12 lg:relative">
+        {/* "Volver" link — normal flow on mobile, absolute on desktop only */}
+        <div className="w-full max-w-sm mb-8 lg:absolute lg:top-6 lg:left-6 lg:mb-0 lg:max-w-none">
           <button
             onClick={goLanding}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -117,8 +119,10 @@ export function AuthView() {
           </button>
         </div>
 
+        {/* Form container */}
         <div className="w-full max-w-sm">
-          <div className="mb-8 mt-4 lg:mt-0">
+          {/* Title — clean spacing, no overlap */}
+          <div className="mb-8">
             <h2 className="text-2xl font-bold tracking-tight">
               {mode === "login" ? "Bienvenido de nuevo" : "Crea tu cuenta"}
             </h2>
