@@ -6,7 +6,11 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string | null;
-  role: string; // "user" | "admin"
+  role: string;
+  clientId?: string | null;
+  clientStatus?: string | null;
+  modules?: string[];
+  active?: boolean;
 }
 
 interface AuthState {
@@ -15,30 +19,44 @@ interface AuthState {
   initialized: boolean;
   fetchUser: () => Promise<void>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  signup: (
-    email: string,
-    password: string,
-    name: string
-  ) => Promise<{ ok: boolean; error?: string }>;
+  signup: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
+}
+
+function safeUser(data: unknown): AuthUser | null {
+  if (!data || typeof data !== "object") return null;
+  const u = data as Record<string, unknown>;
+  if (!u.id || !u.email) return null;
+  return {
+    id: String(u.id),
+    email: String(u.email),
+    name: (u.name as string | null) ?? null,
+    role: (u.role as string) ?? "applicant",
+    clientId: (u.clientId as string | null) ?? null,
+    clientStatus: (u.clientStatus as string | null) ?? null,
+    modules: Array.isArray(u.modules) ? (u.modules as string[]) : [],
+    active: Boolean(u.active),
+  };
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   loading: false,
   initialized: false,
+
   fetchUser: async () => {
     set({ loading: true });
     try {
       const res = await fetch("/api/auth/me");
       const data = await res.json();
-      set({ user: data.user ?? null, initialized: true });
+      set({ user: safeUser(data.user), initialized: true });
     } catch {
       set({ user: null, initialized: true });
     } finally {
       set({ loading: false });
     }
   },
+
   login: async (email, password) => {
     set({ loading: true });
     try {
@@ -47,31 +65,25 @@ export const useAuthStore = create<AuthState>((set) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         set({ loading: false });
-        return { ok: false, error: data.error || "Error al iniciar sesión" };
+        return { ok: false, error: data.error || "Correo o contraseña incorrectos." };
       }
-      // Set user from login response, then re-fetch /api/auth/me for enrichment
-      set({ user: normalizeUser(data.user), initialized: true });
-      // Re-fetch to get full enriched profile (clientId, modules, etc.)
-      try {
-        const meRes = await fetch("/api/auth/me");
-        const meData = await meRes.json();
-        if (meData.user) {
-          set({ user: normalizeUser(meData.user) });
-        }
-      } catch {
-        // Enrichment failed — continue with login response data
-      }
+
+      const data = await res.json();
+      set({ user: safeUser(data.user), initialized: true });
       return { ok: true };
-    } catch {
+    } catch (err) {
       set({ loading: false });
-      return { ok: false, error: "Error de red" };
+      const msg = err instanceof Error ? err.message : "Error desconocido";
+      return { ok: false, error: `Error de conexión: ${msg}` };
     } finally {
       set({ loading: false });
     }
   },
+
   signup: async (email, password, name) => {
     set({ loading: true });
     try {
@@ -80,20 +92,25 @@ export const useAuthStore = create<AuthState>((set) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, name }),
       });
-      const data = await res.json();
+
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         set({ loading: false });
-        return { ok: false, error: data.error || "Error al crear la cuenta" };
+        return { ok: false, error: data.error || "Error al crear la cuenta." };
       }
-      set({ user: data.user, initialized: true });
+
+      const data = await res.json();
+      set({ user: safeUser(data.user), initialized: true });
       return { ok: true };
-    } catch {
+    } catch (err) {
       set({ loading: false });
-      return { ok: false, error: "Error de red" };
+      const msg = err instanceof Error ? err.message : "Error desconocido";
+      return { ok: false, error: `Error de conexión: ${msg}` };
     } finally {
       set({ loading: false });
     }
   },
+
   logout: async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
