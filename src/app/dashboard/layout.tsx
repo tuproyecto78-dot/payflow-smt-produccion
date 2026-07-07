@@ -41,7 +41,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, initialized, fetchUser, logout } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
-  const [redirecting, setRedirecting] = useState(false);
 
   // Fetch user once on mount
   useEffect(() => {
@@ -50,12 +49,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Redirect to /login if not authenticated (only after init)
   useEffect(() => {
-    if (initialized && !user && !redirecting) {
-      setRedirecting(true);
+    if (initialized && !user) {
       const next = encodeURIComponent(pathname || "/dashboard");
       window.location.href = `/login?next=${next}`;
     }
-  }, [initialized, user, redirecting, pathname]);
+  }, [initialized, user, pathname]);
 
   // Loading state
   if (!initialized || !user) {
