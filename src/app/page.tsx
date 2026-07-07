@@ -16,18 +16,16 @@ import { Loader2, Workflow } from "lucide-react";
  */
 export default function Home() {
   const { user, initialized, fetchUser } = useAuthStore();
-  const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
     fetchUser();
   }, [fetchUser]);
 
   useEffect(() => {
-    if (user && !redirecting) {
-      setRedirecting(true);
+    if (user) {
       window.location.href = "/dashboard";
     }
-  }, [user, redirecting]);
+  }, [user]);
 
   if (!initialized) {
     return (
