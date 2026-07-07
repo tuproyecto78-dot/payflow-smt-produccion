@@ -19,8 +19,10 @@ import {
   LogOut,
   Loader2,
   Sparkles,
+  FolderKanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export default function DashboardPage() {
   const { user, initialized, fetchUser, logout } = useAuthStore();
@@ -28,10 +30,58 @@ export default function DashboardPage() {
   const [nav, setNav] = useState<
     "dashboard" | "executions" | "subscriptions" | "payphone" | "agent" | "catalog" | "agenda" | "legal" | "settings"
   >("dashboard");
+  const [projects, setProjects] = useState<any[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   useEffect(() => {
     fetchUser();
   }, [fetchUser]);
+
+  // Load projects from API
+  useEffect(() => {
+    if (user) {
+      loadProjects();
+    }
+  }, [user]);
+
+  async function loadProjects() {
+    setLoadingProjects(true);
+    try {
+      const res = await fetch("/api/projects");
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.projects || []);
+      }
+    } catch {
+      // API might not be available (no DATABASE_URL)
+    } finally {
+      setLoadingProjects(false);
+    }
+  }
+
+  async function createFlow() {
+    try {
+      // Create a project first
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Mi primer flujo", description: "Flujo automático de WhatsApp" }),
+      });
+      if (res.ok) {
+        toast.success("Proyecto creado. Redirigiendo al editor...");
+        await loadProjects();
+      } else {
+        // If API fails (no DB), redirect to a simple flow builder page
+        toast.info("Redirigiendo al creador de flujos...");
+      }
+    } catch {
+      toast.info("Redirigiendo al creador de flujos...");
+    }
+    // Redirect to home which has the full AppShell with CreateFlowDialog
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 1000);
+  }
 
   // Not loaded yet
   if (!initialized) {
@@ -176,7 +226,7 @@ function DashboardContent({ user }: { user: any }) {
             Bienvenido, {user.name || user.email}. Gestiona tus flujos de WhatsApp, pagos e IA.
           </p>
         </div>
-        <Button className="bg-purple-500 hover:bg-purple-600 text-white">
+        <Button onClick={createFlow} className="bg-purple-500 hover:bg-purple-600 text-white">
           <Sparkles className="size-4 mr-2" />
           Crear flujo automático
         </Button>
@@ -190,11 +240,39 @@ function DashboardContent({ user }: { user: any }) {
 
       <div className="mt-8">
         <h2 className="text-lg font-semibold mb-4">Proyectos</h2>
-        <div className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-muted-foreground text-sm">
-            No hay proyectos todavía. Crea tu primer flujo automático para empezar.
-          </p>
-        </div>
+        {loadingProjects ? (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <Loader2 className="size-5 animate-spin mr-2" /> Cargando proyectos…
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-8 text-center">
+            <FolderKanban className="size-10 mx-auto text-muted-foreground/50 mb-3" />
+            <p className="text-muted-foreground text-sm">
+              No hay proyectos todavía. Crea tu primer flujo automático para empezar.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {projects.map((p: any) => (
+              <div key={p.id} className="rounded-xl border bg-card p-5 hover:shadow-md transition-shadow">
+                <div className="flex items-start gap-3">
+                  <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <FolderKanban className="size-5 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-base truncate">{p.name}</h3>
+                    {p.description && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{p.description}</p>}
+                    <div className="flex items-center gap-2 mt-2">
+                      <Badge variant="secondary" className="text-[10px]">
+                        {p._count?.workflows || 0} flujo(s)
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
