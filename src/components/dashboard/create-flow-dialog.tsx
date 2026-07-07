@@ -59,10 +59,13 @@ import { toast } from "sonner";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 type FileStatus = "pendiente" | "cargado" | "procesando" | "listo" | "error";
-type AgentTone = "amable" | "profesional" | "cercano" | "formal";
+type AgentTone = "amable" | "profesional" | "cercano" | "formal" | "comercial" | "empatico";
 type AgentMode = "vender" | "cobrar" | "agendar" | "completo";
 type PaymentProvider = "none" | "payphone" | "mock";
 type AmountMode = "fixed" | "variable";
+type BusinessTypeKey = "medica" | "clinica" | "abogado" | "comercio" | "ecommerce" | "belleza" | "spa" | "restaurante" | "educacion" | "profesional" | "otro";
+type ScheduleDays = "lun-vie" | "lun-sab" | "todos" | "personalizado";
+type ScheduleHours = "08-17" | "09-18" | "10-19" | "24h" | "personalizado";
 type TemplateId =
   | "solo_ia"
   | "ia_agenda"
@@ -184,9 +187,40 @@ const STEP_LABELS = ["Plantilla", "Negocio", "Conocimiento", "Módulos", "Resume
 
 const AGENT_TONES: Array<{ value: AgentTone; label: string; desc: string }> = [
   { value: "amable", label: "Amable", desc: "Cercano y empático" },
-  { value: "profesional", label: "Profesional", desc: "Formal y directo" },
-  { value: "cercano", label: "Cercano", desc: "Informal y conversacional" },
-  { value: "formal", label: "Formal", desc: "Serio y respetuoso" },
+  { value: "profesional", label: "Profesional", desc: "Claro y directo" },
+  { value: "cercano", label: "Cercano", desc: "Cálido y conversacional" },
+  { value: "formal", label: "Formal", desc: "Serio y corporativo" },
+  { value: "comercial", label: "Comercial", desc: "Orientado a ventas" },
+  { value: "empatico", label: "Empático", desc: "Ideal para salud y servicios sensibles" },
+];
+
+const BUSINESS_TYPES: Array<{ value: BusinessTypeKey; label: string; product: string; welcome: string }> = [
+  { value: "medica", label: "Médica", product: "Consulta médica", welcome: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestro consultorio. Puedo ayudarte a agendar tu consulta, resolver dudas y guiarte con el pago." },
+  { value: "clinica", label: "Clínica", product: "Cita médica / consulta especializada", welcome: "¡Hola! 👋 Bienvenido/a a nuestra clínica. Estoy aquí para ayudarte con información, citas y pagos de forma rápida y segura." },
+  { value: "abogado", label: "Abogado", product: "Consulta legal", welcome: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual del despacho. Puedo ayudarte a coordinar una consulta legal y gestionar el pago de forma segura." },
+  { value: "comercio", label: "Comercio", product: "Venta de productos", welcome: "¡Hola! 👋 Bienvenido/a. Estoy aquí para ayudarte con tus compras, disponibilidad de productos y pagos por WhatsApp." },
+  { value: "ecommerce", label: "Ecommerce", product: "Compra online", welcome: "¡Hola! 👋 Bienvenido/a a nuestra tienda online. Puedo ayudarte a elegir productos, confirmar tu pedido y completar el pago." },
+  { value: "belleza", label: "Salón de belleza", product: "Reserva de cita / servicio de belleza", welcome: "¡Hola! 👋 Bienvenido/a a nuestro salón. Puedo ayudarte a reservar una cita, elegir un servicio y confirmar tu pago." },
+  { value: "spa", label: "Spa", product: "Reserva de tratamiento", welcome: "¡Hola! 👋 Bienvenido/a a nuestro spa. Puedo ayudarte a reservar tu tratamiento, revisar horarios disponibles y gestionar tu pago." },
+  { value: "restaurante", label: "Restaurante", product: "Pedido de comida", welcome: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte a tomar tu pedido, confirmar detalles y procesar tu pago por WhatsApp." },
+  { value: "educacion", label: "Educación", product: "Matrícula / mensualidad / curso", welcome: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte con información de cursos, matrículas, mensualidades y pagos." },
+  { value: "profesional", label: "Servicios profesionales", product: "Servicio profesional", welcome: "¡Hola! 👋 Bienvenido/a. Estoy aquí para ayudarte a coordinar tu servicio y gestionar el pago de forma segura." },
+  { value: "otro", label: "Otro", product: "Servicio principal", welcome: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestro negocio. Puedo ayudarte con información, atención y pagos por WhatsApp." },
+];
+
+const SCHEDULE_DAYS_OPTIONS: Array<{ value: ScheduleDays; label: string }> = [
+  { value: "lun-vie", label: "Lunes a Viernes" },
+  { value: "lun-sab", label: "Lunes a Sábado" },
+  { value: "todos", label: "Todos los días" },
+  { value: "personalizado", label: "Personalizado" },
+];
+
+const SCHEDULE_HOURS_OPTIONS: Array<{ value: ScheduleHours; label: string }> = [
+  { value: "08-17", label: "08h00 - 17h00" },
+  { value: "09-18", label: "09h00 - 18h00" },
+  { value: "10-19", label: "10h00 - 19h00" },
+  { value: "24h", label: "24 horas" },
+  { value: "personalizado", label: "Personalizado" },
 ];
 
 const MANUAL_FIELDS: Array<{
@@ -738,11 +772,17 @@ export function CreateFlowDialog({
   // Step 2: Business form
   const [form, setForm] = useState({
     business_name: "",
-    business_type: "",
+    business_type: "" as BusinessTypeKey | "",
+    custom_business_type: "",
     product_or_service: "",
     welcome_message: "",
     whatsapp_number: "",
     business_hours: "",
+    schedule_days: "lun-vie" as ScheduleDays,
+    schedule_hours: "09-18" as ScheduleHours,
+    custom_start_time: "09:00",
+    custom_end_time: "18:00",
+    display_schedule: "",
     agent_tone: "amable" as AgentTone,
   });
 
@@ -772,6 +812,38 @@ export function CreateFlowDialog({
 
   // ─── Reset ──────────────────────────────────────────────────────────
 
+  // Helper: update display schedule from selectors
+  function updateDisplaySchedule(days: ScheduleDays, hours: ScheduleHours, customStart: string, customEnd: string) {
+    const daysLabel = SCHEDULE_DAYS_OPTIONS.find((d) => d.value === days)?.label || "";
+    let hoursLabel: string;
+    if (hours === "personalizado") {
+      hoursLabel = `${customStart}-${customEnd}`;
+    } else {
+      hoursLabel = SCHEDULE_HOURS_OPTIONS.find((h) => h.value === hours)?.label || "";
+    }
+    let display: string;
+    if (days === "todos" && hours === "24h") {
+      display = "Todos los días 24h";
+    } else if (days === "lun-vie") {
+      display = `Lun-Vie ${hoursLabel}`;
+    } else if (days === "lun-sab") {
+      display = `Lun-Sáb ${hoursLabel}`;
+    } else if (days === "todos") {
+      display = `Todos los días ${hoursLabel}`;
+    } else {
+      display = `${daysLabel} ${hoursLabel}`;
+    }
+    setForm((f) => ({
+      ...f,
+      schedule_days: days,
+      schedule_hours: hours,
+      custom_start_time: customStart,
+      custom_end_time: customEnd,
+      display_schedule: display,
+      business_hours: display,
+    }));
+  }
+
   const reset = useCallback(() => {
     setStep(1);
     setSelectedTemplate(null);
@@ -780,10 +852,16 @@ export function CreateFlowDialog({
     setForm({
       business_name: "",
       business_type: "",
+      custom_business_type: "",
       product_or_service: "",
       welcome_message: "",
       whatsapp_number: "",
       business_hours: "",
+      schedule_days: "lun-vie",
+      schedule_hours: "09-18",
+      custom_start_time: "09:00",
+      custom_end_time: "18:00",
+      display_schedule: "",
       agent_tone: "amable",
     });
     setFiles([]);
@@ -1387,107 +1465,232 @@ export function CreateFlowDialog({
 
             {/* ─── Step 2: Negocio ────────────────────────────────────── */}
             {step === 2 && (
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Nombre + Tipo de negocio */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">
+                    <Label className="text-xs font-medium">
                       Nombre del negocio <span className="text-rose-500">*</span>
                     </Label>
                     <Input
                       value={form.business_name}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, business_name: e.target.value }))
-                      }
+                      onChange={(e) => setForm((f) => ({ ...f, business_name: e.target.value }))}
                       placeholder="Mi Negocio S.A."
-                      className="h-9 text-sm"
+                      className="h-10 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Tipo de negocio</Label>
-                    <Input
-                      value={form.business_type}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, business_type: e.target.value }))
-                      }
-                      placeholder="Tienda, Clínica, Restaurante..."
-                      className="h-9 text-sm"
-                    />
+                    <Label className="text-xs font-medium">Tipo de negocio</Label>
+                    <Select
+                      value={form.business_type || undefined}
+                      onValueChange={(v) => {
+                        const bt = BUSINESS_TYPES.find((b) => b.value === v);
+                        setForm((f) => ({
+                          ...f,
+                          business_type: v as BusinessTypeKey,
+                          product_or_service: bt?.product || f.product_or_service,
+                          welcome_message: bt?.welcome || f.welcome_message,
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue placeholder="Selecciona..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BUSINESS_TYPES.map((b) => (
+                          <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
+                {/* Campo adicional si es "Otro" */}
+                {form.business_type === "otro" && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Especifica tu tipo de negocio</Label>
+                    <Input
+                      value={form.custom_business_type}
+                      onChange={(e) => setForm((f) => ({ ...f, custom_business_type: e.target.value }))}
+                      placeholder="Ej: Veterinaria, Taller mecánico..."
+                      className="h-10 text-sm"
+                    />
+                  </div>
+                )}
+
+                {/* Producto o servicio */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Producto o servicio principal</Label>
+                  <Label className="text-xs font-medium">Producto o servicio principal</Label>
                   <Input
                     value={form.product_or_service}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, product_or_service: e.target.value }))
-                    }
+                    onChange={(e) => setForm((f) => ({ ...f, product_or_service: e.target.value }))}
                     placeholder="Consulta médica, Pedido de comida..."
-                    className="h-9 text-sm"
+                    className="h-10 text-sm"
                   />
+                  {form.business_type && (
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <Lightbulb className="size-3" />
+                      Sugerencia automática basada en el tipo de negocio — puedes editar.
+                    </p>
+                  )}
                 </div>
 
+                {/* Mensaje de bienvenida */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Mensaje de bienvenida</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium">Mensaje de bienvenida</Label>
+                    {form.business_type && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] text-purple-600"
+                        onClick={() => {
+                          const bt = BUSINESS_TYPES.find((b) => b.value === form.business_type);
+                          if (bt) setForm((f) => ({ ...f, welcome_message: bt.welcome }));
+                        }}
+                      >
+                        <Lightbulb className="size-3 mr-1" />
+                        Usar sugerido
+                      </Button>
+                    )}
+                  </div>
                   <Textarea
                     value={form.welcome_message}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, welcome_message: e.target.value }))
-                    }
-                    placeholder={`¡Hola! 👋 Bienvenido a ${
-                      form.business_name || "tu negocio"
-                    }.`}
-                    rows={2}
+                    onChange={(e) => setForm((f) => ({ ...f, welcome_message: e.target.value }))}
+                    placeholder="¡Hola! 👋 Bienvenido a tu negocio."
+                    rows={3}
                     className="text-sm"
                   />
+                  {/* Preview WhatsApp */}
+                  {form.welcome_message && (
+                    <div className="mt-2">
+                      <p className="text-[10px] text-muted-foreground mb-1">Así verá el cliente el primer mensaje:</p>
+                      <div className="bg-[#e5ddd5] dark:bg-emerald-950/30 rounded-lg p-2.5 max-w-[85%]">
+                        <div className="bg-[#dcf8c6] dark:bg-emerald-800/40 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm">
+                          <p className="whitespace-pre-wrap">{form.welcome_message}</p>
+                          <span className="text-[8px] text-gray-500 block text-right mt-1">
+                            {new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })} ✓✓
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
+                {/* WhatsApp + Horario */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">
+                    <Label className="text-xs font-medium">
                       Número WhatsApp <span className="text-rose-500">*</span>
                     </Label>
                     <Input
                       value={form.whatsapp_number}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, whatsapp_number: e.target.value }))
-                      }
+                      onChange={(e) => setForm((f) => ({ ...f, whatsapp_number: e.target.value }))}
                       placeholder="+593987654321"
-                      className="h-9 text-sm font-mono"
+                      className={`h-10 text-sm font-mono ${form.whatsapp_number && (!form.whatsapp_number.startsWith("+") || form.whatsapp_number.length < 10) ? "border-rose-400" : ""}`}
                     />
+                    <p className="text-[10px] text-muted-foreground">
+                      Ingresa con código de país. Ej Ecuador: +593987654321
+                    </p>
+                    {form.whatsapp_number && !form.whatsapp_number.startsWith("+") && (
+                      <p className="text-[10px] text-rose-500">Debe iniciar con +</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Horario</Label>
-                    <Input
-                      value={form.business_hours}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, business_hours: e.target.value }))
-                      }
-                      placeholder="Lun-Vie 9-18h"
-                      className="h-9 text-sm"
-                    />
+                    <Label className="text-xs font-medium">Días de atención</Label>
+                    <Select
+                      value={form.schedule_days}
+                      onValueChange={(v) => {
+                        updateDisplaySchedule(v as ScheduleDays, form.schedule_hours, form.custom_start_time, form.custom_end_time);
+                      }}
+                    >
+                      <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {SCHEDULE_DAYS_OPTIONS.map((d) => (
+                          <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
+                {/* Horario */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Horario</Label>
+                    <Select
+                      value={form.schedule_hours}
+                      onValueChange={(v) => {
+                        updateDisplaySchedule(form.schedule_days, v as ScheduleHours, form.custom_start_time, form.custom_end_time);
+                      }}
+                    >
+                      <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {SCHEDULE_HOURS_OPTIONS.map((h) => (
+                          <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {form.schedule_hours === "personalizado" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Hora inicio</Label>
+                        <Input
+                          type="time"
+                          value={form.custom_start_time}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setForm((f) => ({ ...f, custom_start_time: v }));
+                            updateDisplaySchedule(form.schedule_days, "personalizado", v, form.custom_end_time);
+                          }}
+                          className="h-10 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Hora cierre</Label>
+                        <Input
+                          type="time"
+                          value={form.custom_end_time}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setForm((f) => ({ ...f, custom_end_time: v }));
+                            updateDisplaySchedule(form.schedule_days, "personalizado", form.custom_start_time, v);
+                          }}
+                          className="h-10 text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Horario mostrado al cliente */}
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Tono del agente</Label>
+                  <Label className="text-xs font-medium">Horario mostrado al cliente</Label>
+                  <Input
+                    value={form.display_schedule || form.business_hours}
+                    onChange={(e) => setForm((f) => ({ ...f, display_schedule: e.target.value, business_hours: e.target.value }))}
+                    placeholder="Lun-Vie 9h-18h"
+                    className="h-10 text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Generado automáticamente — puedes editarlo.</p>
+                </div>
+
+                {/* Tono del agente */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Tono del agente</Label>
                   <Select
                     value={form.agent_tone}
-                    onValueChange={(v) =>
-                      setForm((f) => ({ ...f, agent_tone: v as AgentTone }))
-                    }
+                    onValueChange={(v) => setForm((f) => ({ ...f, agent_tone: v as AgentTone }))}
                   >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {AGENT_TONES.map((t) => (
                         <SelectItem key={t.value} value={t.value}>
                           <div className="flex flex-col">
                             <span>{t.label}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {t.desc}
-                            </span>
+                            <span className="text-[10px] text-muted-foreground">{t.desc}</span>
                           </div>
                         </SelectItem>
                       ))}
