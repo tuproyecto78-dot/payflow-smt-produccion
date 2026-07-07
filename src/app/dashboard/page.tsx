@@ -64,21 +64,6 @@ export default function DashboardPage() {
     window.location.href = "/";
   }
 
-  // Not loaded yet
-  if (!initialized) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
-        <div className="size-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-          <Workflow className="size-6 text-primary-foreground" />
-        </div>
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="size-4 animate-spin" />
-          Cargando PayFlow SMT…
-        </div>
-      </div>
-    );
-  }
-
   // Not authenticated → redirect to /login
   useEffect(() => {
     if (initialized && !user) {
@@ -86,6 +71,7 @@ export default function DashboardPage() {
     }
   }, [initialized, user]);
 
+  // Not loaded yet or no user
   if (!initialized || !user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
