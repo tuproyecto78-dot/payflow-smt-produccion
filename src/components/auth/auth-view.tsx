@@ -40,8 +40,10 @@ export function AuthView() {
     if (!result.ok) {
       setError(result.error || "Algo salió mal");
     } else {
-      // Login/signup succeeded — redirect to dashboard
-      window.location.href = "/dashboard";
+      // Login/signup succeeded — redirect to next or dashboard
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next") || "/dashboard";
+      window.location.href = next;
     }
   }
 
