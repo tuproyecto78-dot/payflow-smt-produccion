@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
 
 export default function DashboardPage() {
   const { user, initialized, fetchUser, logout } = useAuthStore();
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [redirecting, setRedirecting] = useState(false);
+  const [createFlowOpen, setCreateFlowOpen] = useState(false);
 
   // Fetch user on mount — with 8s timeout
   useEffect(() => {
@@ -82,7 +84,7 @@ export default function DashboardPage() {
   }
 
   async function createFlow() {
-    window.location.href = "/";
+    setCreateFlowOpen(true);
   }
 
   // Loading state
