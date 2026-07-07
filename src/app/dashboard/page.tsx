@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Workflow,
   LayoutDashboard,
@@ -26,23 +24,47 @@ import { toast } from "sonner";
 
 export default function DashboardPage() {
   const { user, initialized, fetchUser, logout } = useAuthStore();
-  const router = useRouter();
   const [nav, setNav] = useState<
     "dashboard" | "executions" | "subscriptions" | "payphone" | "agent" | "catalog" | "agenda" | "legal" | "settings"
   >("dashboard");
   const [projects, setProjects] = useState<any[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [redirecting, setRedirecting] = useState(false);
 
+  // Fetch user on mount — with 8s timeout
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
-  // Load projects from API
+    fetch("/api/auth/me", { signal: controller.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        useAuthStore.setState({
+          user: data.user || null,
+          initialized: true,
+        });
+      })
+      .catch(() => {
+        // Timeout or network error — treat as not logged in
+        useAuthStore.setState({ user: null, initialized: true });
+      })
+      .finally(() => clearTimeout(timeout));
+  }, []);
+
+  // Load projects when user is available
   useEffect(() => {
     if (user) {
       loadProjects();
     }
   }, [user]);
+
+  // Redirect to /login if not authenticated (after init)
+  useEffect(() => {
+    if (initialized && !user && !redirecting) {
+      setRedirecting(true);
+      window.location.href = "/login";
+    }
+  }, [initialized, user, redirecting]);
 
   async function loadProjects() {
     setLoadingProjects(true);
@@ -53,25 +75,17 @@ export default function DashboardPage() {
         setProjects(data.projects || []);
       }
     } catch {
-      // API might not be available (no DATABASE_URL)
+      // API might not be available
     } finally {
       setLoadingProjects(false);
     }
   }
 
   async function createFlow() {
-    // Redirect to home which has the full AppShell with CreateFlowDialog
     window.location.href = "/";
   }
 
-  // Not authenticated → redirect to /login
-  useEffect(() => {
-    if (initialized && !user) {
-      window.location.href = "/login";
-    }
-  }, [initialized, user]);
-
-  // Not loaded yet or no user
+  // Loading state
   if (!initialized || !user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
@@ -99,7 +113,6 @@ export default function DashboardPage() {
     <div className="h-screen flex overflow-hidden bg-background">
       {/* Sidebar */}
       <aside className="w-16 lg:w-60 shrink-0 bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border">
-        {/* Brand */}
         <button
           onClick={() => setNav("dashboard")}
           className="flex items-center gap-2.5 px-3 lg:px-5 h-16 border-b border-sidebar-border hover:bg-sidebar-accent/50 transition-colors"
@@ -113,7 +126,6 @@ export default function DashboardPage() {
           </div>
         </button>
 
-        {/* Nav */}
         <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1 min-h-0 overflow-y-auto">
           <NavBtn icon={<LayoutDashboard className="size-5" />} label="Panel" active={nav === "dashboard"} onClick={() => setNav("dashboard")} />
           <NavBtn icon={<History className="size-5" />} label="Ejecuciones" active={nav === "executions"} onClick={() => setNav("executions")} />
@@ -130,7 +142,7 @@ export default function DashboardPage() {
           <NavBtn icon={<Lock className="size-5" />} label="Contraseña" active={nav === "settings"} onClick={() => setNav("settings")} />
         </nav>
 
-        {/* User */}
+        {/* User + Logout */}
         <div className="border-t border-sidebar-border p-2 lg:p-3">
           <div className="flex items-center gap-2.5 px-1 lg:px-2 py-1.5">
             <div className={cn(
@@ -143,7 +155,7 @@ export default function DashboardPage() {
               <div className="text-sm font-medium truncate flex items-center gap-1.5">
                 {user.name || "Usuario"}
                 {isAdmin && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300 leading-none">
+                  <span className="inline-flex items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300 leading-none">
                     {user.role === "super_admin" ? "SUPER" : "ADMIN"}
                   </span>
                 )}
@@ -155,7 +167,7 @@ export default function DashboardPage() {
               size="icon"
               onClick={async () => {
                 await logout();
-                router.push("/");
+                window.location.href = "/login";
               }}
               className="hidden lg:flex size-8 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               title="Cerrar sesión"
@@ -168,7 +180,7 @@ export default function DashboardPage() {
             size="sm"
             onClick={async () => {
               await logout();
-              router.push("/");
+              window.location.href = "/login";
             }}
             className="lg:hidden w-full text-sidebar-foreground/70 hover:text-sidebar-foreground"
           >
@@ -181,7 +193,7 @@ export default function DashboardPage() {
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
-          {nav === "dashboard" && <DashboardContent user={user} />}
+          {nav === "dashboard" && <DashboardContent user={user} onCreateFlow={createFlow} loadingProjects={loadingProjects} projects={projects} />}
           {nav === "executions" && <PlaceholderView title="Ejecuciones" desc="Historial de ejecuciones de flujos." />}
           {nav === "subscriptions" && <PlaceholderView title="Solicitudes" desc="Solicitudes de suscripción pendientes." />}
           {nav === "payphone" && <PlaceholderView title="PayPhone" desc="Configuración de PayPhone." />}
@@ -196,7 +208,7 @@ export default function DashboardPage() {
   );
 }
 
-function DashboardContent({ user }: { user: any }) {
+function DashboardContent({ user, onCreateFlow, loadingProjects, projects }: { user: any; onCreateFlow: () => void; loadingProjects: boolean; projects: any[] }) {
   return (
     <div className="max-w-6xl mx-auto p-6 lg:p-10">
       <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
@@ -208,14 +220,14 @@ function DashboardContent({ user }: { user: any }) {
             Bienvenido, {user.name || user.email}. Gestiona tus flujos de WhatsApp, pagos e IA.
           </p>
         </div>
-        <Button onClick={createFlow} className="bg-purple-500 hover:bg-purple-600 text-white">
+        <Button onClick={onCreateFlow} className="bg-purple-500 hover:bg-purple-600 text-white">
           <Sparkles className="size-4 mr-2" />
           Crear flujo automático
         </Button>
       </div>
 
       <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-        <StatCard title="Flujos activos" value="0" icon={<Workflow className="size-5" />} />
+        <StatCard title="Flujos activos" value={String(projects.length)} icon={<Workflow className="size-5" />} />
         <StatCard title="Ejecuciones" value="0" icon={<History className="size-5" />} />
         <StatCard title="Pagos" value="$0" icon={<CreditCard className="size-5" />} />
       </div>
@@ -244,11 +256,6 @@ function DashboardContent({ user }: { user: any }) {
                   <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-base truncate">{p.name}</h3>
                     {p.description && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{p.description}</p>}
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge variant="secondary" className="text-[10px]">
-                        {p._count?.workflows || 0} flujo(s)
-                      </Badge>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -265,9 +272,7 @@ function StatCard({ title, value, icon }: { title: string; value: string; icon: 
     <div className="rounded-xl border bg-card p-5">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm text-muted-foreground">{title}</span>
-        <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-          {icon}
-        </div>
+        <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">{icon}</div>
       </div>
       <div className="text-2xl font-bold">{value}</div>
     </div>
@@ -280,33 +285,19 @@ function PlaceholderView({ title, desc }: { title: string; desc: string }) {
       <h1 className="text-2xl font-bold tracking-tight mb-2">{title}</h1>
       <p className="text-muted-foreground">{desc}</p>
       <div className="mt-6 rounded-xl border border-dashed p-8 text-center">
-        <p className="text-muted-foreground text-sm">
-          Esta sección estará disponible próximamente.
-        </p>
+        <p className="text-muted-foreground text-sm">Esta sección estará disponible próximamente.</p>
       </div>
     </div>
   );
 }
 
-function NavBtn({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+function NavBtn({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors justify-center lg:justify-start",
-        active
-          ? "bg-primary text-primary-foreground shadow-sm"
-          : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/60"
+        active ? "bg-primary text-primary-foreground shadow-sm" : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/60"
       )}
     >
       {icon}
