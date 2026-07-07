@@ -79,10 +79,25 @@ export default function DashboardPage() {
     );
   }
 
-  // Not authenticated → redirect to home (shows landing)
-  if (!user) {
-    router.replace("/");
-    return null;
+  // Not authenticated → redirect to /login
+  useEffect(() => {
+    if (initialized && !user) {
+      window.location.href = "/login";
+    }
+  }, [initialized, user]);
+
+  if (!initialized || !user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
+        <div className="size-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
+          <Workflow className="size-6 text-primary-foreground" />
+        </div>
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="size-4 animate-spin" />
+          {initialized ? "Redirigiendo al login…" : "Cargando PayFlow SMT…"}
+        </div>
+      </div>
+    );
   }
 
   const isAdmin = user.role === "super_admin" || user.role === "admin";
