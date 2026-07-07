@@ -14,47 +14,81 @@ export function useScrollColorTransition(rootRef: React.RefObject<HTMLDivElement
     if (typeof window === "undefined") return;
     const root = rootRef.current;
     if (!root) return;
-    const applyTheme = (theme: ThemeName) => { Object.entries(THEMES[theme]).forEach(([k, v]) => root.style.setProperty(k, v)); };
+
+    const applyTheme = (theme: ThemeName) => {
+      Object.entries(THEMES[theme]).forEach(([k, v]) => root.style.setProperty(k, v));
+    };
     applyTheme("dark");
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let ctx: { revert: () => void } | undefined;
+
     let cleanup = () => {};
+    let cancelled = false;
+
     (async () => {
-      const { gsap } = await import("gsap");
-      const { ScrollTrigger } = await import("gsap/ScrollTrigger");
-      gsap.registerPlugin(ScrollTrigger);
-      ctx = gsap.context(() => {
-        const transitionTo = (theme: ThemeName) => {
-          const target = THEMES[theme];
-          const current: Record<string, string> = {};
-          Object.keys(target).forEach((k) => { current[k] = root.style.getPropertyValue(k) || THEMES.dark[k as keyof typeof THEMES.dark]; });
-          const proxy: Record<string, number> = {};
-          const varKeys = Object.keys(target);
-          const fromTheme = { ...current };
-          const toTheme = { ...target };
-          gsap.to(proxy, { duration: prefersReduced ? 0 : 0.6, ease: "power2.inOut", onUpdate: function () {
-            const progress = this.progress();
-            varKeys.forEach((k) => { root.style.setProperty(k, interpolateColor(fromTheme[k], toTheme[k as keyof typeof toTheme], progress)); });
-          } });
+      try {
+        const { gsap } = await import("gsap");
+        const { ScrollTrigger } = await import("gsap/ScrollTrigger");
+        if (cancelled || !rootRef.current) return;
+
+        gsap.registerPlugin(ScrollTrigger);
+        const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        let ctx: { revert: () => void } | undefined;
+        ctx = gsap.context(() => {
+          const transitionTo = (theme: ThemeName) => {
+            const target = THEMES[theme];
+            const current: Record<string, string> = {};
+            Object.keys(target).forEach((k) => {
+              current[k] = root.style.getPropertyValue(k) || THEMES.dark[k as keyof typeof THEMES.dark];
+            });
+            const proxy: Record<string, number> = {};
+            const varKeys = Object.keys(target);
+            const fromTheme = { ...current };
+            const toTheme = { ...target };
+            gsap.to(proxy, {
+              duration: prefersReduced ? 0 : 0.6,
+              ease: "power2.inOut",
+              onUpdate: function () {
+                const progress = this.progress();
+                varKeys.forEach((k) => {
+                  root.style.setProperty(k, interpolateColor(fromTheme[k], toTheme[k as keyof typeof toTheme], progress));
+                });
+              },
+            });
+          };
+          const sections: Record<string, ThemeName> = { hero: "dark", plataforma: "light", beneficios: "grey", precios: "light", nosotros: "dark", footer: "dark" };
+          Object.entries(sections).forEach(([section, theme]) => {
+            const el = root.querySelector(`[data-section='${section}']`);
+            if (el) ScrollTrigger.create({ trigger: el, start: section === "hero" ? "top 80%" : "top 70%", end: "bottom 20%", onEnter: () => transitionTo(theme), onEnterBack: () => transitionTo(theme) });
+          });
+        }, rootRef);
+
+        cleanup = () => {
+          ctx?.revert();
+          ScrollTrigger.getAll().forEach((t) => t.kill());
         };
-        const sections: Record<string, ThemeName> = { hero: "dark", plataforma: "light", beneficios: "grey", precios: "light", nosotros: "dark", footer: "dark" };
-        Object.entries(sections).forEach(([section, theme]) => {
-          const el = root.querySelector(`[data-section='${section}']`);
-          if (el) ScrollTrigger.create({ trigger: el, start: section === "hero" ? "top 80%" : "top 70%", end: "bottom 20%", onEnter: () => transitionTo(theme), onEnterBack: () => transitionTo(theme) });
-        });
-      }, rootRef);
-      cleanup = () => { ctx?.revert(); ScrollTrigger.getAll().forEach((t) => t.kill()); };
+      } catch {
+        // gsap failed — page works without scroll color transitions
+      }
     })();
-    return () => { cleanup(); };
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
   }, [rootRef]);
 }
 
 function interpolateColor(from: string, to: string, t: number): string {
-  const f = parseColor(from); const t2 = parseColor(to);
+  const f = parseColor(from);
+  const t2 = parseColor(to);
   if (!f || !t2) return to;
-  const r = Math.round(f.r + (t2.r - f.r) * t); const g = Math.round(f.g + (t2.g - f.g) * t); const b = Math.round(f.b + (t2.b - f.b) * t); const a = f.a + (t2.a - f.a) * t;
+  const r = Math.round(f.r + (t2.r - f.r) * t);
+  const g = Math.round(f.g + (t2.g - f.g) * t);
+  const b = Math.round(f.b + (t2.b - f.b) * t);
+  const a = f.a + (t2.a - f.a) * t;
   return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
 }
+
 function parseColor(val: string): { r: number; g: number; b: number; a: number } | null {
   const v = val.trim();
   const m = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/);
