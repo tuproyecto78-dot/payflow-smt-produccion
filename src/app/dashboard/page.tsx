@@ -60,27 +60,8 @@ export default function DashboardPage() {
   }
 
   async function createFlow() {
-    try {
-      // Create a project first
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Mi primer flujo", description: "Flujo automático de WhatsApp" }),
-      });
-      if (res.ok) {
-        toast.success("Proyecto creado. Redirigiendo al editor...");
-        await loadProjects();
-      } else {
-        // If API fails (no DB), redirect to a simple flow builder page
-        toast.info("Redirigiendo al creador de flujos...");
-      }
-    } catch {
-      toast.info("Redirigiendo al creador de flujos...");
-    }
     // Redirect to home which has the full AppShell with CreateFlowDialog
-    setTimeout(() => {
-      window.location.href = "/";
-    }, 1000);
+    window.location.href = "/";
   }
 
   // Not loaded yet
