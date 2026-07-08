@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     providerName = "openrouter";
     apiKey = process.env.OPENROUTER_API_KEY;
     const baseUrl = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
-    model = process.env.OPENROUTER_MODEL || "openrouter/free";
+    model = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.2-3b-instruct:free";
     endpoint = `${baseUrl}/chat/completions`;
   } else if (aiProvider === "zai") {
     providerName = "zai";
@@ -122,6 +122,10 @@ export async function POST(req: Request) {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        ...(providerName === "openrouter" && {
+          "HTTP-Referer": "https://payflow-smt.vercel.app",
+          "X-Title": "PayFlow SMT",
+        }),
       },
       body: JSON.stringify({
         model,
