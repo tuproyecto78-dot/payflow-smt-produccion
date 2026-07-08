@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { mapPayPhoneWebhookStatus } from "@/lib/payphone-link";
+import { mapPayphoneWebhookStatus } from "@/lib/payphone-link";
 import { rateLimit, getClientIP, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
 
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     const reference = String(body.Reference || body.reference || "").trim() || null;
 
     // Map PayPhone status to normalized status
-    const newStatus = mapPayPhoneWebhookStatus(statusCode, transactionStatus || undefined);
+    const newStatus = mapPayphoneWebhookStatus(statusCode, transactionStatus || undefined);
 
     // Check for duplicates by providerTransactionId
     let isDuplicate = false;
