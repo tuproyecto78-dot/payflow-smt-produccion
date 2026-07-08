@@ -810,6 +810,56 @@ export function CreateFlowDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
+  // ─── PayPhone config status (Step 4) ────────────────────────────────
+  const [payphoneConfig, setPayphoneConfig] = useState<null | {
+    configured: boolean;
+    env: string;
+    mode: string;
+    tokenConfigured: boolean;
+    storeIdConfigured: boolean;
+    storeIdLastFour: string | null;
+    storeIdMasked: string;
+    externalNotificationEnabled: boolean;
+    preregistrationEnabled: boolean;
+  }>(null);
+  const [payphoneVerifying, setPayphoneVerifying] = useState(false);
+  const [payphoneMessage, setPayphoneMessage] = useState<{ kind: "ok" | "error" | "info"; text: string } | null>(null);
+
+  async function verifyPayphoneConfig() {
+    setPayphoneVerifying(true);
+    setPayphoneMessage(null);
+    try {
+      const res = await fetch("/api/payphone/config/status", { credentials: "include", cache: "no-store" });
+      const data = await res.json();
+      setPayphoneConfig(data);
+      if (data.configured) {
+        setPayphoneMessage({
+          kind: "ok",
+          text: "PayPhone está configurado correctamente para generar links de pago.",
+        });
+      } else {
+        setPayphoneMessage({
+          kind: "error",
+          text: "PayPhone no está configurado. Revisa PAYPHONE_TOKEN y PAYPHONE_STORE_ID en variables de servidor.",
+        });
+      }
+    } catch {
+      setPayphoneMessage({
+        kind: "error",
+        text: "No se pudo verificar la configuración de PayPhone. Intenta nuevamente.",
+      });
+    } finally {
+      setPayphoneVerifying(false);
+    }
+  }
+
+  // Auto-fetch once when entering Step 4 with payphone enabled
+  useEffect(() => {
+    if (step === 4 && modules.uses_payphone && !payphoneConfig && !payphoneVerifying) {
+      void verifyPayphoneConfig();
+    }
+  }, [step, modules.uses_payphone, payphoneConfig, payphoneVerifying]);
+
   // ─── Reset ──────────────────────────────────────────────────────────
 
   // Helper: update display schedule from selectors
@@ -2129,6 +2179,121 @@ export function CreateFlowDialog({
                   </div>
                 )}
 
+                {modules.uses_payphone && (
+                  <div className="rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/40 dark:bg-violet-500/5 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h4 className="text-sm font-semibold flex items-center gap-1.5">
+                        <CreditCard className="size-4 text-violet-500" />
+                        Configuración PayPhone
+                      </h4>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={verifyPayphoneConfig}
+                        disabled={payphoneVerifying}
+                        className="h-7 text-xs"
+                      >
+                        {payphoneVerifying ? (
+                          <Loader2 className="size-3 mr-1 animate-spin" />
+                        ) : (
+                          <Shield className="size-3 mr-1" />
+                        )}
+                        Verificar configuración
+                      </Button>
+                    </div>
+
+                    {payphoneConfig ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                        <ConfigRow
+                          label="Ambiente"
+                          value={
+                            payphoneConfig.env === "production"
+                              ? "Producción"
+                              : payphoneConfig.env === "sandbox"
+                              ? "Pruebas"
+                              : payphoneConfig.env === "disabled"
+                              ? "Desactivado"
+                              : "No configurado"
+                          }
+                          valueClass={
+                            payphoneConfig.env === "production"
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : payphoneConfig.env === "sandbox"
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground"
+                          }
+                        />
+                        <ConfigRow
+                          label="Modo"
+                          value={payphoneConfig.mode === "link" ? "API Link" : payphoneConfig.mode}
+                        />
+                        <ConfigRow
+                          label="Token configurado"
+                          value={payphoneConfig.tokenConfigured ? "Sí" : "No"}
+                          valueClass={
+                            payphoneConfig.tokenConfigured
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-rose-600 dark:text-rose-400"
+                          }
+                        />
+                        <ConfigRow
+                          label="StoreID configurado"
+                          value={payphoneConfig.storeIdConfigured ? "Sí" : "No"}
+                          valueClass={
+                            payphoneConfig.storeIdConfigured
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-rose-600 dark:text-rose-400"
+                          }
+                        />
+                        <ConfigRow
+                          label="StoreID"
+                          value={payphoneConfig.storeIdMasked || "—"}
+                          valueClass="font-mono"
+                        />
+                        <ConfigRow
+                          label="Notificación Externa"
+                          value={payphoneConfig.externalNotificationEnabled ? "Activa" : "No activa"}
+                          valueClass={
+                            payphoneConfig.externalNotificationEnabled
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-muted-foreground"
+                          }
+                        />
+                        <ConfigRow
+                          label="Pre-registro PayPhone"
+                          value={payphoneConfig.preregistrationEnabled ? "Activo" : "No activo"}
+                          valueClass={
+                            payphoneConfig.preregistrationEnabled
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-muted-foreground"
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        Toca "Verificar configuración" para comprobar el estado de PayPhone.
+                      </p>
+                    )}
+
+                    {payphoneMessage && (
+                      <div
+                        className={cn(
+                          "text-xs px-3 py-2 rounded-md border",
+                          payphoneMessage.kind === "ok" &&
+                            "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300",
+                          payphoneMessage.kind === "error" &&
+                            "bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300",
+                          payphoneMessage.kind === "info" &&
+                            "bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-300"
+                        )}
+                      >
+                        {payphoneMessage.text}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-border bg-card p-4 space-y-2">
                   <h4 className="text-sm font-semibold flex items-center gap-1.5">
                     <Bot className="size-4 text-purple-500" />
@@ -2410,6 +2575,25 @@ function ModuleSwitch({
         <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{desc}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
+function ConfigRow({
+  label,
+  value,
+  valueClass,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className={cn("text-xs font-medium", valueClass)}>{value}</span>
     </div>
   );
 }

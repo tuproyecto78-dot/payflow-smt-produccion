@@ -1,24 +1,26 @@
 /**
- * PayFlow SMT — PayPhone configuration helper.
+ * PayFlow SMT — PayPhone configuration helper (legacy compatibility shim).
  *
- * Single source of truth for whether PayPhone is configured, what
- * environment it's in, and what credentials to use.
+ * This module is kept for backward compatibility with code that imports
+ * from `@/lib/payphone-config`. The canonical source of truth is now
+ * `@/lib/payphone/config.ts`.
  *
- * NEVER throws — always returns a valid config object so callers can't
- * crash the app.
+ * The legacy interface is preserved, but it now reads the new env vars:
+ *   - PAYPHONE_TOKEN         (was: PAYPHONE_PRODUCTION_TOKEN / PAYPHONE_SANDBOX_TOKEN)
+ *   - PAYPHONE_STORE_ID      (was: PAYPHONE_PRODUCTION_STORE_ID / PAYPHONE_SANDBOX_STORE_ID)
+ *   - PAYPHONE_ENV           → "production" | "sandbox" | "disabled"
  *
- * Modes:
- *   - "disabled"        → PayPhone fully off, no calls, no validation
- *   - "production"      → uses PAYPHONE_PRODUCTION_TOKEN / STORE_ID
- *   - "sandbox"         → uses PAYPHONE_SANDBOX_TOKEN / STORE_ID
- *   - "not_configured"  → PAYPHONE_ENV empty or invalid (treated as disabled in dev)
+ * Server-only. NEVER import this from a Client Component.
  */
 
-export type PayPhoneEnv =
-  | "production"
-  | "sandbox"
-  | "disabled"
-  | "not_configured";
+import "server-only";
+import {
+  getPayphoneConfig,
+  isDevOrPreview,
+  type PayPhoneEnv,
+} from "./payphone/config";
+
+export type { PayPhoneEnv };
 
 export interface PayPhoneConfig {
   configured: boolean;
@@ -36,76 +38,38 @@ export interface PayPhoneConfig {
   disabled: boolean;
 }
 
-export function isDevOrPreview(): boolean {
-  if (process.env.NODE_ENV !== "production") return true;
-  if (process.env.PAYFLOW_PREVIEW_MODE === "true") return true;
-  if (process.env.VERCEL_ENV === "preview") return true;
-  return false;
-}
+export { isDevOrPreview };
 
+/**
+ * Get the PayPhone configuration (legacy interface).
+ * Reads the new PAYPHONE_TOKEN / PAYPHONE_STORE_ID env vars.
+ */
 export function getPayPhoneConfig(): PayPhoneConfig {
-  const rawEnv = (process.env.PAYPHONE_ENV || "").toLowerCase().trim();
-  const isDev = isDevOrPreview();
+  const cfg = getPayphoneConfig();
 
-  // Feature flags
-  const apiLinkEnabled = process.env.PAYPHONE_API_LINK_ENABLED !== "false";
-  const apiSaleEnabled = process.env.PAYPHONE_API_SALE_ENABLED === "true";
-  const userCheckEnabled = process.env.PAYPHONE_USER_CHECK_ENABLED !== "false";
-  const webhookEnabled = process.env.PAYPHONE_WEBHOOK_ENABLED !== "false";
-
-  let env: PayPhoneEnv;
-  let token: string | null = null;
-  let storeId: string | null = null;
-  let missingVars: string[] = [];
+  // Map canonical env → legacy error code
   let error: PayPhoneConfig["error"] = null;
-  let disabled = false;
-
-  if (rawEnv === "disabled") {
-    // PayPhone explicitly disabled — no calls, no validation, no errors.
-    env = "disabled";
-    disabled = true;
+  if (cfg.env === "disabled") {
     error = "disabled";
-  } else if (rawEnv === "production") {
-    env = "production";
-    token = process.env.PAYPHONE_PRODUCTION_TOKEN || null;
-    storeId = process.env.PAYPHONE_PRODUCTION_STORE_ID || null;
-    if (!token) missingVars.push("PAYPHONE_PRODUCTION_TOKEN");
-    if (!storeId) missingVars.push("PAYPHONE_PRODUCTION_STORE_ID");
-    if (missingVars.length > 0) error = "production_not_configured";
-  } else if (rawEnv === "sandbox") {
-    env = "sandbox";
-    token = process.env.PAYPHONE_SANDBOX_TOKEN || null;
-    storeId = process.env.PAYPHONE_SANDBOX_STORE_ID || null;
-    if (!token) missingVars.push("PAYPHONE_SANDBOX_TOKEN");
-    if (!storeId) missingVars.push("PAYPHONE_SANDBOX_STORE_ID");
-    if (missingVars.length > 0) error = "sandbox_inactive";
-  } else {
-    // PAYPHONE_ENV empty or invalid → treat as disabled in dev, not_configured in prod.
-    env = "not_configured";
-    if (isDev) {
-      disabled = true;
-      error = "disabled";
-    } else {
-      error = "no_env";
-      missingVars = ["PAYPHONE_ENV"];
-    }
+  } else if (!cfg.tokenConfigured || !cfg.storeIdConfigured) {
+    if (cfg.env === "sandbox") error = "sandbox_inactive";
+    else if (cfg.env === "production") error = "production_not_configured";
+    else error = "no_env";
   }
 
-  const configured = !disabled && !!token && !!storeId && env !== "not_configured" && env !== "disabled";
-
   return {
-    configured,
-    env,
-    token,
-    storeId,
-    apiLinkEnabled: configured && apiLinkEnabled,
-    apiSaleEnabled: configured && apiSaleEnabled,
-    userCheckEnabled: configured && userCheckEnabled,
-    webhookEnabled: configured && webhookEnabled,
-    missingVars,
+    configured: cfg.configured,
+    env: cfg.env,
+    token: cfg.token,
+    storeId: cfg.storeId,
+    apiLinkEnabled: cfg.configured && cfg.mode === "link",
+    apiSaleEnabled: false, // PayFlow SMT does not use API Sale
+    userCheckEnabled: cfg.configured,
+    webhookEnabled: cfg.configured && cfg.externalNotificationEnabled,
+    missingVars: cfg.missingVars,
     error,
-    mockMode: !configured && isDev,
-    disabled,
+    mockMode: !cfg.configured && isDevOrPreview(),
+    disabled: cfg.env === "disabled",
   };
 }
 

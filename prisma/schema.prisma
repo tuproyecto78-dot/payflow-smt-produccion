@@ -53,62 +53,193 @@ model ExecutionLog {
   workflowId    String
   workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   status        String    @default("running") // running | success | failed | stopped
-  entriesJson   String    @default("[]") // array of { nodeId, nodeType, nodeLabel, status, message, timestamp, durationMs }
-  variablesJson String    @default("{}") // final variable context
+  entriesJson   String    @default("[]")
+  variablesJson String    @default("{}")
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
 
   @@index([workflowId])
 }
 
-model PaymentTransaction {
-  id                 String   @id @default(cuid())
-  userId             String
-  workflowId         String?
-  workflowRunId      String?
-  provider           String
-  providerPaymentId  String?
-  orderId            String?
-  amount             Float
-  currency           String   @default("USD")
-  status             String   @default("payment_pending")
-  paymentLink        String?
-  rawResponse        String   @default("{}")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  @@index([userId])
-  @@index([workflowId])
-  @@index([provider])
-  @@index([status])
-}
+// ─── Subscriptions & Clients ────────────────────────────────────────────
 
 model SubscriptionRequest {
-  id                 String   @id @default(cuid())
-  selectedPlan       String
-  selectedPlanLabel  String?
-  selectedPlanPrice  Float?
-  fullName           String
-  countryCode        String
-  phoneNumber        String
-  email              String
-  documentId         String
-  businessName       String?
-  businessType       String?
-  country            String?
-  paymentRequired    Boolean  @default(true)
-  paymentProvider    String   @default("payphone") // none | payphone | mock
-  subscriptionStatus String   @default("pending_review")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                            String   @id @default(cuid())
+  // Plan
+  selectedPlan                  String
+  selectedPlanLabel             String?
+  selectedPlanPrice             Float?
+  // Main data
+  fullName                      String
+  countryCode                   String   @default("593")
+  phoneNumber                   String
+  email                         String
+  documentId                    String
+  businessName                  String?
+  businessType                  String?
+  country                       String?
+  city                          String?
+  // Payment provider
+  paymentProvider               String   @default("payphone") // none | payphone | mock
+  payphoneBusinessStatus        String   @default("not_configured") // not_configured | in_process | configured | active
+  payphonePreregistrationStatus String   @default("not_requested") // not_requested | pending | sent | active | error
+  // Optional PayPhone data
+  hasPayphoneBusiness           String   @default("no") // no | yes | in_process
+  startPaymentsConfig           Boolean  @default(false)
+  payphoneRuc                   String?
+  payphoneTradeName             String?
+  payphoneAdminEmail            String?
+  payphoneAdminPhone            String?
+  payphoneCity                  String?
+  payphoneCategory              String?
+  payphoneAdminFirstName        String?
+  payphoneAdminLastName         String?
+  payphoneAdminDocument         String?
+  // Consent
+  consentAccepted               Boolean  @default(false)
+  consentAcceptedAt             DateTime?
+  // Status
+  paymentRequired               Boolean  @default(true)
+  subscriptionStatus            String   @default("pending_review") // pending_review | reviewed | activated | rejected
+  activatedClientId             String?  // FK to ClientAccount.id (set when admin activates)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
 
   @@index([subscriptionStatus])
   @@index([email])
 }
 
+model ClientAccount {
+  id                 String   @id @default(cuid())
+  subscriptionRequestId String? // optional link back to the originating subscription request
+  businessName       String
+  businessType       String?
+  ownerEmail         String
+  ownerPhone         String
+  ownerDocument      String?
+  country            String?
+  city               String?
+  status             String   @default("active") // active | suspended | cancelled
+  paymentProvider    String   @default("payphone")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  paymentAccounts    PaymentAccount[]
+  paymentTransactions PaymentTransaction[]
+
+  @@index([ownerEmail])
+  @@index([status])
+}
+
+model PaymentAccount {
+  id                          String   @id @default(cuid())
+  clientId                    String
+  client                      ClientAccount @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  provider                    String   @default("payphone")
+  providerMode                String   @default("link") // link | sale
+  payphoneBusinessStatus      String   @default("not_configured")
+  payphonePreregistrationStatus String @default("not_requested")
+  tokenConfigured             Boolean  @default(false)
+  storeIdConfigured           Boolean  @default(false)
+  storeIdLastFour             String?
+  externalNotificationStatus  String   @default("not_active") // not_active | active
+  testLinkStatus              String   @default("pending") // pending | generated | error
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([provider])
+}
+
+// ─── Payments ───────────────────────────────────────────────────────────
+
+model PaymentTransaction {
+  id                 String   @id @default(cuid())
+  userId             String
+  clientId           String?
+  workflowId         String?
+  workflowRunId      String?
+  provider           String
+  providerMode       String?  // link | sale
+  integrationType    String?  // API_LINK | API_SALE
+  credentialMode     String?  // GLOBAL_ADMIN_ACCOUNT
+  providerPaymentId  String?  // PayPhone's TransactionId (from webhook)
+  clientTransactionId String? // Our generated id (max 15 chars)
+  storeId            String?
+  orderId            String?
+  amount             Float
+  amountWithoutTax   Float?
+  amountWithTax      Float?
+  tax                Float?
+  service            Float?
+  tip                Float?
+  currency           String   @default("USD")
+  reference          String?
+  status             String   @default("payment_pending") // payment_pending | payment_success | payment_failed | error
+  paymentLink        String?
+  rawRequest         String   @default("{}")
+  rawResponse        String   @default("{}")
+  paidAt             DateTime?
+  client             ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([workflowId])
+  @@index([provider])
+  @@index([status])
+  @@index([clientTransactionId])
+}
+
+model PaymentWebhookEvent {
+  id                  String   @id @default(cuid())
+  provider            String   @default("payphone")
+  paymentTransactionId String?
+  clientTransactionId String?
+  providerTransactionId String?
+  storeId             String?
+  statusCode          Int?
+  transactionStatus   String?
+  amount              Float?
+  currency            String?
+  authorizationCode   String?
+  reference           String?
+  rawEvent            String   @default("{}")
+  processed           Boolean  @default(false)
+  duplicate           Boolean  @default(false)
+  processedAt         DateTime?
+  createdAt           DateTime @default(now())
+
+  @@index([provider])
+  @@index([clientTransactionId])
+  @@index([providerTransactionId])
+}
+
+model PaymentError {
+  id                  String   @id @default(cuid())
+  paymentTransactionId String?
+  provider            String   @default("payphone")
+  errorType           String?
+  errorCode           String?
+  statusCode          Int?
+  providerMessage     String?
+  userMessage         String?
+  adminMessage        String?
+  retryable           Boolean  @default(false)
+  rawError            String   @default("{}")
+  createdAt           DateTime @default(now())
+
+  @@index([paymentTransactionId])
+  @@index([provider])
+}
+
+// ─── Audit ──────────────────────────────────────────────────────────────
+
 model AuditLog {
   id         String   @id @default(cuid())
   userId     String?
+  clientId   String?
   action     String
   entityType String?
   entityId   String?
@@ -118,6 +249,8 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([clientId])
   @@index([action])
   @@index([createdAt])
+  @@index([entityType, entityId])
 }

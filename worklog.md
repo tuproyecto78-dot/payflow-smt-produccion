@@ -1039,3 +1039,148 @@ Stage Summary:
 - Submit a `/api/workflows/create-from-template` con todos los campos del formulario + detected_knowledge + knowledge_files.
 - Self-contained: solo importa de `@/components/ui/*`, `lucide-react`, `sonner`, `@/lib/utils`, y dynamic import de `@/lib/file-content-reader`.
 - Lint clean. TS clean para este archivo.
+
+---
+Task ID: 4-b
+Agent: full-stack-developer
+Task: Reescribir /dashboard/clientes como página admin real con listado de ClientAccounts y diálogo PayPhone
+
+Work Log:
+- Reescribió `src/app/dashboard/clientes/page.tsx` (antes placeholder) como una página admin completa con directiva `"use client"` y ~700 líneas autocontenidas.
+- Solo se modificó este archivo. No se tocaron rutas, componentes, layouts ni dependencias.
+
+Arquitectura del archivo:
+- Imports exclusivos de: `@/components/ui/{badge,button,card,dialog,separator}`, `@/lib/utils` (`cn`), iconos `lucide-react` (`AlertCircle, CheckCircle2, CreditCard, ExternalLink, Loader2, RefreshCw, Search, Send, ShieldCheck, Users`), y hooks de React (`useCallback, useEffect, useState`).
+- Tipos definidos localmente (sin importar tipos externos):
+  - `PayphoneBusinessStatus`, `PayphonePreregistrationStatus`, `TestLinkStatus`, `ExternalNotificationStatus`, `ClientStatus`
+  - `PaymentAccount`, `Client`, `PayphoneServer`, `PayphoneDetail`, `TestLinkResponse`
+- Helpers de render:
+  - `getPayphoneAccount(client)` → encuentra la PaymentAccount payphone (o la primera)
+  - `clientStatusBadge`, `businessStatusBadge`, `toneBadge`, `yesNoBadge` → badges con colores semánticos (emerald=ok, amber=warn, violet=info/PayPhone, rose=err, secondary=muted). NUNCA usa indigo ni blue como color primario; violet solo como acento PayPhone.
+  - `preregistrationLabel(server, pa)` → {text, tone} según `server.preregistrationEnabled` y `pa.payphonePreregistrationStatus` (no habilitado / pendiente / enviado / activado / error)
+  - `testLinkLabel(status)` → pendiente / generado / error
+  - `externalNotifLabel(status)` → no activa / activa
+  - `maskedStoreId(server, pa)` → muestra `****1234` (usa `server.storeIdMasked` o construye desde `storeIdLastFour`). NUNCA muestra el StoreID completo ni el token.
+
+Estado y fetch:
+- `loadClients()` → GET `/api/admin/clients` con `credentials: "include"`, guarda `data.clients`. Soporta `silent:true` para refresh manual.
+- `fetchDetail(clientId)` → GET `/api/admin/clients/[id]/payphone` con `credentials: "include"`, guarda `{client, server, paymentAccount}`.
+- `openPayphoneDialog(client)` → abre dialog, limpia estado, llama `fetchDetail`.
+- `handleVerify()` → re-llama `fetchDetail(activeClient.id)`.
+- `handleMarkActive()` → PATCH `/api/admin/clients/[id]/payphone` con body `{ markActive: true }`, refresca detalle.
+- `handleGenerateLink()` → POST `/api/admin/clients/[id]/test-link`, guarda `TestLinkResponse`, refresca detalle para actualizar `testLinkStatus`.
+- Búsqueda client-side por `businessName / ownerEmail / ownerPhone / city / country`.
+- Manejo de estados: loading (spinner), refreshing (spinner en botón), error (alert con reintentar), empty (tarjeta con mensaje, distingue si hay búsqueda).
+
+UI:
+- Header: icono violeta (Users) + título "Clientes activados" + descripción "Gestión de clientes y configuración PayPhone." Botón "Actualizar" a la derecha.
+- Toolbar: input de búsqueda con icono + contador de clientes.
+- Tabla desktop (md+): columnas Negocio, Email, Teléfono, Ciudad, Estado, Proveedor, Acciones. Botón "Ver PayPhone" con borde violeta.
+- Cards mobile (<md): cada cliente en una card con grid de 2 columnas (email/teléfono/ciudad/proveedor) + botón full-width.
+- Badges de estado de cliente: emerald (active), amber (suspended), rose (cancelled).
+- Badge de proveedor "payphone" en violeta.
+
+Diálogo PayPhone:
+- `DialogContent` `sm:max-w-2xl max-h-[90vh] overflow-y-auto`.
+- Header con icono violeta (CreditCard) + título "Configuración PayPhone" + descripción con businessName y ownerEmail.
+- States: loading (spinner), error (caja rose), body con detalle.
+- Body (`PayphoneDetailBody`):
+  - Caja 1 "Estado PayPhone Business": badge de business status, Token configurado (Sí/No), StoreID configurado (Sí/No), StoreID últimos 4 (`****1234` en `<code>` mono).
+  - Caja 2 "Estado de procesos": Pre-registro (badge según label), Link de prueba (badge), Notificación externa (badge).
+  - Caja 3 info servidor: Entorno, Modo, Configurado (Sí/No). NUNCA muestra token, raw_response ni StoreID completo.
+  - Footer note con icono ShieldCheck: "Por seguridad, los tokens y StoreID completos no se muestran…"
+- Test link success box (`TestLinkSuccessBox`): caja emerald con:
+  - Título "Link de prueba generado" con CheckCircle2
+  - Mensaje del servidor (si viene)
+  - Enlace de pago clickable (anchor `target=_blank rel=noopener`, color violeta, con icono ExternalLink)
+  - Grid de metadata (Monto, Referencia, StoreID mask)
+  - Separator
+  - "Mensaje sugerido para WhatsApp": `"Te comparto tu link seguro de pago PayPhone. Cuando completes el pago, confirmaremos tu transacción."` en caja con borde y italic.
+- Test link error box: caja rose con AlertCircle y mensaje.
+- Acciones (grid 3 columnas en sm+):
+  - "Verificar configuración" (outline, llama `handleVerify`)
+  - "Generar link de prueba" (outline violet, llama `handleGenerateLink`)
+  - "Marcar Business activo" (violet sólido, llama `handleMarkActive`)
+  - Cada botón muestra spinner Loader2 cuando está en progreso.
+- Footer: botón "Cerrar".
+
+Seguridad:
+- NUNCA se muestran tokens, `raw_response`, StoreID completo ni ningún secreto. Solo `storeIdLastFour` enmascarado como `****1234`.
+- Todas las fetch usan rutas relativas y `credentials: "include"`.
+- Los errores se muestran como texto amigable, nunca como JSON crudo.
+
+Responsive:
+- Mobile-first: cards en mobile, tabla en desktop. Padding `p-4 sm:p-6 lg:p-10`. Diálogo `max-w-2xl` en sm+, scroll vertical en `max-h-[90vh]`.
+- Touch-friendly: botones con `h-9` (default) y `size-sm` en tablas, targets ≥36px.
+
+Accesibilidad:
+- `aria-label` en input de búsqueda. `sr-only` implícito en DialogTitle/Description (Radix). HTML semántico (`header`, `table`, `thead`, `tbody`, `code`).
+- Estados de focus visibles (ring-2). Iconos con significado acompañados de texto.
+
+Verification:
+- `bun run lint` → clean (0 errors, 0 warnings). ✓
+- `GET /dashboard/clientes` → HTTP 200 (compile 1613ms, render 138ms). ✓ Sin errores en dev.log.
+- Solo se modificó `src/app/dashboard/clientes/page.tsx`. No se tocaron `/dashboard`, `/dashboard/flujos`, `/login`, `/`, ni ningún otro archivo.
+
+Stage Summary:
+- Página admin /dashboard/clientes completamente funcional: lista ClientAccounts desde `/api/admin/clients`, muestra tabla/cards responsive con negocio/email/teléfono/ciudad/estado/proveedor/acciones.
+- Botón "Ver PayPhone" abre diálogo con configuración PayPhone detallada (estado business, token, storeId enmascarado, pre-registro, link de prueba, notificación externa) y 3 acciones (verificar, generar link de prueba, marcar business activo).
+- Generación de link muestra caja de éxito con enlace clickable + mensaje WhatsApp sugerido.
+- NUNCA expone tokens, raw_response ni StoreID completo. Todo en español. Violet como acento PayPhone (sin indigo/blue primarios). Lint clean. Compile OK.
+
+---
+Task ID: 4-a
+Agent: full-stack-developer
+Task: Reescribir `/src/app/dashboard/solicitudes/page.tsx` como página admin real con tabla de solicitudes, diálogo de historial de auditoría y acción de activación.
+
+Work Log:
+- Reemplazado el stub anterior por una página `"use client"` completa (~470 líneas) que consume los endpoints ya existentes:
+  - `GET /api/subscriptions` → `{ requests: [...] }`
+  - `GET /api/admin/subscriptions/[id]/history` → `{ subscription, history: [...] }`
+  - `POST /api/admin/subscriptions/[id]/activate` → `{ ok, clientId, paymentAccountId, message }`
+- Todas las llamadas `fetch` usan `credentials: "include"` y URLs relativas (requirement del gateway Caddy).
+
+Estructura del archivo:
+- Tipos autocontenidos: `SubscriptionStatus`, `PayphoneBusinessStatus`, `SubscriptionRequest`, `HistoryEntry`, `SubscriptionHistoryPayload`.
+- Mapas de etiquetas en español: `STATUS_LABELS`, `PAYPHONE_STATUS_LABELS`, `ACTION_LABELS` (con los 12 mapeos requeridos y fallback al string raw).
+- Helper `actionLabel(action)` con fallback al valor raw si la acción no está en el mapa.
+- Helper `safeMetadataString(meta)` que filtra claves sensibles (token, raw_response, password, secret, access_token, refresh_token, authorization, apikey, private_key, credential) antes de serializar con `JSON.stringify(..., null, 2)`.
+- Helper `formatDate(iso)` usando `toLocaleString("es-EC")` con try/catch.
+- Helpers `StatusBadge` y `PayphoneStatusBadge` que renderizan `<Badge variant="outline">` con clases Tailwind por color:
+  - Estado: pending_review→amber, reviewed→blue, activated→emerald, rejected→red.
+  - PayPhone Business: not_configured→slate, in_process→amber, configured→blue, active→emerald.
+
+Layout y estados:
+- Header con título "Solicitudes" + descripción "Solicitudes de suscripción pendientes." + botón "Actualizar" (con spinner si refreshing).
+- Estado de carga: spinner centrado con texto "Cargando solicitudes…".
+- Estado de error: card roja con icono AlertCircle, mensaje y botón "Reintentar".
+- Estado vacío: card dashed con icono Inbox y mensaje.
+- Listado de solicitudes:
+  - **Desktop (md+)**: `Card` + `Table` con 8 columnas (Fecha, Nombre, Email, Negocio, Plan, Estado, PayPhone Business, Acciones).
+  - **Mobile (<md)**: tarjetas apiladas con grid 2 columnas de datos y botones de acción debajo.
+- Por cada fila: botón "Ver historial" (siempre) y botón "Activar" (solo si `subscriptionStatus === "pending_review"`). El botón Activar muestra spinner y se deshabilita mientras la petición está en vuelo (`activatingId`).
+- Feedback de activación vía `toast` de `sonner` (success/error) ya montado en el root layout.
+
+Diálogo de historial:
+- `Dialog` con `DialogContent` (max-w-2xl), `DialogHeader`, `DialogTitle` ("Historial de la solicitud") y `DialogDescription` (nombre + email del subscription).
+- Estados: loading (spinner), error (card roja), empty ("No hay eventos registrados"), y lista con `ScrollArea` (max-h-[60vh]).
+- Cada entrada del historial se renderiza como una card con:
+  - Línea superior: etiqueta de acción en español (a la izquierda) + timestamp formateado (a la derecha).
+  - Línea de metadatos: `IP: <ip>` y `Tipo: <entityType>`.
+  - Si la metadata tiene claves no sensibles, se muestra un `<pre>` con `JSON.stringify(..., null, 2)`, fondo `bg-muted/60`, max-h-48 con scroll, font-mono, whitespace-pre-wrap y break-words.
+- NUNCA se exponen tokens, raw_response ni datos sensibles (filtro en `safeMetadataString`).
+
+Restricciones cumplidas:
+- Solo se modificó `/src/app/dashboard/solicitudes/page.tsx`. No se tocaron otros archivos.
+- Solo se importan componentes de `@/components/ui/` (Button, Card, CardContent, Badge, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, ScrollArea, Separator, Table y subcomponentes) e iconos `lucide-react` (AlertCircle, CheckCircle2, History, Inbox, Loader2, RefreshCw). `toast` desde `sonner` (ya usado en otros componentes del proyecto).
+- No se añadieron dependencias nuevas.
+- Sin footer (lo maneja el layout del dashboard).
+- Responsive mobile-first (cards en mobile, tabla en md+).
+
+Verification:
+- `bun run lint` → 0 errores, 0 warnings. ✓
+- `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/dashboard/solicitudes` → `200` (compile 432ms, render 66ms). ✓
+- No hay errores en `dev.log` para esta ruta. ✓
+
+Stage Summary:
+- Página admin `/dashboard/solicitudes` operativa: lista solicitudes de suscripción con tabla responsive, badges de color por estado y por estado PayPhone Business, acción de activación para pendientes (con toast feedback y refresh automático), y diálogo de historial de auditoría con metadata saneada (sin secrets) y etiquetas en español. Lint y compilación limpias.
