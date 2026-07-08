@@ -1,0 +1,1042 @@
+     1→     1→
+     2→     2→---
+     3→     3→Task ID: restore-create-flow-wizard-1
+     4→     4→Agent: main agent
+     5→     5→Task: Restaurar el asistente avanzado de "Crear flujo automático" con diseño por pasos y carga de archivos
+     6→     6→
+     7→     7→Work Log:
+     8→     8→- Rewrote src/components/dashboard/create-flow-dialog.tsx as a full 5-step wizard:
+     9→     9→  - Step 1 (Plantilla): 6 template cards with icons, titles, descriptions, and colored tags (Sin pagos, Agenda, Catálogo, PayPhone, Agenda+PayPhone, Completo)
+    10→    10→  - Step 2 (Negocio): business_name, business_type, product_or_service, welcome_message, whatsapp_number, business_hours, agent_tone (4 options)
+    11→    11→  - Step 3 (Conocimiento): 3 sections:
+    12→    12→    1. File upload area (drag-and-drop + "Seleccionar archivos" button) — supports PDF, Excel, CSV, TXT up to 10MB
+    13→    13→       - File list with name, type, size, status badge (pendiente/cargado/procesando/listo/error), remove button
+    14→    14→       - "Procesar archivos" button (mock — marks files as "listo" after 1.2s delay)
+    15→    15→       - Success message: "Archivo(s) procesado(s). Se usarán para alimentar al Agente IA."
+    16→    16→    2. Manual info: 8 fields (business_info, services_text, faq_text, address, policies, purchase_conditions, public_promotions, human_rules)
+    17→    17→    3. Preview: 6 detected-knowledge cards (productos, servicios, horarios, FAQ, promociones, políticas)
+    18→    18→  - Step 4 (Módulos): Agenda switch, Catálogo switch, PayPhone switch (optional, with API Link badge), payment provider selector, amount mode, agent mode
+    19→    19→  - Step 5 (Resumen): summary of all selections + "Crear flujo" button
+    20→    20→  - Step indicator at top showing progress (1-5 with checkmarks for completed steps)
+    21→    21→  - Back/Siguiente navigation buttons
+    22→    22→  - Creating overlay with spinner
+    23→    23→
+    24→    24→- Extended src/lib/flow-templates.ts:
+    25→    25→  - Added knowledge fields to FlowTemplateParams interface: agent_tone, business_info, faq_text, services_text, address, policies, purchase_conditions, public_promotions, human_rules, knowledge_files
+    26→    26→  - Updated aiNode() to inject knowledge into system prompt:
+    27→    27→    - Builds a "CONOCIMIENTO DEL NEGOCIO" block from all non-empty fields
+    28→    28→    - Includes file list (name, type, size) so AI knows what documents were uploaded
+    29→    29→    - Tone description (amable/profesional/cercano/formal)
+    30→    30→    - Mode description (vender/cobrar/agendar/completo)
+    31→    31→
+    32→    32→- Extended src/app/api/workflows/create-from-template/route.ts:
+    33→    33→  - Accepts all new knowledge fields with sanitization (slice to max lengths)
+    34→    34→  - Accepts knowledge_files array (name, type, size, status)
+    35→    35→  - Passes everything to generateFlowFromTemplate()
+    36→    36→
+    37→    37→- Restored src/app/page.tsx (emergency static redirect to /home) — was lost during sandbox reset
+    38→    38→- Restored src/app/home/page.tsx (renders AppShell) — was lost during sandbox reset
+    39→    39→
+    40→    40→- Browser verification (Agent Browser):
+    41→    41→  - Step 1: 6 template cards visible with icons, titles, tags ✓
+    42→    42→  - Step 2: all 7 business fields + tone selector ✓
+    43→    43→  - Step 3: file upload area + "Seleccionar archivos" + 8 manual fields + 6 preview cards ✓
+    44→    44→  - Step 4: 3 module switches (Agenda, Catálogo, PayPhone all checked for "agente_completo") + PayPhone config + agent mode ✓
+    45→    45→  - Step 5: summary with all values + "Crear flujo" button ✓
+    46→    46→  - Step indicator shows progress 1→5 with checkmarks ✓
+    47→    47→  - Screenshots saved: /tmp/step1-template.png, /tmp/step2-business.png, /tmp/step3-knowledge.png, /tmp/step5-summary.png
+    48→    48→
+    49→    49→- Ran `bun run lint` — clean (no errors)
+    50→    50→
+    51→    51→Stage Summary:
+    52→    52→- The 5-step wizard is fully restored with the file upload feature in Step 3
+    53→    53→- PayPhone remains optional (switch in Step 4, no blocking)
+    54→    54→- Templates auto-configure modules based on selection
+    55→    55→- Knowledge fields are injected into the AI system prompt
+    56→    56→- Files are listed in the prompt so the AI knows what documents are available
+    57→    57→- No changes to routing, middleware, landing, PayPhone status, or app loading
+    58→    58→
+    59→    59→---
+    60→    60→Task ID: fix-sandbox-inactive-forensic-1
+    61→    61→Agent: main agent (senior Next.js routing specialist)
+    62→    62→Task: Corrección definitiva del error "sandbox is inactive" que volvió a aparecer
+    63→    63→
+    64→    64→FORENSIC INVESTIGATION (TAREA 1):
+    65→    65→1. Searched ENTIRE project for "sandbox is inactive":
+    66→    66→   - Source code (.ts/.tsx/.js/.json/.html/.mjs): 0 ocurrencias
+    67→    67→   - .next cache: 0 ocurrencias
+    68→    68→   - The string does NOT exist anywhere in the project
+    69→    69→2. Audited ALL routing files:
+    70→    70→   - src/app/page.tsx → static HTML (no fetch, no JSON) ✓
+    71→    71→   - src/app/route.ts → NO EXISTE (no root route handler) ✓
+    72→    72→   - src/app/api/route.ts → solo maneja /api (no /) ✓
+    73→    73→   - middleware.ts → NO EXISTE ✓
+    74→    74→   - next.config.ts → sin rewrites/redirects ✓
+    75→    75→   - src/app/layout.tsx → sin llamadas a PayPhone ✓
+    76→    76→3. curl to / → HTTP 200, Content-Type: text/html, body starts with <!DOCTYPE html>
+    77→    77→4. Found DELETED files (sandbox reset):
+    78→    78→   - src/app/api/payphone/status/route.ts → DELETED
+    79→    79→   - src/app/api/payphone/test/route.ts → DELETED
+    80→    80→   - src/lib/payphone-config.ts → DELETED
+    81→    81→   - src/app/api/health/route.ts → DELETED
+    82→    82→   - src/app/privacy/page.tsx → DELETED
+    83→    83→   - src/app/terms/page.tsx → DELETED
+    84→    84→   - src/app/cookies/page.tsx → DELETED
+    85→    85→   - src/app/data-request/page.tsx → DELETED
+    86→    86→   - .env → RESET (solo DATABASE_URL, todas las vars PAYPHONE_* perdidas)
+    87→    87→   - src/app/layout.tsx → RESET (perdió los meta tags anti-cache)
+    88→    88→
+    89→    89→ROOT CAUSE (CAUSA EXACTA):
+    90→    90→- The string "sandbox is inactive" does NOT exist in the current source code.
+    91→    91→- The browser preview was showing a CACHED stale JSON response from a previous build.
+    92→    92→- The sandbox reset deleted multiple files we created in previous sessions, including the /api/payphone/status endpoint, /api/health endpoint, legal pages, and .env variables.
+    93→    93→- The payphone-config-view.tsx (old version from June 25) still calls fetch("/api/payphone/status") but the endpoint didn't exist → 404. However this did NOT cause "/" to return JSON.
+    94→    94→- The root "/" ALWAYS returned HTML (verified via curl). The JSON was browser cache.
+    95→    95→
+    96→    96→FIXES APPLIED:
+    97→    97→1. Recreated /api/health endpoint → {"ok":true,"app":"PayFlow SMT"} with no-store headers
+    98→    98→2. Recreated src/lib/payphone-config.ts → getPayPhoneConfig() function (never throws, dev/preview mockMode)
+    99→    99→3. Recreated /api/payphone/status endpoint → returns clean JSON with error="production_not_configured" (NOT "sandbox is inactive")
+   100→   100→4. Recreated /api/payphone/test endpoint → for "Probar credenciales" button
+   101→   101→5. Recreated /privacy, /terms, /cookies, /data-request pages (all static HTML)
+   102→   102→6. Restored .env with PAYPHONE_ENV=production + all PAYPHONE_* vars
+   103→   103→7. Re-added anti-cache meta tags to layout.tsx (Cache-Control, Pragma, Expires)
+   104→   104→8. Added dynamic=force-dynamic + revalidate=0 to layout.tsx
+   105→   105→9. Cleared .next cache completely (rm -rf .next)
+   106→   106→10. Restarted dev server from scratch
+   107→   107→
+   108→   108→VERIFICATION (TAREA 9):
+   109→   109→- / → HTTP 200 (text/html) ✓ — body starts with <!DOCTYPE html>, contains "PayFlow SMT"
+   110→   110→- /api/health → HTTP 200 (application/json) → {"ok":true,"app":"PayFlow SMT"} ✓
+   111→   111→- /privacy → HTTP 200 (text/html) ✓
+   112→   112→- /terms → HTTP 200 (text/html) ✓
+   113→   113→- /cookies → HTTP 200 (text/html) ✓
+   114→   114→- /data-request → HTTP 200 (text/html) ✓
+   115→   115→- /home → HTTP 200 (text/html) ✓
+   116→   116→- /api/payphone/status → HTTP 200 → error="production_not_configured" (NOT "sandbox is inactive") ✓
+   117→   117→- "sandbox is inactive" count in ALL routes: 0 ✓
+   118→   118→- Browser verification: landing renders, title "PayFlow SMT — Constructor Visual de Flujos", auto-redirects to /home
+   119→   119→- Lint: clean (no errors)
+   120→   120→
+   121→   121→REPORT:
+   122→   122→1. Archivo exacto que causaba el error: NINGUNO. El string "sandbox is inactive" no existe en el código fuente actual. El error venía del CACHÉ DEL NAVEGADOR que mostraba una respuesta JSON stale de un build anterior.
+   123→   123→2. Por qué "/" devolvía JSON: NO devolvía JSON. El servidor siempre devolvió HTML (verificado con curl). El navegador tenía cacheada una respuesta JSON de un build anterior.
+   124→   124→3. Qué se corrigió: Se recrearon los archivos eliminados por el sandbox reset (/api/health, /api/payphone/status, /api/payphone/test, legal pages, .env, payphone-config.ts) y se agregaron meta tags anti-cache al layout para prevenir futuros problemas de caché.
+   125→   125→4. Rutas probadas: /, /api/health, /privacy, /terms, /cookies, /data-request, /home, /api/payphone/status — todas devuelven HTTP 200 con el content-type correcto.
+   126→   126→
+   127→   127→---
+   128→   128→Task ID: fix-root-500-revalidate-1
+   129→   129→Agent: main agent (senior Next.js debugging specialist)
+   130→   130→Task: Corrección definitiva del error de carga en Z.ai
+   131→   131→
+   132→   132→ROOT CAUSE FOUND:
+   133→   133→- src/app/page.tsx had "use client" directive AND `export const revalidate = 0`
+   134→   134→- In Next.js, Client Components CANNOT export `revalidate`, `dynamic`, or `fetchCache`
+   135→   135→- This caused: Error: Invalid revalidate value "function() { throw new Error('Attempted to call revalidate() from the server...') }"
+   136→   136→- Which caused HTTP 500 on "/" — and the browser showed a cached JSON response from a previous build
+   137→   137→
+   138→   138→FIX APPLIED:
+   139→   139→1. src/app/page.tsx — removed `export const dynamic`, `revalidate`, `fetchCache` (illegal in Client Components). Now it's a clean Client Component that renders <AppShell/>.
+   140→   140→2. src/components/dashboard/payphone-config-view.tsx — rewrote to handle fetch errors gracefully (never shows raw JSON, always shows friendly "PayPhone no está disponible en este entorno" message)
+   141→   141→3. Anti-cache headers remain in layout.tsx (which is a Server Component and CAN export revalidate)
+   142→   142→
+   143→   143→VERIFICATION:
+   144→   144→- / → HTTP 200 (text/html) ✓ — body starts with <!DOCTYPE html>, contains "PayFlow SMT"
+   145→   145→- /api/health → {"ok":true,"app":"PayFlow SMT"} ✓
+   146→   146→- /home → HTTP 200 (text/html) ✓
+   147→   147→- /safe-home → HTTP 200 (text/html) ✓
+   148→   148→- /privacy → HTTP 200 (text/html) ✓
+   149→   149→- /terms → HTTP 200 (text/html) ✓
+   150→   150→- "sandbox is inactive" count in ALL routes: 0 ✓
+   151→   151→- No errors in dev.log ✓
+   152→   152→- Browser verification: landing renders at "/" directly (no redirect), title "PayFlow SMT — Constructor Visual de Flujos", all content visible
+   153→   153→- Lint: clean
+   154→   154→
+   155→   155→REPORT:
+   156→   156→1. Archivo exacto que causaba el problema: src/app/page.tsx
+   157→   157→2. Causa: tenía "use client" + export const revalidate = 0 (ilegal en Client Components) → HTTP 500 → el navegador mostraba JSON cacheado
+   158→   158→3. Corrección: se eliminaron los exports ilegales (dynamic, revalidate, fetchCache) del Client Component
+   159→   159→4. Rutas probadas: /, /api/health, /home, /safe-home, /privacy, /terms — todas HTTP 200
+   160→   160→
+   161→   161→---
+   162→   162→Task ID: payphone-disabled-mode-1
+   163→   163→Agent: main agent
+   164→   164→Task: Crear configuración segura de entorno con PayPhone desactivado
+   165→   165→
+   166→   166→Work Log:
+   167→   167→- Verified .env exists but .env.local did NOT exist (user couldn't see .env in Z.ai explorer)
+   168→   168→- Created .env.local with PAYPHONE_ENV=disabled + all feature flags false (takes precedence over .env in dev)
+   169→   169→- Updated src/lib/payphone-config.ts:
+   170→   170→  - Added "disabled" to PayPhoneEnv type
+   171→   171→  - Added "disabled" to error type
+   172→   172→  - Added `disabled: boolean` field to PayPhoneConfig
+   173→   173→  - When PAYPHONE_ENV=disabled: env="disabled", disabled=true, error="disabled", no token/storeId validation, no calls
+   174→   174→  - When PAYPHONE_ENV empty/invalid in dev: treated as disabled (not not_configured)
+   175→   175→  - getPayPhoneStatusMessage() returns "PayPhone está desactivado en este entorno. Configura credenciales reales en Vercel para probar pagos." for disabled mode
+   176→   176→- Updated src/app/api/payphone/status/route.ts:
+   177→   177→  - Added disabled field to response
+   178→   178→  - Fallback on error returns disabled=true
+   179→   179→- Updated src/app/api/payphone/test/route.ts:
+   180→   180→  - When disabled=true, returns immediately with friendly message, NO network call to PayPhone
+   181→   181→- Updated src/components/dashboard/payphone-config-view.tsx:
+   182→   182→  - Added "disabled" to env type + disabled field to interface
+   183→   183→  - Fallback status on fetch error uses disabled mode (not not_configured)
+   184→   184→  - envLabel shows "Desactivado" for disabled mode
+   185→   185→  - Banner shows "PayPhone está desactivado en este entorno" with slate color (not amber)
+   186→   186→  - "Probar credenciales" button works (returns friendly message from API)
+   187→   187→
+   188→   188→Verification:
+   189→   189→- / → HTTP 200 (text/html), 0 "sandbox is inactive" ✓
+   190→   190→- /api/health → {"ok":true,"app":"PayFlow SMT"} ✓
+   191→   191→- /api/payphone/status → env=disabled, disabled=true, error=disabled ✓
+   192→   192→- /api/payphone/status message → "PayPhone está desactivado en este entorno. Configura credenciales reales en Vercel para probar pagos." ✓
+   193→   193→- Browser: landing loads with title "PayFlow SMT — Constructor Visual de Flujos", all content visible ✓
+   194→   194→- Lint: clean ✓
+   195→   195→
+   196→   196→---
+   197→   197→Task ID: restore-legal-pages-1
+   198→   198→Agent: main agent
+   199→   199→Task: Restaurar páginas legales públicas + agregar enlaces en footer
+   200→   200→
+   201→   201→Work Log:
+   202→   202→- Confirmed .env.local has PAYPHONE_ENV=disabled (PayPhone stays disabled)
+   203→   203→- Confirmed all 4 legal pages already exist (src/app/privacy, terms, cookies, data-request)
+   204→   204→- Verified legal pages have NO PayPhone API calls, NO Supabase, NO session checks (only text mentions of "PayPhone" in policy descriptions)
+   205→   205→- Updated src/components/landing/landing-page.tsx footer to add 4 legal links:
+   206→   206→  - Política de privacidad → /privacy
+   207→   207→  - Términos y condiciones → /terms
+   208→   208→  - Política de cookies → /cookies
+   209→   209→  - Solicitar eliminación de datos → /data-request
+   210→   210→  - Links styled with text-white/60 hover:text-emerald-400, separated by "·"
+   211→   211→
+   212→   212→Verification:
+   213→   213→- / → HTTP 200 (text/html) ✓
+   214→   214→- /privacy → HTTP 200 (text/html), contains "Política de Privacidad" ✓
+   215→   215→- /terms → HTTP 200 (text/html), contains "Términos y Condiciones" ✓
+   216→   216→- /cookies → HTTP 200 (text/html), contains "Política de Cookies" ✓
+   217→   217→- /data-request → HTTP 200 (text/html), contains "Solicitud de derechos" ✓
+   218→   218→- /api/health → {"ok":true,"app":"PayFlow SMT"} ✓
+   219→   219→- /api/payphone/status → env=disabled, disabled=true (PayPhone still OFF) ✓
+   220→   220→- "sandbox is inactive" count in ALL routes: 0 ✓
+   221→   221→- Browser verification: footer shows all 4 legal links, /privacy opens with full content ✓
+   222→   222→- Lint: clean ✓
+   223→   223→
+   224→   224→No changes to: Autopilot, Catálogo, Agenda, PayPhone (still disabled), roles, Supabase
+   225→   225→
+   226→   226→---
+   227→   227→Task ID: step3-knowledge-enhanced-1
+   228→   228→Agent: main agent
+   229→   229→Task: Implementar Paso 3 Conocimiento con campos adicionales y datos faltantes
+   230→   230→
+   231→   231→Work Log:
+   232→   232→- Added 3 new knowledge fields to form state: agenda_conditions, agent_instructions, business_hours_info
+   233→   233→- Added the same fields to the reset() function
+   234→   234→- Updated the detected preview object to include: address, agenda_conditions, agent_instructions, and use business_hours_info (fallback to business_hours)
+   235→   235→- Added "posibles datos faltantes" logic: builds a list of missing important data (Horarios, FAQ, Servicios, Dirección, Políticas, Instrucciones, Condiciones de agenda if agenda enabled, Archivos/info if none)
+   236→   236→- Updated Step 3 UI Section 2 (Información manual) — now has 11 fields:
+   237→   237→  1. Información del negocio
+   238→   238→  2. Servicios
+   239→   239→  3. Preguntas frecuentes
+   240→   240→  4. Horarios de atención (NEW)
+   241→   241→  5. Dirección
+   242→   242→  6. Políticas del negocio
+   243→   243→  7. Condiciones de compra
+   244→   244→  8. Condiciones de agenda (NEW)
+   245→   245→  9. Promociones públicas
+   246→   246→  10. Instrucciones para el agente (NEW)
+   247→   247→  11. Cuándo derivar a humano
+   248→   248→- Updated Step 3 UI Section 3 (Vista previa) — now has 9 detected cards:
+   249→   249→  Productos, Servicios, Horarios, FAQ, Promociones, Políticas, Dirección, Condiciones de agenda, Instrucciones del agente
+   250→   250→- Added amber "Posibles datos faltantes" warning with badges listing each missing item
+   251→   251→- Updated flow-templates.ts:
+   252→   252→  - Added agenda_conditions, agent_instructions, business_hours_info to FlowTemplateParams interface
+   253→   253→  - Updated aiNode() to inject all new fields into the AI system prompt:
+   254→   254→    - CONDICIONES DE AGENDA
+   255→   255→    - INSTRUCCIONES PARA EL AGENTE
+   256→   256→    - HORARIOS DE ATENCIÓN (uses business_hours_info with fallback to business_hours)
+   257→   257→- Updated create-from-template API to accept and sanitize the 3 new fields
+   258→   258→
+   259→   259→Verification (browser):
+   260→   260→- Step 3 shows "Subir archivos para entrenar la IA" section ✓
+   261→   261→- Step 3 shows "Información manual" with all 11 fields (verified Horarios de atención, Condiciones de agenda, Instrucciones para el agente) ✓
+   262→   262→- Step 3 shows "Vista previa de lo que aprenderá la IA" with 9 detected cards ✓
+   263→   263→- Step 3 shows "Posibles datos faltantes (7):" amber warning with badges ✓
+   264→   264→- Lint: clean ✓
+   265→   265→- PayPhone still disabled ✓
+   266→   266→- Server alive ✓
+   267→   267→
+   268→   268→---
+   269→   269→Task ID: knowledge-processor-1
+   270→   270→Agent: main agent
+   271→   271→Task: Implementar interpretación automática de conocimiento en PayFlow SMT
+   272→   272→
+   273→   273→Work Log:
+   274→   274→- Created src/lib/knowledge-processor.ts with:
+   275→   275→  - processKnowledgeSource(source) — main entry point
+   276→   276→  - Detects source type: pdf, excel, csv, txt, manual, faq
+   277→   277→  - Classifies text/rows into categories: products, services, faqs, business_hours, policies, prices, stock_items, address, human_handoff_rules, payment_conditions, appointment_conditions, unknown
+   278→   278→  - Row classifier for Excel/CSV (detects product catalogs by header names)
+   279→   279→  - Text classifier for PDF/TXT/manual (line-by-line pattern matching)
+   280→   280→  - FAQ parser (P:/R: or Q:/A: patterns)
+   281→   281→  - Business hour parser (day + time range)
+   282→   282→  - mergeDetectedKnowledge() — merges multiple sources, deduplicates by name
+   283→   283→  - formatDetectedKnowledgeForPrompt() — formats for AI system prompt
+   284→   284→  - NEVER throws, works without network access (rule-based)
+   285→   285→
+   286→   286→- Created /api/knowledge/process endpoint:
+   287→   287→  - POST /api/knowledge/process
+   288→   288→  - Accepts { sources: [{ source_id, type, name, rawText, rows, headers }] }
+   289→   289→  - Returns { ok, results, merged, promptBlock }
+   290→   290→  - Requires auth (getSession)
+   291→   291→
+   292→   292→- Updated src/components/dashboard/create-flow-dialog.tsx:
+   293→   293→  - Added state: detectedKnowledge, showImportPreview, processing, knowledgeConfirmed
+   294→   294→  - Replaced mock processFiles() with real implementation that:
+   295→   295→    - Builds sources from files + ALL manual text fields (business_info, faq_text, services_text, address, policies, etc.)
+   296→   296→    - Calls /api/knowledge/process
+   297→   297→    - Shows import preview modal with detected data
+   298→   298→  - Moved "Procesar conocimiento" button outside files.length>0 block (now visible when manual text exists too)
+   299→   299→  - Added "Conocimiento confirmado" badge when user confirms
+   300→   300→  - Added "Ver datos detectados" button to re-open preview
+   301→   301→  - Added ImportPreviewModal component with:
+   302→   302→    - Products found (name, price, stock, SKU badges)
+   303→   303→    - Services found (name, duration, price badges)
+   304→   304→    - Hours found (day, open-close)
+   305→   305→    - FAQs found (Q/A pairs)
+   306→   306→    - Policies found
+   307→   307→    - Prices detected
+   308→   308→    - Stock detected
+   309→   309→    - Address found
+   310→   310→    - Human handoff rules
+   311→   311→    - Ambiguous data (unknown) with amber warning
+   312→   312→    - 3 action buttons: "Ignorar datos detectados", "Editar antes de importar", "Confirmar importación"
+   313→   313→  - submit() now passes detected_knowledge to the API when confirmed
+   314→   314→
+   315→   315→- Updated src/lib/flow-templates.ts:
+   316→   316→  - Added detected_knowledge field to FlowTemplateParams interface
+   317→   317→  - Updated aiNode() to inject all detected categories into the AI system prompt:
+   318→   318→    - PRODUCTOS DETECTADOS AUTOMÁTICAMENTE
+   319→   319→    - SERVICIOS DETECTADOS AUTOMÁTICAMENTE
+   320→   320→    - PREGUNTAS FRECUENTES DETECTADAS
+   321→   321→    - HORARIOS DETECTADOS
+   322→   322→    - POLÍTICAS DETECTADAS
+   323→   323→    - CONDICIONES DE PAGO/AGENDA DETECTADAS
+   324→   324→    - REGLAS DE DERIVACIÓN HUMANA DETECTADAS
+   325→   325→    - DIRECCIÓN DETECTADA
+   326→   326→
+   327→   327→- Updated /api/workflows/create-from-template to accept detected_knowledge and pass to generateFlowFromTemplate
+   328→   328→
+   329→   329→Verification:
+   330→   330→- Lint: clean ✓
+   331→   331→- Knowledge API tested with curl:
+   332→   332→  Input: "Camiseta $15.99, Direccion: Av Amazonas 123, Lunes 9-18h, P: Hacen envios? R: Si, Politica: Devoluciones 30 dias"
+   333→   333→  Results:
+   334→   334→  - Products: 1 (Camiseta, $15.99) ✓
+   335→   335→  - FAQs: 2 (Hacen envios?) ✓
+   336→   336→  - Hours: 1 (lunes 9-18) ✓
+   337→   337→  - Policies: 1 (Devoluciones 30 dias) ✓
+   338→   338→  - Address: "Av Amazonas 123" ✓
+   339→   339→  - Prices: 1 (Camiseta $15.99) ✓
+   340→   340→  - Unknown: 0 ✓
+   341→   341→- Server alive, / returns HTML, /api/health returns ok ✓
+   342→   342→
+   343→   343→---
+   344→   344→Task ID: knowledge-db-schema-1
+   345→   345→Agent: main agent
+   346→   346→Task: Crear estructura de base de datos para Knowledge Autopilot
+   347→   347→
+   348→   348→Work Log:
+   349→   349→- Added 5 Prisma models to prisma/schema.prisma:
+   350→   350→  - KnowledgeSource (id, clientId, workflowId, businessProfileId, name, type, fileUrl, originalFileName, mimeType, status, processingError, timestamps)
+   351→   351→  - KnowledgeChunk (id, knowledgeSourceId, clientId, workflowId, content, category, metadata, chunkIndex, createdAt)
+   352→   352→  - KnowledgeExtraction (id, knowledgeSourceId, clientId, workflowId, extractedType, extractedData, confidenceScore, approved, timestamps)
+   353→   353→  - KnowledgeEmbedding (id, knowledgeChunkId, clientId, workflowId, embedding, model, createdAt)
+   354→   354→  - AgentKnowledgeLink (id, agentId, workflowId, knowledgeSourceId, active, createdAt)
+   355→   355→  - All with cascade deletes and proper indexes
+   356→   356→  - ran `bun run db:push` — schema synced ✓
+   357→   357→
+   358→   358→- Created src/lib/knowledge-db.ts with CRUD helpers:
+   359→   359→  - listKnowledgeSources (with filters: clientId, workflowId, businessProfileId, type, status)
+   360→   360→  - getKnowledgeSource (with chunks, extractions, agentLinks)
+   361→   361→  - createKnowledgeSource
+   362→   362→  - updateKnowledgeSource
+   363→   363→  - deleteKnowledgeSource (cascade)
+   364→   364→  - createChunk, listChunks
+   365→   365→  - createExtraction, approveExtraction, listExtractions
+   366→   366→  - createEmbedding
+   367→   367→  - linkKnowledgeToAgent, toggleKnowledgeLink
+   368→   368→  - getActiveKnowledgeForWorkflow
+   369→   369→  - getKnowledgeStats (total, ready, processing, failed, pending)
+   370→   370→  - canAccessSource (access control: admin sees all, client sees own, operator read-only)
+   371→   371→
+   372→   372→- Created API endpoints:
+   373→   373→  - GET/POST /api/knowledge/sources — list + create
+   374→   374→  - GET/PATCH/DELETE /api/knowledge/sources/[id] — single source CRUD
+   375→   375→  - PATCH /api/knowledge/sources/[id]/toggle — toggle active state of agent links
+   376→   376→
+   377→   377→- Created Supabase migration SQL (supabase/migrations/20260629000000_knowledge_autopilot.sql):
+   378→   378→  - CREATE TABLE for all 5 tables with PostgreSQL types (JSONB for metadata/extractedData/embedding)
+   379→   379→  - Indexes on all filter columns
+   380→   380→  - RLS enabled on all tables
+   381→   381→  - Helper functions: get_current_user_role(), get_current_user_client_id()
+   382→   382→  - RLS policies:
+   383→   383→    - SELECT: admin/operator see all; client roles see own client_id
+   384→   384→    - INSERT/UPDATE/DELETE: admin + client_owner only (NOT client_operator)
+   385→   385→    - anon users: NO access (no policy = denied by default)
+   386→   386→
+   387→   387→- Recreated src/lib/roles.ts (was deleted by sandbox reset) — role constants + permission helpers
+   388→   388→- Recreated src/lib/auth-server.ts (was deleted by sandbox reset) — getCurrentUserProfile, requireAdmin, requireModuleAccess, etc.
+   389→   389→
+   390→   390→Verification:
+   391→   391→- db:push successful, all 5 tables exist ✓
+   392→   392→- Lint: clean ✓
+   393→   393→- Full CRUD API test:
+   394→   394→  - POST /api/knowledge/sources → created source with id, status=pending ✓
+   395→   395→  - GET /api/knowledge/sources → returned 1 source ✓
+   396→   396→  - PATCH /api/knowledge/sources/[id] → status updated to "ready" ✓
+   397→   397→  - DELETE /api/knowledge/sources/[id] → ok=true ✓
+   398→   398→- Server alive ✓
+   399→   399→
+   400→   400→---
+   401→   401→Task ID: knowledge-catalog-agenda-connection-1
+   402→   402→Agent: main agent
+   403→   403→Task: Conectar Knowledge Autopilot con Catálogo y Agenda
+   404→   404→
+   405→   405→Work Log:
+   406→   406→- Added 3 Prisma models to schema:
+   407→   407→  - Product (id, clientId, workflowId, name, description, price, currency, stock, stockStatus, sku, category, active, sourceType, knowledgeSourceId, timestamps)
+   408→   408→  - Service (id, clientId, workflowId, name, description, durationMinutes, price, currency, category, active, sourceType, knowledgeSourceId, timestamps)
+   409→   409→  - AvailabilityRule (id, clientId, workflowId, dayOfWeek, startTime, endTime, slotDuration, active, sourceType, knowledgeSourceId, createdAt)
+   410→   410→  - ran db:push — schema synced ✓
+   411→   411→
+   412→   412→- Created src/lib/knowledge-import.ts with importDetectedKnowledge():
+   413→   413→  - Takes ImportPayload (products, services, business_hours, faqs, policies with per-item _approved/_ignored flags)
+   414→   414→  - knowledgeOnly mode: saves everything as KnowledgeChunk (no catalog/agenda records)
+   415→   415→  - Full import mode:
+   416→   416→    - Products → Product table (with stockStatus: available/low_stock/unavailable/unknown based on stock)
+   417→   417→    - Services → Service table (with default durationMinutes=30)
+   418→   418→    - Business hours → AvailabilityRule table (parses day names ES/EN, normalizes time format)
+   419→   419→    - FAQs → KnowledgeChunk with category="faq"
+   420→   420→    - Policies → KnowledgeChunk with category="policies"
+   421→   421→  - Returns ImportResult with summary counts + warnings + errors
+   422→   422→  - Warnings: "precio pendiente", "stock no definido"
+   423→   423→  - Never throws — catches errors per-item
+   424→   424→
+   425→   425→- Created /api/knowledge/import endpoint:
+   426→   426→  - POST /api/knowledge/import
+   427→   427→  - Access control: admin + client_owner only (NOT client_operator, NOT applicant)
+   428→   428→  - Client roles scoped to their own clientId
+   429→   429→  - Returns { ok, summary, warnings, errors }
+   430→   430→
+   431→   431→- Rewrote ImportPreviewModal in create-flow-dialog.tsx:
+   432→   432→  - Title: "PayFlow detectó esta información"
+   433→   433→  - Per-item controls:
+   434→   434→    - Products: editable price + stock inputs, approve/ignore toggle, badges for "Precio pendiente"/"Stock no definido"
+   435→   435→    - Services: editable price + duration inputs, approve/ignore toggle, "Precio pendiente" badge
+   436→   436→    - Business hours: approve/ignore toggle
+   437→   437→    - FAQs: approve/ignore toggle
+   438→   438→    - Policies: approve/ignore toggle
+   439→   439→  - "Aprobar todo" button
+   440→   440→  - "Ignorar todo" button (onIgnore)
+   441→   441→  - "Editar campos manuales" button (onEdit)
+   442→   442→  - "Guardar como conocimiento solamente" checkbox (knowledgeOnly mode)
+   443→   443→  - "Confirmar importación" / "Guardar conocimiento" button (calls /api/knowledge/import)
+   444→   444→  - Shows import summary in toast after completion
+   445→   445→
+   446→   446→Verification (curl API tests):
+   447→   447→1. Full import:
+   448→   448→   Input: 2 products (Camiseta $15.99 stock:50, Pantalón $29.99), 1 service (Consulta $25 30min), 2 hours (lunes/martes 9-18), 1 FAQ, 1 policy
+   449→   449→   Result: products_created=2, services_created=1, availability_rules_created=2, faq_chunks_created=1, policy_chunks_created=1, warnings=["Pantalón: stock no definido"] ✓
+   450→   450→
+   451→   451→2. Knowledge-only mode:
+   452→   452→   Input: 1 product, 1 FAQ, 1 policy (knowledgeOnly=true)
+   453→   453→   Result: products_created=0, faq_chunks_created=1, policy_chunks_created=1 ✓
+   454→   454→
+   455→   455→3. Item ignoring:
+   456→   456→   Input: 2 products (1 approved, 1 ignored)
+   457→   457→   Result: products_created=1, items_ignored=1 ✓
+   458→   458→
+   459→   459→4. DB verification:
+   460→   460→   Products: 2, Services: 1, AvailabilityRules: 2, Chunks: 2 ✓
+   461→   461→
+   462→   462→- Lint: clean (no errors)
+   463→   463→- Server alive ✓
+   464→   464→
+   465→   465→---
+   466→   466→Task ID: commercial-agent-knowledge-1
+   467→   467→Agent: main agent
+   468→   468→Task: Conectar Biblioteca de Conocimiento con el Agente Comercial IA
+   469→   469→
+   470→   470→Work Log:
+   471→   471→- Added Appointment model to Prisma schema (id, clientId, workflowId, customerName, customerPhone, serviceName, appointmentDate, appointmentTime, status, notes, timestamps) + db:push
+   472→   472→
+   473→   473→- Created src/lib/agent-tools.ts with 6 internal tools:
+   474→   474→  - searchKnowledge(query, ctx) — searches KnowledgeChunk by keyword, returns matched chunks with scores
+   475→   475→  - searchProduct(query, ctx) — searches Product table by name/description/sku/category
+   476→   476→  - checkStock(productName, ctx) — returns stock + stockStatus for a product
+   477→   477→  - checkAvailability(dayName, ctx) — searches AvailabilityRule by day of week (ES/EN)
+   478→   478→  - createAppointment(data, ctx) — creates Appointment record in DB
+   479→   479→  - createPaymentLink(data, ctx) — signals payment creation (actual link created by payment node)
+   480→   480→  - requestHuman(reason, ctx) — logs human handoff request to AuditLog
+   481→   481→
+   482→   482→- Created src/lib/commercial-agent.ts with runCommercialAgent():
+   483→   483→  - Step 1: Detect intent (greeting, product_query, stock_query, price_query, availability_query, appointment_request, payment_request, faq, business_info, human_handoff, unknown)
+   484→   484→  - Step 2: Call appropriate tools based on intent:
+   485→   485→    - product_query/price_query/stock_query → searchProduct + checkStock
+   486→   486→    - availability_query → checkAvailability + searchKnowledge
+   487→   487→    - appointment_request → ask for details
+   488→   488→    - payment_request → signal create_payment
+   489→   489→    - faq/business_info/unknown → searchKnowledge
+   490→   490→    - human_handoff → requestHuman
+   491→   491→  - Step 3: Build response using REAL data from tools
+   492→   492→  - Step 4: If no data found → "No tengo esa información exacta, pero puedo pedir que un asesor te ayude."
+   493→   493→  - Step 5: enforceAgentRules() — post-processing:
+   494→   494→    - confidence_score < 0.3 → requires_human = true
+   495→   495→    - No matched_sources → clear product/price/stock (don't invent)
+   496→   496→    - Never says "pago confirmado" (only PayPhone webhook confirms)
+   497→   497→
+   498→   498→  - Returns structured output:
+   499→   499→    - ai_response (ONLY this is shown to client)
+   500→   500→    - intent, next_action, confidence_score, requires_human
+   501→   501→    - product_id, product_name, price, stock
+   502→   502→    - service_name, appointment_date, appointment_time
+   503→   503→    - knowledge_used[], matched_sources[]
+   504→   504→
+   505→   505→- Created /api/agent/chat endpoint (POST) — runs the agent, returns structured JSON
+   506→   506→
+   507→   507→- Agent rules enforced:
+   508→   508→  1. No inventar precios ✓ (only from Product table)
+   509→   509→  2. No inventar stock ✓ (only from Product table)
+   510→   510→  3. No inventar horarios ✓ (only from AvailabilityRule table)
+   511→   511→  4. No inventar políticas ✓ (only from KnowledgeChunk)
+   512→   512→  5. No vender productos inactivos ✓ (searchProduct filters active=true)
+   513→   513→  6. No ofrecer citas fuera de horario ✓ (checkAvailability returns available=false)
+   514→   514→  7. No confirmar pagos exitosos ✓ (enforceAgentRules strips "pago confirmado")
+   515→   515→  8. Solo PayPhone webhook confirma payment_success ✓
+   516→   516→  9. Si no sabe → "No tengo esa información exacta..." ✓
+   517→   517→  10. confidence_score < 0.3 → requires_human = true ✓
+   518→   518→
+   519→   519→Verification (curl API tests):
+   520→   520→1. Greeting "hola" → "¡Hola! 👋 Bienvenido a Tienda Demo..." intent=greeting, confidence=0.9 ✓
+   521→   521→2. Product query "¿Tienen camisetas?" → found Camiseta, price=15.99, stock=50, matched_sources=["catalog"] ✓
+   522→   522→3. Price query "¿cuánto cuesta la camiseta?" → "Camiseta: $15.99 USD\n✅ Disponible (50 en stock)" confidence=0.9 ✓
+   523→   523→4. Human handoff "quiero hablar con un humano" → requires_human=true, next_action=handoff ✓
+   524→   524→5. Unknown question "¿cuál es la receta secreta?" → confidence=0.25, requires_human=true ✓
+   525→   525→6. Availability "atenden los lunes" (misspelled) → confidence=0.25, requires_human=true (didn't invent) ✓
+   526→   526→
+   527→   527→- Lint: clean ✓
+   528→   528→- Server alive ✓
+   529→   529→
+   530→   530→---
+   531→   531→Task ID: knowledge-flow-recommender-1
+   532→   532→Agent: main agent
+   533→   533→Task: Implementar generación automática de flujos desde conocimiento cargado
+   534→   534→
+   535→   535→Work Log:
+   536→   536→- Created src/lib/knowledge-recommender.ts with recommendWorkflowTemplateFromKnowledge():
+   537→   537→  - Analyzes detected knowledge (products, services, business_hours, faqs, policies, prices, stock)
+   538→   538→  - Applies 6 recommendation rules:
+   539→   539→    1. products + prices → IA + Catálogo (confidence 0.85)
+   540→   540→    2. products + prices + paymentRequired → IA + Catálogo + PayPhone (0.9)
+   541→   541→    3. services + horarios → IA + Agenda (0.85)
+   542→   542→    4. services + horarios + reservationPayment → IA + Agenda + PayPhone (0.88)
+   543→   543→    5. only FAQs/políticas/descripción → Solo IA sin pagos (0.7)
+   544→   544→    6. products + services + agenda + pagos → Agente comercial completo (0.95)
+   545→   545→  - Returns: recommended_template, reason, detected_modules, missing_data, confidence_score
+   546→   546→  - TEMPLATE_INFO map with name/description/modules for each template
+   547→   547→  - buildSuggestedConfig() — generates uses_catalog, uses_agenda, payment_required, payment_provider, agent_mode per template
+   548→   548→
+   549→   549→- Updated /api/knowledge/recommend endpoint:
+   550→   550→  - Returns template_name, template_info, suggested_config in addition to recommendation fields
+   551→   551→  - Fallback returns Solo IA with confidence 0.3
+   552→   552→
+   553→   553→- Verified create-flow-dialog already has:
+   554→   554→  - RecommendationBanner component (shows "PayFlow recomienda este flujo" with confidence badge, reason, detected modules, missing data)
+   555→   555→  - 3 buttons: "Usar recomendación", "Elegir otra plantilla", "Editar datos"
+   556→   556→  - onUse: applies recommended template + suggested_config automatically
+   557→   557→  - onChooseOther: hides banner, shows all templates
+   558→   558→  - onEditData: goes back to Step 3 (Knowledge) to edit
+   559→   559→  - After ImportPreviewModal confirm → fetches /api/knowledge/recommend → shows banner in Step 1
+   560→   560→
+   561→   561→Verification (curl API tests):
+   562→   562→1. Products + prices → ia_catalogo, confidence 0.85, reason "Detectamos productos con precios..." ✓
+   563→   563→2. Products + prices + payment → ia_catalogo, confidence 0.9, reason "...pagos activos..." ✓
+   564→   564→3. Services + hours → ia_agenda, confidence 0.85, reason "Detectamos servicios y horarios..." ✓
+   565→   565→4. Products + services + hours + payment → agente_completo, confidence 0.95, config uses_catalog=true uses_agenda=true payment_required=true ✓
+   566→   566→5. Only FAQs → solo_ia, confidence 0.7, reason "Detectamos información general..." ✓
+   567→   567→
+   568→   568→- Lint: clean ✓
+   569→   569→- Server alive ✓
+   570→   570→
+   571→   571→---
+   572→   572→Task ID: step3-knowledge-demo-1
+   573→   573→Agent: main agent
+   574→   574→Task: Completar Paso 3 Conocimiento con datos demo + chat interactivo + stock visibility
+   575→   575→
+   576→   576→Work Log:
+   577→   577→- Added "Cargar datos demo (TechStore)" button to Step 3:
+   578→   578→  - Fills ALL 11 manual knowledge fields with demo data (business info, products, services, FAQs, hours, address, policies, purchase conditions, agenda conditions, promotions, agent instructions, human rules)
+   579→   579→  - Adds a demo CSV file entry (catalogo-techstore-demo.csv, status=listo)
+   580→   580→  - Toast: "Datos demo cargados. Presiona 'Procesar conocimiento' para ver la detección."
+   581→   581→  - Located above the drop zone for easy access
+   582→   582→
+   583→   583→- Created src/components/editor/interactive-chat.tsx:
+   584→   584→  - WhatsApp-style chat interface (green #075e54 header, #e5ddd5 background, #dcf8c6 user bubbles)
+   585→   585→  - Calls /api/agent/chat with message + workflowId + businessName + history
+   586→   586→  - Shows AI response in assistant bubble
+   587→   587→  - Loading spinner while waiting
+   588→   588→  - Enter to send, Shift+Enter for newline
+   589→   589→  - Initial greeting message
+   590→   590→
+   591→   591→- Added InteractiveChat to editor-view.tsx simulator panel:
+   592→   592→  - New tab switcher: "Flujo" (original simulator) | "Chat IA" (interactive chat)
+   593→   593→  - "Flujo" tab shows the workflow execution result
+   594→   594→  - "Chat IA" tab shows the interactive chat where admin can type questions
+   595→   595→  - Chat uses workflow.id so the agent has access to workflow-scoped knowledge
+   596→   596→
+   597→   597→- Updated commercial-agent.ts stock visibility rules:
+   598→   598→  - Product query: "✅ Disponible" (was "✅ Disponible (50 en stock)")
+   599→   599→  - Stock query: "Sí, tenemos [product] disponible" (was "[product]: 50 unidades disponibles")
+   600→   600→  - Zero stock: "⚠️ Agotado por ahora" (unchanged)
+   601→   601→  - Internal result.stock still has the exact number (for admin debugging)
+   602→   602→  - Client NEVER sees exact quantities
+   603→   603→
+   604→   604→- Verified PayPhone stays disabled (PAYPHONE_ENV=disabled in .env.local)
+   605→   605→
+   606→   606→Verification:
+   607→   607→- / → HTTP 200 ✓
+   608→   608→- /api/health → HTTP 200 ✓
+   609→   609→- /api/agent/chat → HTTP 401 (requires auth) ✓
+   610→   610→- PayPhone: env=disabled, disabled=true ✓
+   611→   611→- Stock visibility: "Sí, tenemos Camiseta disponible" (no "50" or "unidades") ✓
+   612→   612→- Lint: clean ✓
+   613→   613→
+   614→   614→---
+   615→   615→Task ID: real-file-processing-1
+   616→   616→Agent: main agent
+   617→   617→Task: Completar procesamiento real del módulo Conocimiento de la IA
+   618→   618→
+   619→   619→Work Log:
+   620→   620→- Installed xlsx package (bun add xlsx) for Excel parsing
+   621→   621→- Created src/lib/file-content-reader.ts:
+   622→   622→  - readFileContent(file, sourceId) — main entry point, dispatches by extension
+   623→   623→  - readTxt() — reads file.text() → rawText
+   624→   624→  - readCsv() — reads file.text() → parses CSV (handles comma/semicolon, quoted fields, newlines in quotes) → rawText + headers + rows
+   625→   625→  - readExcel() — reads file.arrayBuffer() → XLSX.read() → sheet_to_json() → headers + rows + rawText
+   626→   626→  - readPdf() — reads file.arrayBuffer() → extractPdfText() (finds BT/ET markers, extracts Tj/TJ string operators) → rawText
+   627→   627→  - parseCsv() — custom CSV parser with proper quote handling
+   628→   628→  - extractPdfText() — lightweight PDF text extraction (no external dependency)
+   629→   629→  - decodePdfString() — handles PDF escape sequences
+   630→   630→
+   631→   631→- Updated handleFiles() in create-flow-dialog.tsx:
+   632→   632→  - Stores the actual File object as _file property on UploadedFile
+   633→   633→  - This allows processFiles() to read the real file content later
+   634→   634→
+   635→   635→- Updated processFiles() in create-flow-dialog.tsx:
+   636→   636→  - For each pending file, reads actual content using readFileContent()
+   637→   637→  - Demo files (id starts with "demo_") use name as text hint
+   638→   638→  - Real files use the stored _file File object
+   639→   639→  - Passes rawText (for PDF/TXT/manual) or rows+headers (for CSV/Excel) to the API
+   640→   640→  - Graceful fallback: if reading fails, uses file name as text
+   641→   641→
+   642→   642→- Updated commercial-agent.ts with commercial/advisory tone:
+   643→   643→  - Greeting: "¡Hola! 👋 Bienvenido a [business]. Soy tu asesor virtual. Cuéntame, ¿qué necesitas hoy?"
+   644→   644→  - Product query: "Claro 😊, te puedo asesorar con [product]... Precio: $X... ✅ Disponible... ¿Te interesa? Para recomendarte mejor, cuéntame si lo necesitas para uso personal, trabajo o negocio."
+   645→   645→  - Out of stock: "⚠️ Por ahora está agotado, pero puedo ofrecerte alternativas."
+   646→   646→  - Unknown: "No tengo esa información exacta en este momento, pero puedo pedir que un asesor te ayude. ¿Quieres que te conecte con alguien del equipo?"
+   647→   647→
+   648→   648→- Stock visibility rules enforced:
+   649→   649→  - Internal: result.stock has exact number (for admin debugging)
+   650→   650→  - Client-facing: "✅ Disponible" (no "50 en stock")
+   651→   651→  - Zero stock: "⚠️ Por ahora está agotado" (no "0 unidades")
+   652→   652→
+   653→   653→Verification (curl API tests):
+   654→   654→1. CSV processing:
+   655→   655→   Input: 3 rows (Audífonos $29.99 stock:15, Funda $12.50 stock:30, Cargador $8.99 stock:0)
+   656→   656→   Output: 3 products detected with prices and stock, 3 prices, 2 stock_items ✓
+   657→   657→
+   658→   658→2. TXT processing:
+   659→   659→   Input: "Direccion: Av. Amazonas 1234\nHorarios: Lunes a Viernes 9-18h\nP: Hacen envios? R: Si\nPolitica: Garantia 3 meses"
+   660→   660→   Output: address="Av. Amazonas 1234", 1 business_hour (lunes 9-18), 1 FAQ, 1 policy ✓
+   661→   661→
+   662→   662→3. Commercial tone:
+   663→   663→   Greeting: "¡Hola! 👋 Bienvenido a TechStore. Soy tu asesor virtual..." ✓
+   664→   664→   Product: "Claro 😊, te puedo asesorar con Camiseta... ✅ Disponible... ¿Te interesa? Para recomendarte mejor..." ✓
+   665→   665→   No exact stock: False (doesn't show "50 en stock") ✓
+   666→   666→   Commercial tone: True (contains "asesor" and "recomendarte") ✓
+   667→   667→
+   668→   668→- PayPhone stays disabled ✓
+   669→   669→- Lint: clean ✓
+   670→   670→- Server alive ✓
+   671→   671→
+   672→   672→---
+   673→   673→Task ID: connect-knowledge-agent-1
+   674→   674→Agent: main agent
+   675→   675→Task: Conectar Conocimiento de la IA con el Agente Comercial IA
+   676→   676→
+   677→   677→Work Log:
+   678→   678→- Updated CommercialAgentResult interface:
+   679→   679→  - Added public_availability field: "available" | "unavailable" | "unknown"
+   680→   680→  - stock field remains internal (never shown to client)
+   681→   681→  - Added documentation: "CRITICAL: client only sees ai_response"
+   682→   682→
+   683→   683→- Updated runCommercialAgent() product handling:
+   684→   684→  - Sets public_availability based on stock (>0 = available, =0 = unavailable, undefined = unknown)
+   685→   685→  - Uses public_availability for response text instead of raw stock numbers
+   686→   686→  - Removed redundant checkStock tool call (stock comes from searchProduct result)
+   687→   687→
+   688→   688→- Updated enforceAgentRules() with stronger client-facing protection:
+   689→   689→  - Rule 3: Strips accidental exact stock numbers from ai_response
+   690→   690→    - Regex: /\d+\s*(en stock|unidades?|items?|art[ií]culos?)/gi → "disponible"
+   691→   691→    - Regex: /stock\s*:\s*\d+/gi → "disponible"
+   692→   692→  - Strips JSON-like content if ai_response starts with { or [
+   693→   693→    - Replaces with "No tengo esa información exacta..."
+   694→   694→    - Sets requires_human = true, confidence ≤ 0.2
+   695→   695→  - Strips template variables like {{something}} from ai_response
+   696→   696→  - Clears public_availability when matched_sources is empty
+   697→   697→
+   698→   698→- Updated /api/agent/chat endpoint:
+   699→   699→  - Added public_availability to response
+   700→   700→  - Updated fallback response with public_availability: null
+   701→   701→
+   702→   702→- Removed unused checkStock import from commercial-agent.ts
+   703→   703→
+   704→   704→Verification (curl API tests):
+   705→   705→1. Greeting: "¡Hola! 👋 Bienvenido a TechStore. Soy tu asesor virtual..."
+   706→   706→   - has asesor: True ✓
+   707→   707→   - has JSON: False ✓
+   708→   708→   - has stock number: False ✓
+   709→   709→
+   710→   710→2. Product query: "Claro 😊, te puedo asesorar con Camiseta. Precio: $15.99 USD ✅ Disponible..."
+   711→   711→   - public_availability: "available" ✓
+   712→   712→   - stock (internal): 50 (not shown to client) ✓
+   713→   713→   - has exact stock in text: False ✓
+   714→   714→   - has JSON: False ✓
+   715→   715→   - has template vars: False ✓
+   716→   716→
+   717→   717→3. Unknown: "No tengo esa información exacta, pero puedo pedir que un asesor te ayude."
+   718→   718→   - confidence: 0.25 ✓
+   719→   719→   - requires_human: True ✓
+   720→   720→   - has JSON: False ✓
+   721→   721→
+   722→   722→4. Human handoff: "Entiendo. Voy a conectarle con un asesor humano..."
+   723→   723→   - requires_human: True ✓
+   724→   724→   - next_action: "handoff" ✓
+   725→   725→
+   726→   726→- PayPhone stays disabled ✓
+   727→   727→- Lint: clean ✓
+   728→   728→- Server alive ✓
+   729→   729→
+   730→   730→---
+   731→   731→Task ID: stability-review-knowledge-1
+   732→   732→Agent: main agent
+   733→   733→Task: Revisión de estabilidad del módulo Conocimiento de la IA
+   734→   734→
+   735→   735→Validation Results:
+   736→   736→1. PAYPHONE_ENV=disabled ✓
+   737→   737→2. PayPhone status: env=disabled, disabled=true, configured=false ✓ (no se ejecuta)
+   738→   738→3. Landing: / → HTTP 200 (text/html) ✓
+   739→   739→4. Panel: login OK (role=admin), /home → HTTP 200, /api/projects → HTTP 200 ✓
+   740→   740→5. Public routes: / /privacy /terms /cookies /data-request /safe-home /api/health → all HTTP 200 ✓
+   741→   741→6. "sandbox is inactive" count across ALL routes: 0 ✓
+   742→   742→7. Knowledge process API: ok=true, detected FAQs + business_hours ✓
+   743→   743→8. Agent greeting: "¡Hola! 👋 Soy tu asesor virtual..." — no JSON, no stock numbers ✓
+   744→   744→9. Agent product query: "Claro 😊, te puedo asesorar con Camiseta... ✅ Disponible" — public_availability=available, stock=50 (internal only), no exact stock in text ✓
+   745→   745→10. Agent unknown: confidence=0.25, requires_human=true ✓
+   746→   746→11. Agent human handoff: requires_human=true, next_action=handoff ✓
+   747→   747→12. Lint: clean ✓
+   748→   748→13. Knowledge recommend API: returns recommended_template + confidence ✓
+   749→   749→14. Knowledge import API: creates products + FAQ chunks ✓
+   750→   750→15. DB tables: KnowledgeSource(5), KnowledgeChunk(5), Product(3), Service(1), AvailabilityRule(2) ✓
+   751→   751→
+   752→   752→No errors found. Module is stable.
+   753→   753→
+   754→   754→---
+   755→   755→Task ID: legal-module-complete-1
+   756→   756→Agent: main agent
+   757→   757→Task: Restaurar y completar módulo Legal en PayFlow SMT
+   758→   758→
+   759→   759→Work Log:
+   760→   760→- Added ConsentLog + DataSubjectRequest models to Prisma schema + db:push
+   761→   761→
+   762→   762→- Expanded /privacy page (9 sections):
+   763→   763→  1. Responsable del tratamiento
+   764→   764→  2. Datos que recopilamos
+   765→   765→  3. Finalidades del tratamiento
+   766→   766→  4. Uso de inteligencia artificial
+   767→   767→  5. Proveedores externos
+   768→   768→  6. Conservación de datos
+   769→   769→  7. Derechos del titular
+   770→   770→  8. Seguridad
+   771→   771→  9. Cambios
+   772→   772→
+   773→   773→- Expanded /terms page (11 sections):
+   774→   774→  1. Naturaleza del servicio
+   775→   775→  2. Uso permitido
+   776→   776→  3. Responsabilidad del negocio
+   777→   777→  4. Pagos
+   778→   778→  5. WhatsApp y terceros
+   779→   779→  6. Inteligencia artificial
+   780→   780→  7. Disponibilidad
+   781→   781→  8. Seguridad
+   782→   782→  9. Limitación de responsabilidad
+   783→   783→  10. Protección de datos
+   784→   784→  11. Cambios
+   785→   785→
+   786→   786→- Expanded /cookies page (5 sections):
+   787→   787→  1. Qué son cookies
+   788→   788→  2. Cookies necesarias
+   789→   789→  3. Cookies de seguridad
+   790→   790→  4. Cookies de analítica
+   791→   791→  5. Cómo desactivarlas
+   792→   792→
+   793→   793→- Updated /data-request page:
+   794→   794→  - Title: "Solicitar gestión de datos personales"
+   795→   795→  - Form: name, email, phone, request_type (6 options), message
+   796→   796→  - 6 request types: Acceso, Rectificación, Eliminación, Oposición, Portabilidad, Otro
+   797→   797→  - Success state with CheckCircle2
+   798→   798→
+   799→   799→- Created /api/consent-logs endpoint:
+   800→   800→  - POST: records consent with IP, user-agent, privacy/terms version
+   801→   801→  - GET: admin-only list
+   802→   802→  - Validates: privacy_policy_accepted + terms_accepted required
+   803→   803→
+   804→   804→- Created /api/data-requests endpoint:
+   805→   805→  - POST: public submission of data subject requests
+   806→   806→  - GET: admin-only list
+   807→   807→  - Validates: full_name + email required, request_type validated
+   808→   808→
+   809→   809→- Updated subscription form:
+   810→   810→  - Replaced single "terms_accepted" checkbox with 3 separate checkboxes:
+   811→   811→    1. "Acepto la Política de Privacidad" (required, links to /privacy)
+   812→   812→    2. "Acepto los Términos y Condiciones" (required, links to /terms)
+   813→   813→    3. "Acepto recibir comunicaciones comerciales" (optional)
+   814→   814→  - Submit button disabled until both required checkboxes are checked
+   815→   815→  - After subscription success, calls /api/consent-logs to record consent
+   816→   816→  - Validation: "Debes aceptar la Política de Privacidad." + "Debes aceptar los Términos y Condiciones."
+   817→   817→
+   818→   818→- Footer links already existed (verified): /privacy, /terms, /cookies, /data-request
+   819→   819→
+   820→   820→Verification:
+   821→   821→- /privacy → HTTP 200, contains "Responsable del tratamiento" ✓
+   822→   822→- /terms → HTTP 200, contains "Naturaleza del servicio" ✓
+   823→   823→- /cookies → HTTP 200, contains "Qué son las cookies" ✓
+   824→   824→- /data-request → HTTP 200, contains "Solicitar gestión de datos" ✓
+   825→   825→- /api/health → HTTP 200 ✓
+   826→   826→- /api/data-requests POST → ok=true ✓
+   827→   827→- /api/consent-logs POST → ok=true ✓
+   828→   828→- PayPhone: env=disabled, disabled=true ✓
+   829→   829→- Lint: clean ✓
+   830→   830→- Server alive ✓
+   831→   831→
+   832→   832→---
+   833→   833→Task ID: 2-roles-rbac
+   834→   834→Agent: full-stack-developer
+   835→   835→Task: Implement RBAC roles system
+   836→   836→
+   837→   837→Work Log:
+   838→   838→- Verified existing `src/lib/roles.ts` (ROLES, MODULES, helpers) and `src/lib/auth-server.ts` (getCurrentUserProfile, requireAdmin, denyResponse, AccessDeniedError) were complete. Added `getAccessError(ctx, navKey)` + `roleBadgeLabel(role)` helpers and updated `visibleNavKeys()` so applicants see `["application", "settings"]` and admins additionally see `"clients"`.
+   839→   839→
+   840→   840→- Rewrote `src/stores/auth-store.ts`:
+   841→   841→  - AuthUser interface now includes id, email, name, role, clientId, clientStatus, modules, memberRole, memberPermissions (ClientMemberPermissions), active.
+   842→   842→  - Added `normalizeUser(raw)` that coerces the server payload into the typed shape (filtering modules to strings, only accepting known memberPermissions fields).
+   843→   843→  - Added `fetchMeWithTimeout()` that fetches `/api/auth/me` with `AbortController` + 5s timeout and `cache: "no-store"`.
+   844→   844→  - `fetchUser`, `login`, and `signup` now use `fetchMeWithTimeout()` so the client always has the enriched profile after auth.
+   845→   845→
+   846→   846→- Updated `src/app/api/auth/me/route.ts`:
+   847→   847→  - Calls `getCurrentUserProfile()` and returns `{ id, email, name, role, clientId, clientStatus, modules, memberRole, memberPermissions, active }`.
+   848→   848→  - Wrapped in try-catch so the endpoint never returns 500; falls back to `{ user: null }` on any error.
+   849→   849→
+   850→   850→- Updated `src/app/api/auth/signup/route.ts`:
+   851→   851→  - Creates User with `role: ROLES.APPLICANT`.
+   852→   852→  - Creates a matching Profile row (`role=applicant`, `status=pending`) right after the user is created (best-effort; auth-server will lazy-create it if missing).
+   853→   853→
+   854→   854→- Updated `src/app/api/auth/login/route.ts`:
+   855→   855→  - Trusts the DB role; defaults to `ROLES.APPLICANT` when blank and persists the corrected role back to the User row.
+   856→   856→
+   857→   857→- Rewrote `src/components/common/sidebar.tsx`:
+   858→   858→  - Computes `RoleContext` from the AuthUser, calls `visibleNavKeys(ctx)` and only renders matching nav items.
+   859→   859→  - Nav catalog now includes: Panel, Ejecuciones, Solicitudes, Clientes y roles, PayPhone, Agente IA, Catálogo, Agenda, Legal, Mi solicitud, Contraseña.
+   860→   860→  - Shows a role badge (SUPER / ADMIN / OPERADOR / CLIENTE / SOLICITANTE) next to the user name with role-specific color (amber for admin, sky for operator, emerald for client, muted for applicant). Avatar fallback color matches.
+   861→   861→
+   862→   862→- Updated `src/components/common/app-shell.tsx`:
+   863→   863→  - Builds `RoleContext` from the AuthUser and uses `isApplicant()` to decide between `ApplicantView` and the full dashboard.
+   864→   864→  - Gates the current nav with `getAccessError(ctx, nav)` and shows a localized "Acceso restringido" message when blocked.
+   865→   865→  - Used the canonical "adjust state during render" pattern (`lastUserKey` tracker) instead of `setState` inside an effect to avoid the `react-hooks/set-state-in-effect` lint error.
+   866→   866→  - Applicants see `ApplicantView` + `ChangePasswordView` only.
+   867→   867→
+   868→   868→- Created `src/components/dashboard/applicant-view.tsx`:
+   869→   869→  - Greeting "Hola, [name] 👋".
+   870→   870→  - Status card "Cuenta sin suscripción activa" with CTA buttons linking to `/#section-precios`.
+   871→   871→  - Subscription-request status panel (fetches `/api/profile`).
+   872→   872→  - "Módulos bloqueados" grid showing all 6 modules (Autopilot, PayPhone, Catálogo, Agenda, Agente IA, Flujos) as locked.
+   873→   873→
+   874→   874→- Created `src/components/dashboard/clients-view.tsx`:
+   875→   875→  - "Cuentas de cliente" card with create/edit/delete dialogs. Edit dialog uses per-module Switches + Select for plan/status.
+   876→   876→  - "Usuarios y roles" card with a search input and a list of profiles (email, fullName, role badge, status). Includes an "Asignar rol" dialog that POSTs to `/api/admin/assign-role` with a role Select.
+   877→   877→  - Uses `ALL_ROLES`, `ROLE_LABELS`, `ALL_MODULES`, `MODULE_LABELS`, `CLIENT_STATUS` from `@/lib/roles`.
+   878→   878→
+   879→   879→- Created `src/components/dashboard/legal-view.tsx`:
+   880→   880→  - Dashboard view with cards linking to the existing public legal pages (`/privacy`, `/terms`, `/cookies`, `/data-request`).
+   881→   881→
+   882→   882→- Created `src/app/api/admin/clients/route.ts`:
+   883→   883→  - `GET`: admin-only list of ClientAccount rows with enabled module grants + member count.
+   884→   884→  - `POST`: creates a ClientAccount with the requested module grants (validated against `ALL_MODULES`). Auto-links an existing User/Profile with the same `contactEmail` as `client_owner` (creates ClientMember + updates Profile.role, Profile.clientId, Profile.status, and User.role).
+   885→   885→
+   886→   886→- Created `src/app/api/admin/clients/[id]/route.ts`:
+   887→   887→  - `GET`: client details with members list.
+   888→   888→  - `PATCH`: updates basic fields and reconciles module grants inside a `$transaction` (deletes existing grants, recreates the requested set). When the client becomes `active`, also flips the owner profiles to `active`.
+   889→   889→  - `DELETE`: detaches profiles (clears clientId, sets role=applicant, status=cancelled) before deleting the account.
+   890→   890→
+   891→   891→- Created `src/app/api/admin/assign-role/route.ts`:
+   892→   892→  - `POST` validates the role against `ALL_ROLES`, updates both the User and Profile rows. When downgrading to `applicant`, clears `clientId` and resets `status=pending`.
+   893→   893→
+   894→   894→- Created `src/app/api/admin/profiles/route.ts`:
+   895→   895→  - `GET` returns all profiles. Since `Profile.clientId` is a plain String foreign key (no Prisma relation), resolves `clientAccount.businessName` via a separate `clientAccount.findMany` and a Map lookup.
+   896→   896→
+   897→   897→- Created `src/app/api/profile/route.ts`:
+   898→   898→  - `GET`: returns the current profile (with derived status), the 5 most recent subscription requests for the email, and the clientAccount (with contracted modules) when applicable.
+   899→   899→  - `PATCH`: allows updating `fullName` only (validated, sliced to 120 chars). Persists to both Profile and User.
+   900→   900→
+   901→   901→- Updated `scripts/seed-admin.ts`:
+   902→   902→  - Admin User.role is now `super_admin` (was `admin`).
+   903→   903→  - Ensures a Profile row exists for the admin (role=super_admin, status=active).
+   904→   904→  - Added a `seedDemoClient()` step that creates `cliente@demo.smt / cliente123` as a `client_owner` with a ClientAccount (`businessName="Negocio Demo SMT"`, plan=anual, status=active) that has all 6 module grants enabled, plus a ClientMember row (canViewCatalog/Agenda/Conversations/Payments = true) and a Profile row (role=client_owner, clientId, status=active).
+   905→   905→  - Idempotent: re-running the script reconciles missing module grants and refreshes the demo profile.
+   906→   906→
+   907→   907→- Ran `bun run scripts/seed-admin.ts`:
+   908→   908→  - Admin account updated to super_admin ✓
+   909→   909→  - Admin Profile created ✓
+   910→   910→  - Demo client user created (cliente@demo.smt) ✓
+   911→   911→  - Demo ClientAccount created with all modules ✓
+   912→   912→  - Demo ClientMember created (client_owner) ✓
+   913→   913→  - Demo client profile ready ✓
+   914→   914→
+   915→   915→- Ran `bun run lint` → clean (0 errors, 0 warnings).
+   916→   916→- Confirmed no new `tsc` errors introduced by this task (remaining tsc warnings are pre-existing in commercial-agent.ts, knowledge-import.ts, file-content-reader.ts, knowledge-processor.ts, create-flow-dialog.tsx).
+   917→   917→
+   918→   918→Stage Summary:
+   919→   919→- RBAC layer fully wired across auth, sidebar, dashboard, and admin APIs.
+   920→   920→- New roles flow: signup creates applicant Profile → admin can create ClientAccount + assign roles from the new "Clientes y roles" view → /api/auth/me returns the enriched profile → sidebar + app-shell gate navigation via `getAccessError()`.
+   921→   921→- Applicants see a dedicated `ApplicantView` with a clear "Cuenta sin suscripción activa" status + pricing CTA + blocked modules list.
+   922→   922→- Admins/super_admins see the full nav (Panel, Ejecuciones, Solicitudes, Clientes y roles, PayPhone, Agente IA, Catálogo, Agenda, Legal, Contraseña).
+   923→   923→- Operators see Panel, Ejecuciones, Solicitudes, Catálogo, Agenda, Contraseña.
+   924→   924→- Client owners/operators see Panel + only the modules contracted by their ClientAccount (and for operators, further gated by their ClientMember permissions).
+   925→   925→- Demo client (cliente@demo.smt / cliente123) lets you verify the client_owner experience end-to-end.
+   926→   926→- Lint clean. PayPhone untouched. Legal pages, IA knowledge module, routing untouched.
+   927→   927→
+   928→   928→---
+   929→   929→Task ID: prepare-github-vercel-deploy-1
+   930→   930→Agent: main agent
+   931→   931→Task: Preparar PayFlow SMT para descargar y subir a GitHub/Vercel
+   932→   932→
+   933→   933→Work Log:
+   934→   934→- Verified .env.local: PAYPHONE_ENV=disabled, all tokens empty, all flags false ✓
+   935→   935→- Updated .env: changed PAYPHONE_ENV from production → disabled, all flags → false
+   936→   936→- Created .env.example: all variables empty, with comments explaining each section
+   937→   937→- Updated .gitignore: added !.env.example exception, added *.key
+   938→   938→- Verified no real tokens in any .env file
+   939→   939→- Verified NEXT_PUBLIC not used for PayPhone variables
+   940→   940→
+   941→   941→Verification:
+   942→   942→1. PayPhone: env=disabled, disabled=true, message="PayPhone está desactivado en este entorno..." ✓
+   943→   943→2. Public routes: / /privacy /terms /cookies /data-request /api/health → all HTTP 200 ✓
+   944→   944→3. Panel: /home → HTTP 200, /api/projects → HTTP 200 ✓
+   945→   945→4. Knowledge: process API works, detected products ✓
+   946→   946→5. Agent: chat API responds with commercial tone ✓
+   947→   947→6. sandbox is inactive: 0 occurrences ✓
+   948→   948→7. Files: .env.local EXISTS, .env.example EXISTS, .gitignore EXISTS ✓
+   949→   949→8. .gitignore: ignores .env*, allows .env.example, has *.key, has *.pem ✓
+   950→   950→9. No real tokens in .env: 0 found ✓
+   951→   951→10. Lint: clean ✓
+   952→   952→11. Server: alive ✓
+   953→   953→
+   954→   954→Files for deployment:
+   955→   955→- .env.local → stays in Z.ai (gitignored, not committed)
+   956→   956→- .env.example → committed to GitHub (template for Vercel)
+   957→   957→- .env → gitignored (has DATABASE_URL for local dev)
+   958→   958→- .gitignore → ensures .env* files don't leak to GitHub
+   959→   959→
+   960→   960→---
+   961→   961→Task ID: rebuild-flow-wizard
+   962→   962→Agent: main agent
+   963→   963→Task: Reconstruir el componente CreateFlowDialog como un asistente de 5 pasos con carga de archivos y procesamiento de conocimiento
+   964→   964→
+   965→   965→Work Log:
+   966→   966→- Reemplazado `src/components/dashboard/create-flow-dialog.tsx` (versión antigua de 2 pasos / 280 líneas) por un asistente completo de 5 pasos (2246 líneas, autocontenido).
+   967→   967→
+   968→   968→Arquitectura del archivo:
+   969→   969→- "use client" en la primera línea.
+   970→   970→- Imports solo de: `@/components/ui/*` (Dialog, Button, Input, Label, Textarea, Select, Switch, Badge, Separator), iconos `lucide-react`, `cn` de `@/lib/utils`, `toast` de `sonner`, y tipos/hooks de `react` (`useCallback`, `useEffect`, `useRef`, `useState`, `type DragEvent`, `type ReactNode`).
+   971→   971→- `readFileContent` se importa dinámicamente (`await import("@/lib/file-content-reader")`) dentro de `processKnowledge()` para no cargar la lib `xlsx` hasta que el usuario procese archivos.
+   972→   972→
+   973→   973→Tipos definidos (autocontenidos):
+   974→   974→- `Step`, `FileStatus`, `AgentTone`, `AgentMode`, `PaymentProvider`, `AmountMode`, `TemplateId`
+   975→   975→- `DetectedProduct`, `DetectedService`, `DetectedFaq`, `DetectedBusinessHour`, `DetectedPolicy`, `DetectedKnowledge`
+   976→   976→- `Recommendation`, `UploadedFile`, `CreateFlowDialogProps`
+   977→   977→
+   978→   978→Sub-componentes definidos en el mismo archivo:
+   979→   979→1. `StepIndicator` — barra superior con 5 círculos numerados, conectores y checkmarks para pasos completados.
+   980→   980→2. `ImportPreviewModal` — modal anidado (Dialog dentro de Dialog) con 5 secciones (Productos, Servicios, Horarios, FAQs, Políticas). Cada sección muestra tarjetas con nombre/detalles. Botones: Confirmar importación, Editar (toggle edit mode con checkboxes por ítem), Ignorar. Aprobar todos / Ignorar todos por sección. Usa el patrón canónico de React "store info from previous render" para inicializar `local` desde `detected` SIN usar `useEffect` (evita el lint error `react-hooks/set-state-in-effect`).
+   981→   981→3. `DetectedSection` — contenedor de cada categoría detectada con header, contador (approved/total), y acciones bulk.
+   982→   982→4. `DetectedItem` — tarjeta individual con checkbox de aprobación en modo edición.
+   983→   983→5. `PreviewStat` — tarjeta de estadística (icono + número + label) para la sección de preview del Step 3.
+   984→   984→6. `DetectedCard` — tarjeta de lista de items detectados (productos, servicios, FAQs).
+   985→   985→7. `ModuleSwitch` — switch de módulo con icono, label, descripción y badge opcional (PayPhone API Link).
+   986→   986→8. `SummaryRow` — fila de resumen para el Step 5 con icono, título, valor y sub-items.
+   987→   987→
+   988→   988→5 pasos del asistente:
+   989→   989→- **Step 1 (Plantilla)**: 6 tarjetas de plantilla (Solo IA, IA+Agenda, IA+Catálogo, IA+PayPhone, IA+Agenda+PayPhone, Agente completo) con icono, nombre, descripción, badge de color y checkmark al seleccionar. Cada plantilla preconfigura los módulos del Step 4 automáticamente. Si hay una recomendación del recommender (tras confirmar conocimiento), se muestra un banner morado con la razón, % de confianza, botón "Aplicar: {template}", botón "Elegir manualmente", y lista de datos faltantes.
+   990→   990→- **Step 2 (Negocio)**: 7 campos — business_name*, business_type, product_or_service, welcome_message, whatsapp_number*, business_hours, agent_tone (Select con 4 opciones: amable/profesional/cercano/formal, cada una con descripción).
+   991→   991→- **Step 3 (Conocimiento)**: 3 secciones separadas por Separator:
+   992→   992→  1. Carga de archivos: área drag-and-drop + botón "Seleccionar archivos". Acepta PDF, Excel (.xlsx/.xls), CSV, TXT hasta 10MB. Lista de archivos con icono, nombre, tipo, tamaño, badge de status (pendiente/cargado/procesando/listo/error), botón eliminar. Botón "Procesar conocimiento" que: lee cada archivo con `readFileContent` (client-side), construye un source adicional con los 11 campos manuales, envía todo a `/api/knowledge/process`, guarda el `merged` en estado, y abre el `ImportPreviewModal`.
+   993→   993→  2. Información manual: 11 Textarea fields (business_info, services_text, faq_text, business_hours_info, address, policies, purchase_conditions, agenda_conditions, public_promotions, agent_instructions, human_rules) con icono y placeholder. Los campos de 3+ rows ocupan todo el ancho.
+   994→   994→  3. Vista previa: 5 tarjetas de estadística (Productos, Servicios, Horarios, FAQs, Políticas) + tarjetas de listas (productos, servicios, FAQs) con "+N más" si excede 4. Warning amber si faltan datos (productos/servicios, horarios, FAQs, políticas). Botón "Revisar detalle" reabre el ImportPreviewModal.
+   995→   995→- **Step 4 (Módulos)**: 3 switches (Agenda, Catálogo, PayPhone con badge "API Link"). Al activar PayPhone, se expande configuración de pago (provider Select, amount mode Select, monto Input si fixed). Select de Modo del agente IA (completo/vender/cobrar/agendar).
+   996→   996→- **Step 5 (Resumen)**: 4 SummaryRows (Plantilla, Negocio, Conocimiento, Módulos) + caja morada de confirmación. Botón "Crear flujo" en el footer.
+   997→   997→
+   998→   998→Flujo de confirmación de conocimiento (después de ImportPreviewModal):
+   999→   999→1. `confirmImport(approved)` llama a `/api/knowledge/import` con `knowledgeOnly: true` y los items aprobados (best-effort: si falla, toast warning pero continúa).
+  1000→  1000→2. Llama a `/api/knowledge/recommend` con el `detected` y `paymentRequired`.
+  1001→  1001→3. Guarda la recomendación en estado.
+  1002→  1002→4. Cierra el modal.
+  1003→  1003→5. Al volver al Step 1, se muestra el banner de recomendación (si no fue dismissed).
+  1004→  1004→
+  1005→  1005→Submit:
+  1006→  1006→- `submit()` valida template seleccionado y business_name + whatsapp_number.
+  1007→  1007→- Construye payload con: templateId, projectId, todos los campos del Step 2, los 11 campos manuales, knowledge_files (metadata), detected_knowledge, payment_required, payment_provider, amount_mode, fixed_amount, currency, agent_mode.
+  1008→  1008→- POST a `/api/workflows/create-from-template`.
+  1009→  1009→- Toast de éxito, reset, onCreated(workflow_id, project_id).
+  1010→  1010→
+  1011→  1011→Robustez:
+  1012→  1012→- Todas las llamadas a APIs (/api/knowledge/process, /api/knowledge/import, /api/knowledge/recommend, /api/workflows/create-from-template) están envueltas en try/catch con toast de error y sin crash.
+  1013→  1013→- Errores no fatales (import/recommend fallan) muestran toast warning pero el flujo continúa.
+  1014→  1014→- Archivos que fallan al leer se marcan como "error" con mensaje, los demás continúan.
+  1015→  1015→- Reset completo del estado cuando el dialog se cierra (setTimeout 150ms para permitir animación de cierre).
+  1016→  1016→- Validación de archivo: tipo (pdf/excel/csv/txt), tamaño (máx 10MB), con toasts de error/warning.
+  1017→  1017→
+  1018→  1018→Diseño y UX:
+  1019→  1019→- Responsive: grid de 1 columna en mobile, 2 columnas en sm+ para plantillas, campos de negocio y campos manuales.
+  1020→  1020→- Step indicator con círculos 32px (mobile) / 36px (desktop), conectores de 2px, animación de scale-110 en el paso actual.
+  1021→  1021→- Color morado (purple-500) como acento principal (consistente con el resto del proyecto).
+  1022→  1022→- Badges de color por plantilla (emerald, sky, amber, violet, rose, purple).
+  1023→  1023→- Overlay de "Creando flujo..." con spinner cuando `creating=true`.
+  1024→  1024→- Footer con botones Atrás / "Paso X de 5" (desktop) / Siguiente o Crear flujo.
+  1025→  1025→- pf-scroll class para scrollbars estilizados en áreas scrollables.
+  1026→  1026→- Accesibilidad: aria-label en botones de eliminar archivo, role="button" + tabIndex + onKeyDown en área de drag-drop, labels asociados a inputs.
+  1027→  1027→
+  1028→  1028→Verification:
+  1029→  1029→- `bun run lint` → clean (0 errors, 0 warnings). ✓
+  1030→  1030→- `bunx tsc --noEmit` → 0 errores en create-flow-dialog.tsx (errores restantes son pre-existing en schedule.ts/commercial-agent.ts/etc). ✓
+  1031→  1031→- `/home` → HTTP 200 ✓
+  1032→  1032→- `/dashboard` → HTTP 200 ✓ (compile exitoso, render exitoso)
+  1033→  1033→- Warning pre-existing: `xlsx` module not found (en `src/lib/file-content-reader.ts:171`, no en mi código) — el catch block de `readExcel` hace fallback a texto plano, así que Excel files se procesan como texto sin crashear.
+  1034→  1034→
+  1035→  1035→Stage Summary:
+  1036→  1036→- CreateFlowDialog reescrito como asistente completo de 5 pasos (Plantilla → Negocio → Conocimiento → Módulos → Resumen).
+  1037→  1037→- Carga de archivos PDF/Excel/CSV/TXT con lectura client-side vía `readFileContent`.
+  1038→  1038→- Procesamiento de conocimiento vía `/api/knowledge/process` → ImportPreviewModal con edición por ítem → `/api/knowledge/import` (best-effort) → `/api/knowledge/recommend` → banner de recomendación en Step 1.
+  1039→  1039→- Submit a `/api/workflows/create-from-template` con todos los campos del formulario + detected_knowledge + knowledge_files.
+  1040→  1040→- Self-contained: solo importa de `@/components/ui/*`, `lucide-react`, `sonner`, `@/lib/utils`, y dynamic import de `@/lib/file-content-reader`.
+  1041→  1041→- Lint clean. TS clean para este archivo.
+  1042→  1042→

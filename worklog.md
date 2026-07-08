@@ -1184,3 +1184,76 @@ Verification:
 
 Stage Summary:
 - Página admin `/dashboard/solicitudes` operativa: lista solicitudes de suscripción con tabla responsive, badges de color por estado y por estado PayPhone Business, acción de activación para pendientes (con toast feedback y refresh automático), y diálogo de historial de auditoría con metadata saneada (sin secrets) y etiquetas en español. Lint y compilación limpias.
+
+---
+Task ID: connect-payflow-payphone-architecture
+Agent: main agent (Z.ai Code)
+Task: Conectar el registro de PayFlow SMT con la arquitectura correcta de PayPhone API Link
+
+Work Log:
+- Stage A — Canonical PayPhone config + endpoints:
+  - Created `src/lib/payphone/config.ts` (server-only) reading PAYPHONE_TOKEN, PAYPHONE_STORE_ID, PAYPHONE_ENV, PAYPHONE_MODE, PAYPHONE_EXTERNAL_NOTIFICATION_ENABLED, PAYPHONE_PREREGISTRATION_ENABLED. Exports getPayphoneConfig, validatePayphoneConfig, maskStoreId, isPayphoneConfigured, getPayphoneBaseUrl, getSafePayphoneStatus.
+  - Created `GET /api/payphone/config/status` returning ONLY safe masked fields (configured, env, mode, tokenConfigured, storeIdConfigured, storeIdLastFour, storeIdMasked, externalNotificationEnabled, preregistrationEnabled, missingVars). NEVER returns token or full StoreID.
+  - Created `src/lib/payphone/api-link.ts` calling `POST https://pay.payphonetodoesposible.com/api/Links` with Bearer token, amounts in cents, USD, oneTime=true, isAmountEditable=false, expireIn=0, server-generated clientTransactionId (max 15 chars).
+  - Created `src/lib/payments/providers/payphone-api-link.ts` as alias re-export (path requested by the user).
+  - Created `src/lib/payphone/preregistration.ts` with checkCompanyStatus, listCategories, submitPreregistration (gated by PAYPHONE_PREREGISTRATION_ENABLED).
+  - Created 3 admin-only pre-registration endpoints: `GET /api/payphone/companies/status?ruc=`, `GET /api/payphone/categories`, `POST /api/payphone/companies/preregister`. All return 403 unless role=admin/super_admin. RUC/document/phone always masked in audit logs.
+- Stage B — Backward-compat refactor:
+  - Rewrote `src/lib/payphone-config.ts` as a shim delegating to the new canonical config; keeps legacy `getPayPhoneConfig` and `getPayPhoneStatusMessage` working.
+  - Rewrote `src/lib/payphone-link.ts` as a shim re-exporting createPayPhoneLink, checkPayPhoneUser, testPayPhoneCredentials, normalizeEcuadorPhone, etc., so the existing webhook/check-user/status routes keep working.
+  - Rewrote `POST /api/payphone/create-link` with zod validation, server-generated clientTransactionId, payment_pending status, audit log `payphone_link_created`. Response NEVER includes the token; only `store_id_last_four`.
+- Stage C — Database:
+  - Extended Prisma schema with: ClientAccount, PaymentAccount, PaymentWebhookEvent, PaymentError models; extended SubscriptionRequest (city, paymentProvider, payphoneBusinessStatus, payphonePreregistrationStatus, hasPayphoneBusiness, startPaymentsConfig, payphone* optional fields, consentAccepted, consentAcceptedAt, activatedClientId); extended PaymentTransaction (clientId, clientTransactionId, storeId, integrationType, credentialMode, amountWithoutTax/WithTax/tax/service/tip, reference, rawRequest, paidAt); extended AuditLog (clientId). Ran `bun run db:push` successfully.
+- Stage D — Frontend:
+  - Updated `src/components/landing/subscription-form.tsx` with all required fields: plan, full name, email, phone, document, business name, business type, country, city, payment_provider=payphone, has_payphone_business (sí/no/en trámite), start_payments_config checkbox, optional PayPhone admin data (RUC, trade name, email, phone, city, category, admin first/last name, admin document), explicit consent checkbox, terms checkbox. Updated `/api/subscriptions` to persist all new fields and write `subscription_request_created` audit log.
+  - Built real admin Solicitudes page (`/dashboard/solicitudes`): list with status badges, "Ver historial" dialog showing audit logs (with Spanish action labels), "Activar" button calling `POST /api/admin/subscriptions/[id]/activate`. (Task 4-a by subagent.)
+  - Built real admin Clientes page (`/dashboard/clientes`): list with search, "Ver PayPhone" dialog showing PayPhone status (token/storeId configured, masked storeId, preregistration status, test link status, external notification), "Verificar configuración", "Generar link de prueba", "Marcar PayPhone Business activo" buttons. (Task 4-b by subagent.)
+  - Added new admin endpoints: `GET /api/admin/clients` (list), `GET /api/admin/clients/[id]/payphone`, `PATCH /api/admin/clients/[id]/payphone`, `POST /api/admin/clients/[id]/test-link` (creates $1.00 test link), `POST /api/admin/subscriptions/[id]/activate` (creates ClientAccount + PaymentAccount, marks subscription activated), `GET /api/admin/subscriptions/[id]/history` (audit logs for that request).
+  - Added "Configuración PayPhone" status box inside CreateFlowDialog Step 4 (after the existing payment config block, BEFORE the agent mode block — nothing was moved or removed). Shows: Ambiente, Modo, Token configurado, StoreID configurado, StoreID (****1234), Notificación Externa, Pre-registro PayPhone. "Verificar configuración" button calls GET /api/payphone/config/status and shows success/error message. Auto-fetches once when entering Step 4 with payphone enabled.
+- Stage E — Verification:
+  - `bun run lint` → 0 errors, 0 warnings.
+  - Installed `xlsx` package (was a missing dependency for `file-content-reader.ts`).
+  - All routes verified via curl:
+    - GET / → 200
+    - GET /login → 200
+    - GET /dashboard → 200
+    - GET /dashboard/flujos → 200
+    - GET /dashboard/solicitudes → 200
+    - GET /dashboard/clientes → 200
+    - GET /api/payphone/config/status → 200 (returns safe masked JSON)
+    - GET /api/payphone/status → 200
+    - GET /api/payphone/companies/status → 401 (correct — no session)
+    - GET /api/payphone/categories → 401 (correct)
+    - POST /api/payphone/create-link → 401 (correct)
+    - All /api/admin/* endpoints → 401 (correct)
+  - Browser verification (agent-browser):
+    - Landing renders with all sections ✓
+    - "Suscribirme" opens dialog with all new fields (plan, datos principales, datos PayPhone Business opcionales, consentimiento, términos) ✓
+    - Login as admin@payflow.smt / admin123 → redirected to /dashboard ✓
+    - /dashboard/solicitudes renders table with headers (Fecha, Nombre, Email, Negocio, Plan, Estado, PayPhone Business, Acciones) ✓
+    - /dashboard/clientes renders with search + "Actualizar" ✓
+    - CreateFlowDialog Step 4 shows "Configuración PayPhone" box with "Verificar configuración" button; clicking it shows: Ambiente=No configurado, Modo=API Link, Token configurado=No, StoreID configurado=No, StoreID=—, Notificación Externa=No activa, Pre-registro PayPhone=No activo, and the message "PayPhone no está configurado. Revisa PAYPHONE_TOKEN y PAYPHONE_STORE_ID en variables de servidor." ✓
+- Git:
+  - Committed as "Connect PayFlow registration with PayPhone API Link"
+  - Rebased onto origin/main (resolved the duplicate "Improve automatic flow business form" commit)
+  - Pushed to https://github.com/tuproyecto78-dot/payflow-smt-produccion.git main (commit 953b0a9)
+
+Stage Summary:
+- The PayPhone architecture is now correctly implemented per the user's spec:
+  1. Direct merchant registration in PayFlow SMT (subscription_requests) ✓
+  2. Audit log history per request/client ✓
+  3. Real PayPhone config using PAYPHONE_TOKEN and PAYPHONE_STORE_ID from server env ✓
+  4. PayPhone API Link integration (POST /api/Links) ready to be called from automation flows ✓
+  5. Pre-registration module prepared but gated by PAYPHONE_PREREGISTRATION_ENABLED ✓
+  6. No PayPhone credentials asked from end-user ✓
+  7. Token and full StoreID NEVER shown on screen ✓
+- The CreateFlowDialog Step 4 now shows a "Configuración PayPhone" box that calls /api/payphone/config/status. Nothing in the wizard was moved or removed.
+- All "no romper" constraints respected: /, /login, /dashboard, /dashboard/flujos, Crear flujo automático, tipo de negocio, mensaje de bienvenida, horarios, Supabase Auth, navegación interna, simulador all verified working.
+- Vercel env vars required (for the user to add real TOKEN and STORE_ID):
+  - PAYPHONE_ENV=production
+  - PAYPHONE_MODE=link
+  - PAYPHONE_TOKEN=<tu Token real>
+  - PAYPHONE_STORE_ID=<tu StoreID real>
+  - PAYPHONE_EXTERNAL_NOTIFICATION_ENABLED=false (cambiar a true cuando configures webhook)
+  - PAYPHONE_PREREGISTRATION_ENABLED=false (cambiar a true si quieres habilitar pre-registro)
+- Vercel env var URL: https://vercel.com/tuproyecto78-dot/payflow-smt-produccion/settings/environment-variables
