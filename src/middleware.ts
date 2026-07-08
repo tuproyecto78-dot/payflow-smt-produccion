@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 /**
- * Middleware simple que solo agrega headers de seguridad.
+ * Middleware simple que solo agrega headers de seguridad + cache-busting.
  * NO procesa sesión de Supabase (eso se hace en los API routes).
  * NO bloquea ninguna ruta.
  */
@@ -18,6 +18,23 @@ export async function middleware(request: NextRequest) {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()"
   );
+
+  // Cache-busting: ensure the browser always fetches the latest HTML for
+  // dashboard pages and API routes (prevents stale error messages).
+  const pathname = request.nextUrl.pathname;
+  if (
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/api/") ||
+    pathname === "/" ||
+    pathname === "/login"
+  ) {
+    response.headers.set(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0"
+    );
+    response.headers.set("Pragma", "no-cache");
+    response.headers.set("Expires", "0");
+  }
 
   return response;
 }
