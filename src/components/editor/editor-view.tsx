@@ -413,6 +413,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     try {
       const res = await fetch(`/api/workflows/${workflow.id}`, {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
@@ -420,14 +421,47 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           edges: edges.map(toApiEdge),
         }),
       });
+
+      // Read the response body once (works for both ok and error responses).
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        toast.error("Error al guardar el flujo");
+        // Show the backend's actual error message when available.
+        if (res.status === 401) {
+          toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
+          setTimeout(() => {
+            window.location.href = `/login?next=/dashboard/flujos/${workflow.id}`;
+          }, 1500);
+          return;
+        }
+        if (res.status === 404) {
+          // Demo flow or not-found — can't save to DB, but show a clear message.
+          toast.info(
+            "Este es un flujo demo local. Puedes usarlo como plantilla, pero los cambios no se guardan en la base de datos."
+          );
+          setDirty(false);
+          return;
+        }
+        if (res.status === 503) {
+          toast.error(
+            data?.error ||
+              "Base de datos no disponible. Los cambios no se pueden guardar ahora."
+          );
+          return;
+        }
+        toast.error(data?.error || `Error al guardar el flujo (${res.status}).`);
+        console.error("[save] backend error:", {
+          status: res.status,
+          data,
+        });
         return;
       }
+
       setDirty(false);
       toast.success("Flujo guardado");
-    } catch {
+    } catch (err) {
       toast.error("Error de red al guardar");
+      console.error("[save] network error:", err);
     } finally {
       setSaving(false);
     }
