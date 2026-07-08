@@ -448,29 +448,83 @@ export async function executeWorkflow(
             outputVariable = "ai_response";
           }
           let aiContent = "";
-          try {
-            const ZAIModule = await import("z-ai-web-dev-sdk");
-            const ZAI = ZAIModule.default;
-            const zai = await ZAI.create();
-            const completion = await zai.chat.completions.create({
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: prompt },
-              ],
-              thinking: { type: "disabled" },
-            });
-            aiContent = completion.choices[0]?.message?.content || "";
-          } catch (err) {
-            aiContent = `[Error de IA: ${err instanceof Error ? err.message : "desconocido"}]`;
+
+          // ─── Call Z.ai directly via fetch (no config file needed) ───
+          // Reads env vars: ZAI_API_KEY, ZAI_BASE_URL, ZAI_MODEL
+          const zaiApiKey = process.env.ZAI_API_KEY;
+          const zaiBaseUrl = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
+          const zaiModel = process.env.ZAI_MODEL || "glm-5.1";
+
+          console.log("[engine] AI agent execution:", {
+            provider: "zai",
+            model: zaiModel,
+            endpoint: `${zaiBaseUrl}/chat/completions`,
+            hasApiKey: !!zaiApiKey,
+          });
+
+          if (!zaiApiKey) {
+            // Missing API key — use mock fallback so the flow doesn't crash.
+            aiContent = "Confirmo que deseas continuar con el pago.";
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "error",
-              message: `Falló la llamada al Agente IA: ${err instanceof Error ? err.message : String(err)}`,
+              message: "Falta ZAI_API_KEY. Se usó respuesta simulada.",
               durationMs: Date.now() - startedAt,
             });
+          } else {
+            try {
+              const res = await fetch(`${zaiBaseUrl}/chat/completions`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${zaiApiKey}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: zaiModel,
+                  messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: prompt },
+                  ],
+                  temperature: 0.3,
+                }),
+                cache: "no-store",
+              });
+
+              if (!res.ok) {
+                const errText = await res.text().catch(() => "");
+                console.error("[engine] Z.ai API error:", {
+                  status: res.status,
+                  statusText: res.statusText,
+                  body: errText.slice(0, 500),
+                });
+                throw new Error(`Z.ai devolvió HTTP ${res.status}: ${errText.slice(0, 200)}`);
+              }
+
+              const data = await res.json();
+              aiContent = data?.choices?.[0]?.message?.content || "";
+
+              console.log("[engine] Z.ai success:", {
+                model: zaiModel,
+                responseLength: aiContent.length,
+                responsePreview: aiContent.slice(0, 100),
+              });
+            } catch (err) {
+              console.error("[engine] Z.ai fetch failed:", err instanceof Error ? err.message : String(err));
+              // Use mock fallback so the flow continues.
+              aiContent = "Confirmo que deseas continuar con el pago.";
+              log(ctx, {
+                nodeId: node.id,
+                nodeType: node.type as NodeType,
+                nodeLabel: label,
+                status: "error",
+                message: `Falló la llamada al Agente IA: ${err instanceof Error ? err.message : String(err)}. Se usó respuesta simulada.`,
+                durationMs: Date.now() - startedAt,
+              });
+            }
           }
+
           ctx.variables[outputVariable] = aiContent;
           ctx.variables["last_ai_response"] = aiContent;
           // Log detallado: entrada recibida y resultado generado
