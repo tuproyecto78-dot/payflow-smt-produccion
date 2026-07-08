@@ -117,8 +117,22 @@ export async function POST(req: Request) {
     // ─── Mode 2: Env admin fallback ──────────────────────────────────
     // This runs if Supabase failed OR Supabase is not configured
     if (isAdminEmail && passwordStr === adminPassword) {
+      // Try to resolve the real Prisma admin user ID so that DB queries
+      // (projects, workflows, etc.) filter by the correct userId.
+      // Falls back to "env-admin" if Prisma is unavailable.
+      let realUserId = "env-admin";
+      try {
+        const { db } = await import("@/lib/db");
+        const adminUser = await db.user.findUnique({ where: { email: adminEmail } });
+        if (adminUser) {
+          realUserId = adminUser.id;
+        }
+      } catch {
+        // Prisma not available — keep "env-admin"
+      }
+
       const token = await createSessionToken({
-        userId: "env-admin",
+        userId: realUserId,
         email: adminEmail,
         name: "Administrator",
         role: ROLES.SUPER_ADMIN,
@@ -127,7 +141,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         user: {
-          id: "env-admin",
+          id: realUserId,
           email: adminEmail,
           name: "Administrator",
           role: ROLES.SUPER_ADMIN,

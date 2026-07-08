@@ -1257,3 +1257,44 @@ Stage Summary:
   - PAYPHONE_EXTERNAL_NOTIFICATION_ENABLED=false (cambiar a true cuando configures webhook)
   - PAYPHONE_PREREGISTRATION_ENABLED=false (cambiar a true si quieres habilitar pre-registro)
 - Vercel env var URL: https://vercel.com/tuproyecto78-dot/payflow-smt-produccion/settings/environment-variables
+
+---
+Task ID: restore-example-flow
+Agent: main agent (Z.ai Code)
+Task: Restaurar el flujo de ejemplo en /dashboard/flujos (Flujos activos: 0 → >0)
+
+Work Log:
+- Investigated DB state via bun script: admin user (cmqk1k0xk0000mbijonylhhz4) exists with 2 projects ("Admin Workspace", "Negocio Sin Pagos") and 3 workflows including "Cobro por WhatsApp con IA".
+- Root cause of "Flujos activos: 0": the login route's env-admin fallback (Mode 2) set userId="env-admin" (a fake ID) in the session. Since no projects in the DB have userId="env-admin", /api/projects returned 0 projects.
+- Fix 1 (root cause): Updated src/app/api/auth/login/route.ts Mode 2 (env-admin fallback) to look up the real Prisma admin user by email and use that user's ID in the session. Falls back to "env-admin" only if Prisma is unavailable. Login UX is identical (same email, same password, same button). Supabase Auth (Mode 1) is untouched.
+- Fix 2 (new demo flow): Added a new template "Flujo demo WhatsApp + IA + PayPhone" to src/lib/templates.ts with exactly the 10-node structure the user specified:
+  1. Inicio (start)
+  2. Bienvenida WhatsApp — "¡Hola! 👋 Soy el asistente virtual. Puedo ayudarte con información y generar un link seguro de pago PayPhone."
+  3. Agente IA de pagos (ai_agent)
+  4. Crear link de pago PayPhone (create_payment, provider=PayPhone, providerMode=payphone_api_link) — "Te comparto tu link seguro de pago PayPhone. Cuando completes el pago, confirmaremos tu transacción."
+  5. Condición estado de pago (condition)
+  6. Mensaje pago pendiente — "Tu pago está pendiente. Cuando PayPhone confirme la transacción, te avisaremos."
+  7. Mensaje pago confirmado — "¡Pago confirmado! Gracias, tu transacción fue aprobada correctamente."
+  8. Mensaje pago fallido — "Tu pago no pudo ser procesado. Intenta nuevamente con un nuevo link seguro PayPhone."
+  9. Mensaje error — "Ocurrió un error procesando tu pago. Por favor intenta nuevamente en unos minutos."
+  10. Fin (end)
+  13 edges connecting all nodes. Template id: "demo-whatsapp-ia-payphone".
+- Fix 3 (seed): Updated scripts/seed-admin.ts to iterate over ALL templates (not just TEMPLATES[0]) and create each one idempotently in the admin's "Admin Workspace" project. The --reset-template flag now resets ALL templates.
+- Ran `bun run scripts/seed-admin.ts` — created the new "Flujo demo WhatsApp + IA + PayPhone" workflow in the DB (id: cmrbd1ry90001p2v1cx6nvjgf). Existing "Cobro por WhatsApp con IA" was preserved.
+- Verification:
+  - bun run lint → 0 errors, 0 warnings ✓
+  - /api/projects now returns 2 projects for the admin session ✓
+  - /dashboard shows "Flujos activos: 2" (was 0) ✓
+  - /dashboard/flujos shows "Admin Workspace" and "Negocio Sin Pagos" project cards ✓
+  - The "Flujo demo WhatsApp + IA + PayPhone" workflow exists in the DB under the "Admin Workspace" project with 10 nodes and 13 edges ✓
+  - Session userId now matches the real Prisma admin user ID (cmqk1k0xk0000mbijonylhhz4) instead of "env-admin" ✓
+  - Login UX is identical (same email/password/flow) ✓
+  - Supabase Auth (Mode 1) is untouched ✓
+  - No tables deleted, no DB reset, no destructive migrations ✓
+
+Stage Summary:
+- The example flow is restored: "Flujo demo WhatsApp + IA + PayPhone" (10 nodes, provider=payphone, mode=payphone_api_link) now exists in the DB.
+- /dashboard shows "Flujos activos: 2" (was 0).
+- /dashboard/flujos shows the admin's projects ("Admin Workspace" containing the demo flow, "Negocio Sin Pagos" containing "Solo IA").
+- The login bug (env-admin fake userId) is fixed at the root cause — the session now uses the real Prisma admin user ID.
+- No platform structure, login UX, landing, dashboard page, clients, solicitudes, PayPhone API Link, env vars, or Supabase Auth were changed.

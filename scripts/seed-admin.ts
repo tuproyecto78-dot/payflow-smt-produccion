@@ -69,37 +69,38 @@ async function main() {
     console.log(`✓ Removed ${leftover.length} empty "Admin Flow" workflow(s).`);
   }
 
-  // 4. Ensure the template flow exists.
-  const tpl = TEMPLATES[0];
-  const existing = await db.workflow.findFirst({
-    where: { projectId: project.id, name: tpl.name },
-    select: { id: true, name: true, updatedAt: true },
-  });
+  // 4. Ensure ALL template flows exist (idempotent — one row per template name).
+  for (const tpl of TEMPLATES) {
+    const existing = await db.workflow.findFirst({
+      where: { projectId: project.id, name: tpl.name },
+      select: { id: true, name: true, updatedAt: true },
+    });
 
-  if (!existing) {
-    await db.workflow.create({
-      data: {
-        name: tpl.name,
-        projectId: project.id,
-        nodesJson: JSON.stringify(tpl.nodes),
-        edgesJson: JSON.stringify(tpl.edges),
-      },
-    });
-    console.log(`✓ Template flow created: "${tpl.name}"`);
-  } else if (RESET_TEMPLATE) {
-    await db.workflow.update({
-      where: { id: existing.id },
-      data: {
-        nodesJson: JSON.stringify(tpl.nodes),
-        edgesJson: JSON.stringify(tpl.edges),
-      },
-    });
-    console.log(`✓ Template flow RESET to latest: "${tpl.name}"`);
-  } else {
-    console.log(`✓ Template flow already exists (preserved): "${tpl.name}"`);
-    console.log(`  Last updated: ${existing.updatedAt.toISOString()}`);
-    console.log(`  Use --reset-template to overwrite with the latest version.`);
+    if (!existing) {
+      await db.workflow.create({
+        data: {
+          name: tpl.name,
+          projectId: project.id,
+          nodesJson: JSON.stringify(tpl.nodes),
+          edgesJson: JSON.stringify(tpl.edges),
+        },
+      });
+      console.log(`✓ Template flow created: "${tpl.name}"`);
+    } else if (RESET_TEMPLATE) {
+      await db.workflow.update({
+        where: { id: existing.id },
+        data: {
+          nodesJson: JSON.stringify(tpl.nodes),
+          edgesJson: JSON.stringify(tpl.edges),
+        },
+      });
+      console.log(`✓ Template flow RESET to latest: "${tpl.name}"`);
+    } else {
+      console.log(`✓ Template flow already exists (preserved): "${tpl.name}"`);
+      console.log(`  Last updated: ${existing.updatedAt.toISOString()}`);
+    }
   }
+  console.log(`  Tip: use --reset-template to overwrite all templates with the latest version.`);
 
   // Summary
   const allWorkflows = await db.workflow.findMany({
