@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
+import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
+import { ROLES } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,9 @@ export const dynamic = "force-dynamic";
  * Each workflow includes: id, name, projectId, projectName, nodeCount,
  * updatedAt, and a derived provider/channel/status for display.
  *
+ * For admin users, auto-seeds the demo flow if they have 0 workflows
+ * (critical for Vercel ephemeral databases).
+ *
  * Used by /dashboard/flujos to render workflow cards.
  */
 export async function GET() {
@@ -20,6 +25,14 @@ export async function GET() {
   }
 
   try {
+    // Auto-seed: for admin users, ensure they have the demo flow.
+    // This is critical for Vercel where the DB is ephemeral.
+    const isAdmin =
+      session.role === ROLES.ADMIN || session.role === ROLES.SUPER_ADMIN;
+    if (isAdmin) {
+      await ensureDemoFlowForAdmin(session.userId);
+    }
+
     const projects = await db.project.findMany({
       where: { userId: session.userId },
       select: {

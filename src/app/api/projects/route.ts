@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
+import { ROLES } from "@/lib/roles";
 
 /**
  * GET /api/projects
  * Returns user's projects. Gracefully handles missing DATABASE_URL.
+ *
+ * For admin users, auto-seeds the demo flow if they have 0 projects
+ * (critical for Vercel ephemeral databases).
  */
 export async function GET() {
   const session = await getSession();
@@ -14,6 +19,16 @@ export async function GET() {
   // Try Prisma — if not available, return empty list
   try {
     const { db } = await import("@/lib/db");
+
+    // Auto-seed: for admin users, ensure they have at least one project
+    // with the demo flow. This is critical for Vercel where the DB is
+    // ephemeral and resets on cold start.
+    const isAdmin =
+      session.role === ROLES.ADMIN || session.role === ROLES.SUPER_ADMIN;
+    if (isAdmin) {
+      await ensureDemoFlowForAdmin(session.userId);
+    }
+
     const projects = await db.project.findMany({
       where: { userId: session.userId },
       orderBy: { updatedAt: "desc" },
