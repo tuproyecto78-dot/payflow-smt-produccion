@@ -1,15 +1,10 @@
 /**
- * PayFlow SMT — Canonical local demo workflow.
+ * PayFlow SMT — Canonical local demo workflow (RESET — clean & stable).
  *
- * This is the single source of truth for the "Cobro por WhatsApp con IA"
- * demo flow. It exists in code (not in a database) so it's always
- * available — even when Supabase is down, DATABASE_URL is missing, or
- * no workflows exist in the DB.
+ * Single source of truth for the "Flujo demo WhatsApp + IA + PayPhone" flow.
+ * Exists in code (not in a database) so it's always available.
  *
- * The demo flow is read-only by default. Users can open it in the visual
- * editor, simulate it, or duplicate it — but saving requires a real DB.
- *
- * Provider: mock (default) · PayPhone API Link available as real option.
+ * Provider: Mock (default) · PayPhone API Link available as real option.
  *
  * Reglas:
  *   - Crear pago real con PayPhone = payment_pending
@@ -40,45 +35,43 @@ export interface DemoWorkflow {
   edges: FlowEdge[];
 }
 
-// ─── Nodes (10 nodes, exact positions per spec) ──────────────────────
+// ─── Nodes (10 nodes per spec) ────────────────────────────────────────
 
 const DEMO_NODES: FlowNode[] = [
   // 1. Inicio
   {
     id: "start",
     type: "start",
-    position: { x: 80, y: 220 },
+    position: { x: 80, y: 300 },
     data: {
       label: "Inicio",
-      description:
-        "Inicia el flujo cuando llega un mensaje del cliente por WhatsApp.",
+      description: "Inicia el flujo cuando llega un mensaje del cliente por WhatsApp.",
       trigger: "manual",
     },
   },
-  // 2. Mensaje inicial WhatsApp
+  // 2. Bienvenida WhatsApp
   {
     id: "whatsapp-initial",
     type: "whatsapp",
-    position: { x: 280, y: 160 },
+    position: { x: 300, y: 220 },
     data: {
-      label: "Mensaje inicial",
+      label: "Bienvenida WhatsApp",
       description: "Enviar un mensaje de bienvenida por WhatsApp.",
-      phoneNumber: "+15551234567",
+      phoneNumber: "+593987654321",
       message:
         "¡Hola! 👋 Soy el asistente virtual. Puedo ayudarte con información y generar un link seguro de pago PayPhone.",
       outputVariable: "user_response",
       defaultResponse: "sí",
-      templateName: "confirmacion_pedido",
     },
   },
   // 3. Agente IA de pagos
   {
     id: "ai-agent",
     type: "ai_agent",
-    position: { x: 280, y: 340 },
+    position: { x: 300, y: 420 },
     data: {
       label: "Agente IA de pagos",
-      description: "Ejecutar un agente de IA para generar una respuesta.",
+      description: "Agente IA procesa y guía el pago.",
       systemPrompt:
         "Eres un agente de cobros por WhatsApp. Confirmas la intención de pago del cliente de forma amable y breve. REGLA: nunca confirmas pagos exitosos, solo confirmas la intención del cliente.",
       prompt:
@@ -87,18 +80,16 @@ const DEMO_NODES: FlowNode[] = [
       outputVariable: "ai_confirmation",
     },
   },
-  // 4. Crear pago
+  // 4. Crear link de pago
   {
     id: "create-payment",
     type: "create_payment",
-    position: { x: 520, y: 250 },
+    position: { x: 560, y: 320 },
     data: {
-      label: "Crear pago",
-      description: "Generar un cobro con 4 resultados posibles.",
-      moduleDescription:
-        "Módulo de Pagos. Genera un cobro y se bifurca en 4 resultados. Proveedor predeterminado: Mock.",
+      label: "Crear link de pago",
+      description: "Genera una orden y solicita el pago.",
       paymentProvider: "mock",
-      paymentProviderLabel: "Mock (predeterminado)",
+      paymentProviderLabel: "Mock",
       provider: "Mock",
       providerMode: "payphone_api_link",
       amount: 49.99,
@@ -107,26 +98,21 @@ const DEMO_NODES: FlowNode[] = [
       paymentDescription: "Pedido Pro",
       customerName: "Cliente WhatsApp",
       customer: "Cliente WhatsApp",
-      phoneNumber: "+15551234567",
-      customerPhone: "+15551234567",
+      phoneNumber: "+593987654321",
+      customerPhone: "+593987654321",
       orderId: "ord_{{timestamp}}",
       generatedPaymentUrl: "https://pay.payflow.smt/ord_{{timestamp}}",
       paymentStatus: "pendiente hasta ejecutar",
-      possibleResults: [
-        "payment_success",
-        "payment_failed",
-        "payment_pending",
-        "error",
-      ],
+      possibleResults: ["payment_success", "payment_failed", "payment_pending", "error"],
       message:
         "Te comparto tu link seguro de pago PayPhone. Cuando completes el pago, confirmaremos tu transacción.",
     },
   },
-  // 5. Condición estado del pago
+  // 5. Estado del pago
   {
     id: "payment-status",
     type: "condition",
-    position: { x: 760, y: 250 },
+    position: { x: 820, y: 320 },
     data: {
       label: "Estado del pago",
       description: "Evalúa el resultado del pago.",
@@ -141,11 +127,11 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-success",
     type: "whatsapp",
-    position: { x: 1030, y: 100 },
+    position: { x: 1080, y: 140 },
     data: {
       label: "WhatsApp éxito",
       description: "Mensaje cuando el pago fue confirmado.",
-      phoneNumber: "+15551234567",
+      phoneNumber: "+593987654321",
       message:
         "¡Pago confirmado! Gracias, tu transacción fue aprobada correctamente.",
     },
@@ -154,11 +140,11 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-failed",
     type: "whatsapp",
-    position: { x: 1030, y: 240 },
+    position: { x: 1080, y: 280 },
     data: {
       label: "WhatsApp pago fallido",
       description: "Mensaje cuando el pago falla.",
-      phoneNumber: "+15551234567",
+      phoneNumber: "+593987654321",
       message:
         "No pudimos confirmar tu pago. Puedes intentar nuevamente o contactar al comercio.",
     },
@@ -167,11 +153,11 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-pending",
     type: "whatsapp",
-    position: { x: 1030, y: 380 },
+    position: { x: 1080, y: 420 },
     data: {
       label: "WhatsApp pago pendiente",
       description: "Mensaje cuando el pago queda pendiente.",
-      phoneNumber: "+15551234567",
+      phoneNumber: "+593987654321",
       message:
         "Tu pago está pendiente. Cuando PayPhone confirme la transacción, te avisaremos.",
     },
@@ -180,11 +166,11 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-error",
     type: "whatsapp",
-    position: { x: 1030, y: 520 },
+    position: { x: 1080, y: 560 },
     data: {
       label: "WhatsApp error",
       description: "Mensaje cuando ocurre un error.",
-      phoneNumber: "+15551234567",
+      phoneNumber: "+593987654321",
       message:
         "Ocurrió un problema al generar el pago. Un asesor revisará tu caso.",
     },
@@ -193,7 +179,7 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "end",
     type: "end",
-    position: { x: 1280, y: 300 },
+    position: { x: 1340, y: 340 },
     data: {
       label: "Fin",
       description: "Finaliza el flujo.",
@@ -225,8 +211,8 @@ const DEMO_EDGES: FlowEdge[] = [
 
 export const demoWhatsappAiPaymentFlow: DemoWorkflow = {
   id: DEMO_WORKFLOW_ID,
-  name: "Cobro por WhatsApp con IA",
-  description: "Flujo demo para cobrar por WhatsApp usando IA y pagos.",
+  name: "Flujo demo WhatsApp + IA + PayPhone",
+  description: "Flujo demo para cobrar por WhatsApp usando IA y link seguro PayPhone.",
   status: "testing",
   statusLabel: "En prueba",
   savedState: "sin guardar",
@@ -237,35 +223,25 @@ export const demoWhatsappAiPaymentFlow: DemoWorkflow = {
   edges: DEMO_EDGES,
 };
 
-/**
- * Returns the demo workflow if the id matches, null otherwise.
- */
+/** Returns the demo workflow if the id matches, null otherwise. */
 export function getDemoWorkflowById(id: string): DemoWorkflow | null {
   if (id === DEMO_WORKFLOW_ID) return demoWhatsappAiPaymentFlow;
   return null;
 }
 
-/**
- * True if the id is the demo workflow id.
- */
+/** True if the id is the demo workflow id. */
 export function isDemoWorkflowId(id: string): boolean {
   return id === DEMO_WORKFLOW_ID;
 }
 
-/**
- * The demo project that contains the demo workflow.
- * Used as fallback when no projects exist in the DB.
- */
+/** The demo project that contains the demo workflow. */
 export const demoProject = {
   id: "demo-project",
-  name: "Cobro por WhatsApp con IA",
-  description: "Flujo demo para cobrar por WhatsApp usando IA y pagos.",
+  name: "Flujo demo WhatsApp + IA + PayPhone",
+  description: "Flujo demo para cobrar por WhatsApp usando IA y link seguro PayPhone.",
 };
 
-/**
- * Convert the demo workflow into the FlowItem shape expected by the
- * /api/workflows GET response and the /dashboard + /dashboard/flujos UIs.
- */
+/** Convert the demo workflow into the FlowItem shape expected by the UIs. */
 export function getDemoFlowItem() {
   return {
     id: demoWhatsappAiPaymentFlow.id,

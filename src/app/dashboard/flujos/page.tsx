@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, Sparkles, Loader2, ExternalLink, Eye, Play, Copy, Power } from "lucide-react";
+import { Workflow, Sparkles, Loader2, ExternalLink, Eye, Play, Copy, Power, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
 
@@ -149,9 +149,12 @@ export default function FlujosPage() {
         <div className="grid gap-4 md:grid-cols-2">
           {workflows.map((w) => {
             const isInactive = w.name.startsWith("[Desactivado]");
-            const statusLabel = isInactive ? "Desactivado" : w.status === "draft" ? "Borrador" : "Activo";
+            const isDemo = w.id === "demo-cobro-whatsapp-ia";
+            const statusLabel = isInactive ? "Desactivado" : isDemo ? "En prueba" : w.status === "draft" ? "Borrador" : "Activo";
             const statusColor = isInactive
               ? "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300"
+              : isDemo
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
               : w.status === "draft"
               ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
               : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
@@ -197,7 +200,7 @@ export default function FlujosPage() {
                       className="h-8 text-xs"
                     >
                       <Eye className="size-3.5 mr-1" />
-                      Ver
+                      Abrir
                     </Button>
                   </Link>
                   <Link href={`/dashboard/flujos/${w.id}`}>
@@ -207,9 +210,34 @@ export default function FlujosPage() {
                       className="h-8 text-xs"
                     >
                       <Play className="size-3.5 mr-1" />
-                      Probar simulador
+                      Simulador
                     </Button>
                   </Link>
+                  <Link href={`/dashboard/flujos/${w.id}`}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                    >
+                      Ejecutar
+                    </Button>
+                  </Link>
+                  {isDemo && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem(`payflow_demo_workflow_${w.id}`);
+                        } catch {}
+                        toast.success("Flujo demo restablecido. Abre el flujo para verlo.");
+                      }}
+                    >
+                      <RotateCcw className="size-3.5 mr-1" />
+                      Restablecer demo
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"

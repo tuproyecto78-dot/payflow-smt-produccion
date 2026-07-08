@@ -66,6 +66,7 @@ import {
   Check,
   AlertTriangle,
   LayoutTemplate,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -424,9 +425,67 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     [setNodes, setEdges, fitView]
   );
 
+  /** Reset the demo flow to its original state from code. */
+  function resetDemo() {
+    if (!isDemoWorkflowId(workflow.id)) {
+      toast.info("Solo el flujo demo puede restablecerse.");
+      return;
+    }
+    const demo = getDemoWorkflowById(workflow.id);
+    if (!demo) {
+      toast.error("No se pudo cargar el flujo demo.");
+      return;
+    }
+    // Clear localStorage for this demo.
+    try {
+      localStorage.removeItem(`payflow_demo_workflow_${workflow.id}`);
+    } catch {
+      // ignore
+    }
+    // Reload nodes + edges from the clean demo definition.
+    setNodes(demo.nodes.map(toFlowNode));
+    setEdges(
+      demo.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
+        type: "edgeWithDelete",
+        selectable: true,
+        focusable: true,
+      }))
+    );
+    setName(demo.name);
+    setSelectedId(DEMO_DEFAULT_SELECTED_NODE);
+    setDirty(false);
+    toast.success("Flujo demo restablecido.");
+    setTimeout(() => fitView({ padding: 0.25, duration: 400, maxZoom: 1.2 }), 100);
+  }
+
   async function save() {
     setSaving(true);
     try {
+      // ─── Demo flow: save to localStorage ONLY (no DB, no API) ────
+      if (isDemoWorkflowId(workflow.id)) {
+        try {
+          localStorage.setItem(
+            `payflow_demo_workflow_${workflow.id}`,
+            JSON.stringify({
+              name,
+              nodes: nodes.map(toApiNode),
+              edges: edges.map(toApiEdge),
+              updatedAt: new Date().toISOString(),
+            })
+          );
+          setDirty(false);
+          toast.success("Flujo demo guardado localmente.");
+        } catch {
+          toast.error("No se pudo guardar localmente. Intenta nuevamente.");
+        }
+        return;
+      }
+      // ─── Real flow: try API save ──────────────────────────────────
       const res = await fetch(`/api/workflows/${workflow.id}`, {
         method: "PUT",
         credentials: "include",
@@ -438,11 +497,9 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         }),
       });
 
-      // Read the response body once (works for both ok and error responses).
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // Show the backend's actual error message when available.
         if (res.status === 401) {
           toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
           setTimeout(() => {
@@ -450,65 +507,32 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           }, 1500);
           return;
         }
-        if (res.status === 404) {
-          // Demo flow or not-found — save to localStorage as fallback.
-          try {
-            localStorage.setItem(
-              `payflow:demo:${workflow.id}`,
-              JSON.stringify({
-                name,
-                nodes: nodes.map(toApiNode),
-                edges: edges.map(toApiEdge),
-                updatedAt: new Date().toISOString(),
-              })
-            );
-            setDirty(false);
-            toast.success("Flujo demo guardado localmente.");
-          } catch {
-            toast.info(
-              "Este es un flujo demo local. Puedes usarlo como plantilla, pero los cambios no se guardan en la base de datos."
-            );
-            setDirty(false);
-          }
-          return;
+        // Fallback: save to localStorage so the user doesn't lose work.
+        try {
+          localStorage.setItem(
+            `payflow_workflow_${workflow.id}`,
+            JSON.stringify({
+              name,
+              nodes: nodes.map(toApiNode),
+              edges: edges.map(toApiEdge),
+              updatedAt: new Date().toISOString(),
+            })
+          );
+          setDirty(false);
+          toast.success("Guardado local temporal. La base no está disponible.");
+        } catch {
+          toast.error(data?.error || "No se pudo guardar el flujo. Intenta nuevamente.");
         }
-        if (res.status === 503) {
-          // DB not available — save to localStorage as fallback.
-          try {
-            localStorage.setItem(
-              `payflow:workflow:${workflow.id}`,
-              JSON.stringify({
-                name,
-                nodes: nodes.map(toApiNode),
-                edges: edges.map(toApiEdge),
-                updatedAt: new Date().toISOString(),
-              })
-            );
-            setDirty(false);
-            toast.success("Guardado local temporal. La base no está disponible.");
-          } catch {
-            toast.error(
-              data?.error ||
-                "No se pudo guardar el flujo. Intenta nuevamente."
-            );
-          }
-          return;
-        }
-        toast.error(data?.error || `Error al guardar el flujo (${res.status}).`);
-        console.error("[save] backend error:", {
-          status: res.status,
-          data,
-        });
         return;
       }
 
       setDirty(false);
       toast.success("Flujo guardado correctamente.");
     } catch (err) {
-      // Network error — try localStorage fallback so the user doesn't lose work.
+      // Network error — try localStorage fallback.
       try {
         localStorage.setItem(
-          `payflow:workflow:${workflow.id}`,
+          `payflow_workflow_${workflow.id}`,
           JSON.stringify({
             name,
             nodes: nodes.map(toApiNode),
@@ -519,8 +543,8 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         setDirty(false);
         toast.success("Guardado local temporal. La base no está disponible.");
       } catch {
-        toast.error("Error de red al guardar");
-        console.error("[save] network error:", err);
+        toast.error("No se pudo guardar localmente. Intenta nuevamente.");
+        console.error("[save] error:", err);
       }
     } finally {
       setSaving(false);
@@ -745,6 +769,18 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           )}
           Ejecutar
         </Button>
+        {isDemoWorkflowId(workflow.id) && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={resetDemo}
+            className="shrink-0"
+            title="Volver al esquema limpio del demo"
+          >
+            <RotateCcw className="size-4 mr-1.5" />
+            <span className="hidden sm:inline">Restablecer demo</span>
+          </Button>
+        )}
       </header>
 
       {/* Área principal del editor */}
