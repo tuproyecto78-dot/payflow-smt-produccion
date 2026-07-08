@@ -70,6 +70,11 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TEMPLATES, type WorkflowTemplate } from "@/lib/templates";
+import {
+  isDemoWorkflowId,
+  getDemoWorkflowById,
+  DEMO_DEFAULT_SELECTED_NODE,
+} from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 
 const nodeTypes = { payflow: PayFlowNode };
 
@@ -147,6 +152,22 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         const wf = data.workflow;
         setName(wf.name);
         const flowNodes: FlowNode[] = wf.nodes || [];
+
+        // ─── Demo flow: auto-select "create-payment" node ──────────
+        // When opening the demo flow, select the "Crear pago" node by
+        // default so the right panel shows the payment config.
+        if (isDemoWorkflowId(workflow.id)) {
+          const demo = getDemoWorkflowById(workflow.id);
+          if (demo) {
+            const defaultSelected =
+              flowNodes.find((n) => n.id === DEMO_DEFAULT_SELECTED_NODE)?.id ||
+              null;
+            if (defaultSelected) {
+              setSelectedId(defaultSelected);
+            }
+          }
+        }
+
         if (flowNodes.length === 0) {
           const startId = makeId();
           const endId = makeId();
@@ -199,10 +220,10 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     };
   }, [workflow.id]);
 
-  // Ajustar vista tras la primera carga
+  // Ajustar vista tras la primera carga — fitView centra todos los nodos
   useEffect(() => {
     if (loaded && nodes.length > 0) {
-      const t = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100);
+      const t = setTimeout(() => fitView({ padding: 0.25, duration: 400, maxZoom: 1.2 }), 150);
       return () => clearTimeout(t);
     }
   }, [loaded, nodes.length, fitView]);
