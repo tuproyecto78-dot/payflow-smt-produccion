@@ -75,8 +75,10 @@ import {
   getDemoWorkflowById,
   DEMO_DEFAULT_SELECTED_NODE,
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
+import { EdgeWithDelete } from "./nodes/edge-with-delete";
 
 const nodeTypes = { payflow: PayFlowNode };
+const edgeTypes = { edgeWithDelete: EdgeWithDelete };
 
 function toFlowNode(n: FlowNode): Node {
   return {
@@ -243,7 +245,18 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges((eds) => addEdge({ ...connection, id: `e_${makeId()}` }, eds));
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...connection,
+            id: `e_${makeId()}`,
+            type: "edgeWithDelete",
+            selectable: true,
+            focusable: true,
+          },
+          eds
+        )
+      );
       setDirty(true);
     },
     [setEdges]
@@ -608,12 +621,19 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
               setSelectedId(n.id);
               setActiveTab("config");
             }}
+            onEdgeClick={() => {
+              // Edge is selected via ReactFlow's internal state.
+              // The delete button appears automatically on the selected edge.
+            }}
             onPaneClick={() => setSelectedId(null)}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             defaultEdgeOptions={{
-              type: "smoothstep",
+              type: "edgeWithDelete",
+              selectable: true,
+              focusable: true,
               style: { stroke: "#94a3b8", strokeWidth: 2 },
             }}
             connectionMode={ConnectionMode.Loose}
