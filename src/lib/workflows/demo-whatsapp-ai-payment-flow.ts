@@ -65,9 +65,10 @@ const DEMO_NODES: FlowNode[] = [
       description: "Enviar un mensaje de bienvenida por WhatsApp.",
       phoneNumber: "+15551234567",
       message:
-        "¡Hola! 👋 Soy el asistente virtual. Puedo ayudarte con información y generar un link seguro de pago.",
+        "¡Hola! 👋 Soy el asistente virtual. Puedo ayudarte con información y generar un link seguro de pago PayPhone.",
       outputVariable: "user_response",
       defaultResponse: "sí",
+      templateName: "confirmacion_pedido",
     },
   },
   // 3. Agente IA de pagos
@@ -109,7 +110,7 @@ const DEMO_NODES: FlowNode[] = [
       phoneNumber: "+15551234567",
       customerPhone: "+15551234567",
       orderId: "ord_{{timestamp}}",
-      generatedPaymentUrl: "https://pay.payflow.smt/ord_...",
+      generatedPaymentUrl: "https://pay.payflow.smt/ord_{{timestamp}}",
       paymentStatus: "pendiente hasta ejecutar",
       possibleResults: [
         "payment_success",
