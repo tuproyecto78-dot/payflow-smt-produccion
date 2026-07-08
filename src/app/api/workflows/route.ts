@@ -3,19 +3,19 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
-import { getDemoFlowItem } from "@/lib/workflows/demo-workflow";
+import { getDemoFlowItem, isDemoWorkflowId } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/workflows
  *
- * Returns all workflows owned by the current user (across all their projects).
- * Each workflow includes: id, name, projectId, projectName, nodeCount,
- * updatedAt, and a derived provider/channel/status for display.
+ * Returns all workflows owned by the current user (across all their projects)
+ * PLUS the local demo flow "Cobro por WhatsApp con IA".
  *
- * For admin users with 0 workflows, includes the demo flow as fallback
- * so the dashboard never shows an empty state.
+ * The demo flow is ALWAYS included (even when the DB has other flows) so
+ * the dashboard never shows an empty state and users always have a
+ * visual example to open.
  */
 export async function GET() {
   const session = await getSession();
@@ -37,7 +37,7 @@ export async function GET() {
   }> = [];
 
   try {
-    // Auto-seed: for admin users, ensure they have the demo flow.
+    // Auto-seed: for admin users, ensure they have the demo flow in DB too.
     const isAdmin =
       session.role === ROLES.ADMIN || session.role === ROLES.SUPER_ADMIN;
     if (isAdmin) {
@@ -63,6 +63,9 @@ export async function GET() {
 
     for (const p of projects) {
       for (const w of p.workflows) {
+        // Skip the demo flow from DB — we'll add the local version below.
+        if (isDemoWorkflowId(w.id)) continue;
+
         let nodes: Array<{ type?: string; data?: Record<string, unknown> }> = [];
         try {
           nodes = JSON.parse(w.nodesJson || "[]");
@@ -99,16 +102,14 @@ export async function GET() {
       }
     }
   } catch (err) {
-    // DB not available — we'll fall back to the demo flow below.
+    // DB not available — we'll still include the demo flow below.
     console.error("[/api/workflows GET] DB error, using demo fallback:", err);
   }
 
-  // If no workflows were found (DB empty or unavailable), include the demo flow.
-  if (workflows.length === 0) {
-    workflows.push(getDemoFlowItem());
-  }
+  // ALWAYS include the local demo flow (first in the list).
+  workflows.unshift(getDemoFlowItem());
 
-  // Sort by updatedAt desc.
+  // Sort by updatedAt desc (demo flow has a recent updatedAt so it stays near top).
   workflows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
   return NextResponse.json({ workflows });

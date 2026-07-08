@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, Sparkles, Loader2, RotateCcw, Eye, Play, Copy, Power } from "lucide-react";
+import { Workflow, Sparkles, Loader2, ExternalLink, Eye, Play, Copy, Power } from "lucide-react";
 import { toast } from "sonner";
 import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
-import { useAuthStore } from "@/stores/auth-store";
 
 interface FlowItem {
   id: string;
@@ -24,13 +22,9 @@ interface FlowItem {
 }
 
 export default function FlujosPage() {
-  const router = useRouter();
   const [workflows, setWorkflows] = useState<FlowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createFlowOpen, setCreateFlowOpen] = useState(false);
-  const [restoring, setRestoring] = useState(false);
-  const { user } = useAuthStore();
-  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
 
   useEffect(() => {
     loadWorkflows();
@@ -51,37 +45,6 @@ export default function FlujosPage() {
     }
   }
 
-  async function handleRestoreDemo() {
-    setRestoring(true);
-    try {
-      const res = await fetch("/api/workflows/restore-demo", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.status === 401) {
-        toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
-        setTimeout(() => { window.location.href = "/login?next=/dashboard/flujos"; }, 2000);
-        return;
-      }
-      if (res.status === 403) {
-        toast.error("No tienes permisos para esta acción.");
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "No se pudo restaurar el flujo de ejemplo.");
-        return;
-      }
-      // Success — show the message (works for both supabase and demo-fallback)
-      toast.success(data.message || "Flujo de ejemplo restaurado.");
-      await loadWorkflows();
-    } catch {
-      toast.error("Error de red al restaurar el flujo.");
-    } finally {
-      setRestoring(false);
-    }
-  }
 
   async function handleDuplicate(w: FlowItem) {
     try {
@@ -145,20 +108,12 @@ export default function FlujosPage() {
           <p className="text-muted-foreground mt-1">Canales de pago automatizados por WhatsApp</p>
         </div>
         <div className="flex gap-2">
-          {isAdmin && (
-            <Button
-              onClick={handleRestoreDemo}
-              disabled={restoring}
-              variant="outline"
-            >
-              {restoring ? (
-                <Loader2 className="size-4 mr-2 animate-spin" />
-              ) : (
-                <RotateCcw className="size-4 mr-2" />
-              )}
-              Restaurar flujo de ejemplo
+          <Link href="/dashboard/flujos/demo-cobro-whatsapp-ia">
+            <Button variant="outline">
+              <ExternalLink className="size-4 mr-2" />
+              Abrir flujo demo
             </Button>
-          )}
+          </Link>
           <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
             <Sparkles className="size-4 mr-2" />
             Crear flujo sugerido
@@ -178,16 +133,12 @@ export default function FlujosPage() {
             Crea tu primer flujo automático o restaura el flujo de ejemplo para empezar.
           </p>
           <div className="flex gap-2 justify-center">
-            {isAdmin && (
-              <Button onClick={handleRestoreDemo} disabled={restoring} variant="outline">
-                {restoring ? (
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                ) : (
-                  <RotateCcw className="size-4 mr-2" />
-                )}
-                Restaurar flujo de ejemplo
+            <Link href="/dashboard/flujos/demo-cobro-whatsapp-ia">
+              <Button variant="outline">
+                <ExternalLink className="size-4 mr-2" />
+                Abrir flujo demo
               </Button>
-            )}
+            </Link>
             <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
               <Sparkles className="size-4 mr-2" />
               Crear flujo sugerido

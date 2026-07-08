@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { EditorView } from "@/components/editor/editor-view";
 import type { WorkflowSummary } from "@/stores/app-store";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import {
+  isDemoWorkflowId,
+  getDemoWorkflowById,
+  demoWhatsappAiPaymentFlow,
+} from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 
 interface WorkflowData {
   id: string;
@@ -20,7 +25,6 @@ interface WorkflowData {
 
 export default function WorkflowEditorPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const [workflow, setWorkflow] = useState<WorkflowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +37,26 @@ export default function WorkflowEditorPage() {
   async function loadWorkflow(id: string) {
     setLoading(true);
     setError(null);
+
+    // ─── Local demo flow: load from code, no API call ──────────────
+    if (isDemoWorkflowId(id)) {
+      const demo = getDemoWorkflowById(id);
+      if (demo) {
+        setWorkflow({
+          id: demo.id,
+          name: demo.name,
+          projectId: "demo-project",
+          nodes: demo.nodes,
+          edges: demo.edges,
+          createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        setLoading(false);
+        return;
+      }
+    }
+
+    // ─── Real flow: load from API ──────────────────────────────────
     try {
       const res = await fetch(`/api/workflows/${id}`, { credentials: "include" });
       if (!res.ok) {
@@ -61,6 +85,7 @@ export default function WorkflowEditorPage() {
   if (error || !workflow) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <AlertCircle className="size-10 text-muted-foreground/40" />
         <p className="text-sm text-muted-foreground max-w-md">
           {error || "Flujo no encontrado."}
         </p>
@@ -81,6 +106,8 @@ export default function WorkflowEditorPage() {
     updatedAt: workflow.updatedAt,
   };
 
+  const isDemo = isDemoWorkflowId(workflow.id);
+
   return (
     <div className="h-screen flex flex-col" style={{ height: "100vh" }}>
       {/* Top bar with back button */}
@@ -93,6 +120,11 @@ export default function WorkflowEditorPage() {
         </Link>
         <span className="text-xs text-muted-foreground">/</span>
         <span className="text-xs font-medium truncate">{workflow.name}</span>
+        {isDemo && (
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+            En prueba
+          </span>
+        )}
       </div>
 
       {/* Editor fills remaining space */}

@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
-import { demoProject } from "@/lib/workflows/demo-workflow";
+import { demoProject } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 
 /**
  * GET /api/projects
- * Returns user's projects. Gracefully handles missing DATABASE_URL.
+ * Returns user's projects PLUS the local demo project.
  *
- * For admin users with 0 projects, includes the demo project as fallback
- * so the dashboard never shows an empty state.
+ * The demo project is ALWAYS included so the dashboard never shows an
+ * empty state, even when the DB is unavailable.
  */
 export async function GET() {
   const session = await getSession();
@@ -17,7 +17,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let projects: Array<{
+  const projects: Array<{
     id: string;
     name: string;
     description: string | null;
@@ -26,13 +26,11 @@ export async function GET() {
     _count?: { workflows: number };
   }> = [];
 
-  // Try Prisma — if not available, we'll fall back to the demo project.
+  // Try Prisma — if not available, we'll still include the demo project.
   try {
     const { db } = await import("@/lib/db");
 
-    // Auto-seed: for admin users, ensure they have at least one project
-    // with the demo flow. This is critical for Vercel where the DB is
-    // ephemeral and resets on cold start.
+    // Auto-seed: for admin users, ensure they have at least one project.
     const isAdmin =
       session.role === ROLES.ADMIN || session.role === ROLES.SUPER_ADMIN;
     if (isAdmin) {
@@ -44,29 +42,29 @@ export async function GET() {
       orderBy: { updatedAt: "desc" },
       include: { _count: { select: { workflows: true } } },
     });
-    projects = dbProjects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      createdAt: p.createdAt.toISOString(),
-      updatedAt: p.updatedAt.toISOString(),
-      _count: { workflows: p._count?.workflows ?? 0 },
-    }));
+    for (const p of dbProjects) {
+      projects.push({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        createdAt: p.createdAt.toISOString(),
+        updatedAt: p.updatedAt.toISOString(),
+        _count: { workflows: p._count?.workflows ?? 0 },
+      });
+    }
   } catch {
-    // Prisma not available — we'll fall back to the demo project below.
+    // Prisma not available — we'll still include the demo project below.
   }
 
-  // If no projects were found, include the demo project as fallback.
-  if (projects.length === 0) {
-    projects.push({
-      id: demoProject.id,
-      name: demoProject.name,
-      description: demoProject.description,
-      createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
-      updatedAt: new Date().toISOString(),
-      _count: { workflows: 1 },
-    });
-  }
+  // ALWAYS include the local demo project (first in the list).
+  projects.unshift({
+    id: demoProject.id,
+    name: demoProject.name,
+    description: demoProject.description,
+    createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+    updatedAt: new Date().toISOString(),
+    _count: { workflows: 1 },
+  });
 
   return NextResponse.json({ projects });
 }
