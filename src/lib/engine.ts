@@ -455,6 +455,9 @@ export async function executeWorkflow(
           const zaiBaseUrl = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
           const zaiModel = process.env.ZAI_MODEL || "glm-5.1";
 
+          // Default mock response used when Z.ai is not available.
+          const mockResponse = "Confirmo que deseas continuar con el pago.";
+
           console.log("[engine] AI agent execution:", {
             provider: "zai",
             model: zaiModel,
@@ -464,13 +467,13 @@ export async function executeWorkflow(
 
           if (!zaiApiKey) {
             // Missing API key — use mock fallback so the flow doesn't crash.
-            aiContent = "Confirmo que deseas continuar con el pago.";
+            aiContent = mockResponse;
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "error",
-              message: "Falta ZAI_API_KEY. Se usó respuesta simulada.",
+              message: "Falta ZAI_API_KEY en las variables de entorno. Se usó respuesta simulada.",
               durationMs: Date.now() - startedAt,
             });
           } else {
@@ -499,27 +502,50 @@ export async function executeWorkflow(
                   statusText: res.statusText,
                   body: errText.slice(0, 500),
                 });
-                throw new Error(`Z.ai devolvió HTTP ${res.status}: ${errText.slice(0, 200)}`);
+
+                // Build a short, clear error message based on the HTTP status.
+                let shortMsg: string;
+                if (res.status === 401 || res.status === 403) {
+                  shortMsg = "ZAI_API_KEY inválida o sin permisos. Verifica tu API key en Vercel.";
+                } else if (res.status === 429) {
+                  shortMsg = "Saldo insuficiente en Z.ai. Recarga tu cuenta en z.ai para usar la IA real.";
+                } else if (res.status === 404) {
+                  shortMsg = `Modelo "${zaiModel}" no encontrado en Z.ai. Verifica ZAI_MODEL en Vercel.`;
+                } else if (res.status >= 500) {
+                  shortMsg = `Z.ai no disponible (HTTP ${res.status}). Intenta nuevamente.`;
+                } else {
+                  shortMsg = `Z.ai devolvió HTTP ${res.status}.`;
+                }
+
+                aiContent = mockResponse;
+                log(ctx, {
+                  nodeId: node.id,
+                  nodeType: node.type as NodeType,
+                  nodeLabel: label,
+                  status: "error",
+                  message: `${shortMsg} Se usó respuesta simulada.`,
+                  durationMs: Date.now() - startedAt,
+                });
+              } else {
+                const data = await res.json();
+                aiContent = data?.choices?.[0]?.message?.content || mockResponse;
+
+                console.log("[engine] Z.ai success:", {
+                  model: zaiModel,
+                  responseLength: aiContent.length,
+                  responsePreview: aiContent.slice(0, 100),
+                });
               }
-
-              const data = await res.json();
-              aiContent = data?.choices?.[0]?.message?.content || "";
-
-              console.log("[engine] Z.ai success:", {
-                model: zaiModel,
-                responseLength: aiContent.length,
-                responsePreview: aiContent.slice(0, 100),
-              });
             } catch (err) {
               console.error("[engine] Z.ai fetch failed:", err instanceof Error ? err.message : String(err));
-              // Use mock fallback so the flow continues.
-              aiContent = "Confirmo que deseas continuar con el pago.";
+              // Network error — use mock fallback so the flow continues.
+              aiContent = mockResponse;
               log(ctx, {
                 nodeId: node.id,
                 nodeType: node.type as NodeType,
                 nodeLabel: label,
                 status: "error",
-                message: `Falló la llamada al Agente IA: ${err instanceof Error ? err.message : String(err)}. Se usó respuesta simulada.`,
+                message: "No se pudo conectar con Z.ai (error de red). Se usó respuesta simulada.",
                 durationMs: Date.now() - startedAt,
               });
             }
