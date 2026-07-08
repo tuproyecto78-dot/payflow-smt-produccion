@@ -127,11 +127,21 @@ function LogLine({ entry }: { entry: LogEntry }) {
     error: <XCircle className="size-3.5 text-red-500" />,
     info: <ChevronRight className="size-3.5 text-muted-foreground" />,
   };
+  // Guard against missing/invalid timestamps (new endpoint logs may not include them).
+  let timeStr = "--:--:--";
+  if (entry.timestamp) {
+    const d = new Date(entry.timestamp);
+    if (!isNaN(d.getTime())) {
+      try {
+        timeStr = format(d, "HH:mm:ss");
+      } catch {
+        timeStr = "--:--:--";
+      }
+    }
+  }
   return (
     <div className="flex gap-2 leading-relaxed">
-      <span className="text-muted-foreground/50 shrink-0">
-        {format(new Date(entry.timestamp), "HH:mm:ss")}
-      </span>
+      <span className="text-muted-foreground/50 shrink-0">{timeStr}</span>
       <span className="shrink-0 mt-0.5">{iconMap[entry.status] || iconMap.info}</span>
       <span className="shrink-0 text-primary/80 uppercase text-[10px] font-semibold mt-0.5">
         {NODE_TYPE_LABELS[entry.nodeType] || entry.nodeType}

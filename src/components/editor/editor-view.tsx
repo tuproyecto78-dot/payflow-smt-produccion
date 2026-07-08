@@ -245,8 +245,24 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges((eds) =>
-        addEdge(
+      // Prevent self-connections.
+      if (connection.source === connection.target) {
+        toast.warning("Conexión no permitida: un nodo no puede conectarse a sí mismo.");
+        return;
+      }
+      // Prevent duplicate connections (same source + target + sourceHandle).
+      setEdges((eds) => {
+        const exists = eds.some(
+          (e) =>
+            e.source === connection.source &&
+            e.target === connection.target &&
+            (e.sourceHandle || null) === (connection.sourceHandle || null)
+        );
+        if (exists) {
+          toast.info("Esa conexión ya existe.");
+          return eds;
+        }
+        return addEdge(
           {
             ...connection,
             id: `e_${makeId()}`,
@@ -255,8 +271,8 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
             focusable: true,
           },
           eds
-        )
-      );
+        );
+      });
       setDirty(true);
     },
     [setEdges]
@@ -435,18 +451,47 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           return;
         }
         if (res.status === 404) {
-          // Demo flow or not-found — can't save to DB, but show a clear message.
-          toast.info(
-            "Este es un flujo demo local. Puedes usarlo como plantilla, pero los cambios no se guardan en la base de datos."
-          );
-          setDirty(false);
+          // Demo flow or not-found — save to localStorage as fallback.
+          try {
+            localStorage.setItem(
+              `payflow:demo:${workflow.id}`,
+              JSON.stringify({
+                name,
+                nodes: nodes.map(toApiNode),
+                edges: edges.map(toApiEdge),
+                updatedAt: new Date().toISOString(),
+              })
+            );
+            setDirty(false);
+            toast.success("Flujo demo guardado localmente.");
+          } catch {
+            toast.info(
+              "Este es un flujo demo local. Puedes usarlo como plantilla, pero los cambios no se guardan en la base de datos."
+            );
+            setDirty(false);
+          }
           return;
         }
         if (res.status === 503) {
-          toast.error(
-            data?.error ||
-              "Base de datos no disponible. Los cambios no se pueden guardar ahora."
-          );
+          // DB not available — save to localStorage as fallback.
+          try {
+            localStorage.setItem(
+              `payflow:workflow:${workflow.id}`,
+              JSON.stringify({
+                name,
+                nodes: nodes.map(toApiNode),
+                edges: edges.map(toApiEdge),
+                updatedAt: new Date().toISOString(),
+              })
+            );
+            setDirty(false);
+            toast.success("Guardado local temporal. La base no está disponible.");
+          } catch {
+            toast.error(
+              data?.error ||
+                "No se pudo guardar el flujo. Intenta nuevamente."
+            );
+          }
           return;
         }
         toast.error(data?.error || `Error al guardar el flujo (${res.status}).`);
@@ -458,10 +503,25 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
       }
 
       setDirty(false);
-      toast.success("Flujo guardado");
+      toast.success("Flujo guardado correctamente.");
     } catch (err) {
-      toast.error("Error de red al guardar");
-      console.error("[save] network error:", err);
+      // Network error — try localStorage fallback so the user doesn't lose work.
+      try {
+        localStorage.setItem(
+          `payflow:workflow:${workflow.id}`,
+          JSON.stringify({
+            name,
+            nodes: nodes.map(toApiNode),
+            edges: edges.map(toApiEdge),
+            updatedAt: new Date().toISOString(),
+          })
+        );
+        setDirty(false);
+        toast.success("Guardado local temporal. La base no está disponible.");
+      } catch {
+        toast.error("Error de red al guardar");
+        console.error("[save] network error:", err);
+      }
     } finally {
       setSaving(false);
     }
@@ -506,26 +566,70 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     setActiveTab("run");
     resetNodeFlags();
     try {
-      const res = await fetch(`/api/workflows/${workflow.id}/execute`, {
+      // Use the new /api/workflows/execute endpoint (works without DB,
+      // loads demo flow locally, supports Mock execution).
+      const res = await fetch(`/api/workflows/execute`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          workflowId: workflow.id,
           nodes: nodes.map(toApiNode),
           edges: edges.map(toApiEdge),
           forcePaymentOutcome: forceOutcome,
           questionResponses,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "La ejecución falló");
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 401) {
+        toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
+        setTimeout(() => {
+          window.location.href = `/login?next=/dashboard/flujos/${workflow.id}`;
+        }, 1500);
         setRunning(false);
         return;
       }
-      const r: RunResult = data.result;
-      await replay(r);
+      if (res.status === 500) {
+        toast.error(data?.error || "Error interno al ejecutar el flujo. Revisa logs de Vercel.");
+        setRunning(false);
+        return;
+      }
+      if (!res.ok) {
+        toast.error(data?.error || "No se pudo conectar con el endpoint de ejecución.");
+        setRunning(false);
+        return;
+      }
+
+      // The new endpoint returns { success, logs, result, ... } at the top level.
+      // Convert to the RunResult shape expected by replay().
+      const r: RunResult = {
+        status: data.status === "completed" ? "success" : data.status,
+        entries: data.logs || [],
+        variables: data.variables || {},
+        whatsappMessages: data.whatsappMessages || [],
+        finalNode: data.finalNode,
+        error: data.error,
+      };
+
       setResult(r);
       setSimOpen(true);
+
+      // Skip replay if there are too many entries (prevents RangeError/stack overflow).
+      // Just show the result directly in the run tab + simulator panel.
+      if (r.entries.length <= 50) {
+        try {
+          await replay(r);
+        } catch (replayErr) {
+          console.error("[run] replay error:", replayErr);
+        }
+      } else {
+        // For large executions, just show all entries at once without animation.
+        setVisibleEntries(r.entries);
+        setVisibleMessages(r.whatsappMessages);
+      }
+
       if (r.status === "success") {
         toast.success("Flujo completado");
       } else if (r.status === "failed") {
@@ -533,8 +637,9 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
       } else {
         toast.warning("Ejecución detenida");
       }
-    } catch {
-      toast.error("Error de red durante la ejecución");
+    } catch (err) {
+      console.error("[run] network error:", err);
+      toast.error("No se pudo conectar con el endpoint de ejecución.");
     } finally {
       setRunning(false);
     }
@@ -556,9 +661,12 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         markNode(entry.nodeId, "__running");
       }
       setVisibleEntries((prev) => [...prev, entry]);
-      const upto = r.whatsappMessages.filter(
-        (m) => new Date(m.timestamp).getTime() <= new Date(entry.timestamp).getTime()
-      );
+      // Show whatsapp messages up to this entry (guard against missing timestamps).
+      const entryTime = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+      const upto = r.whatsappMessages.filter((m) => {
+        const mTime = new Date(m.timestamp).getTime();
+        return !isNaN(mTime) && mTime <= entryTime;
+      });
       setVisibleMessages(upto);
       const next = r.entries[i + 1];
       if (entry.nodeId !== "—" && (!next || next.nodeId !== entry.nodeId)) {
