@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import {
   isDemoWorkflowId,
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
+import { supabaseUpdateWorkflow } from "@/lib/supabase-server";
 
 async function getOwnedWorkflow(workflowId: string, userId: string) {
   const workflow = await db.workflow.findUnique({
@@ -82,15 +83,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   try {
-    const workflow = await getOwnedWorkflow(id, session.userId);
-    if (!workflow) {
-      console.warn("[workflow PUT] workflow not found or not owned:", {
-        workflowId: id,
-        userId: session.userId,
-      });
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-
     const body = await req.json();
     const data: Record<string, unknown> = {};
 
@@ -106,11 +98,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     // Validate + sanitize nodes array (accept any node type, including ai_agent).
+    let sanitizedNodes: unknown[] | null = null;
     if (Array.isArray(body.nodes)) {
       // Each node must have id, type, position. Data can contain any fields
       // (systemPrompt, prompt, inputVariable, outputVariable, etc.).
       // We do NOT reject AI agent nodes — they're fully supported.
-      const sanitizedNodes = body.nodes.map((n: Record<string, unknown>, idx: number) => {
+      sanitizedNodes = body.nodes.map((n: Record<string, unknown>, idx: number) => {
         if (!n || typeof n !== "object") {
           throw new Error(`Nodo en posición ${idx} inválido.`);
         }
@@ -130,8 +123,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       data.nodesJson = JSON.stringify(sanitizedNodes);
     }
 
+    let sanitizedEdges: unknown[] | null = null;
     if (Array.isArray(body.edges)) {
-      const sanitizedEdges = body.edges.map((e: Record<string, unknown>, idx: number) => {
+      sanitizedEdges = body.edges.map((e: Record<string, unknown>, idx: number) => {
         if (!e || typeof e !== "object") {
           throw new Error(`Conexión en posición ${idx} inválida.`);
         }
@@ -146,32 +140,88 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       data.edgesJson = JSON.stringify(sanitizedEdges);
     }
 
-    const updated = await db.workflow.update({
-      where: { id },
-      data,
-    });
-    // Touch project updatedAt
-    await db.project.update({
-      where: { id: workflow.projectId },
-      data: { updatedAt: new Date() },
-    });
+    // ─── Try Prisma (SQLite/local dev) first ─────────────────────────
+    try {
+      const workflow = await getOwnedWorkflow(id, session.userId);
+      if (!workflow) {
+        console.warn("[workflow PUT] workflow not found or not owned (Prisma):", {
+          workflowId: id,
+          userId: session.userId,
+        });
+        throw new Error("Workflow not found in Prisma");
+      }
 
-    console.log("[workflow PUT] saved successfully:", {
-      workflowId: id,
-      nodeCount: Array.isArray(body.nodes) ? body.nodes.length : 0,
-      edgeCount: Array.isArray(body.edges) ? body.edges.length : 0,
-    });
+      const updated = await db.workflow.update({
+        where: { id },
+        data,
+      });
+      // Touch project updatedAt
+      await db.project.update({
+        where: { id: workflow.projectId },
+        data: { updatedAt: new Date() },
+      });
 
-    return NextResponse.json({
-      workflow: {
-        id: updated.id,
-        name: updated.name,
-        projectId: updated.projectId,
-        nodes: JSON.parse(updated.nodesJson || "[]"),
-        edges: JSON.parse(updated.edgesJson || "[]"),
-        updatedAt: updated.updatedAt,
-      },
-    });
+      console.log("[workflow PUT] saved via Prisma:", {
+        workflowId: id,
+        nodeCount: sanitizedNodes?.length ?? 0,
+        edgeCount: sanitizedEdges?.length ?? 0,
+      });
+
+      return NextResponse.json({
+        workflow: {
+          id: updated.id,
+          name: updated.name,
+          projectId: updated.projectId,
+          nodes: JSON.parse(updated.nodesJson || "[]"),
+          edges: JSON.parse(updated.edgesJson || "[]"),
+          updatedAt: updated.updatedAt,
+        },
+      });
+    } catch (prismaErr) {
+      // Prisma not available (Vercel without DATABASE_URL) — try Supabase.
+      console.warn("[workflow PUT] Prisma failed, trying Supabase:", prismaErr instanceof Error ? prismaErr.message : String(prismaErr));
+
+      const supaResult = await supabaseUpdateWorkflow(id, session.userId, {
+        name: typeof body.name === "string" ? data.name as string : undefined,
+        nodes: sanitizedNodes || undefined,
+        edges: sanitizedEdges || undefined,
+      });
+
+      if (supaResult.ok && supaResult.workflow) {
+        const wf = supaResult.workflow;
+        console.log("[workflow PUT] saved via Supabase:", {
+          workflowId: id,
+          nodeCount: sanitizedNodes?.length ?? 0,
+          edgeCount: sanitizedEdges?.length ?? 0,
+        });
+
+        return NextResponse.json({
+          workflow: {
+            id: String(wf.id || id),
+            name: String(wf.name || ""),
+            projectId: String(wf.project_id || ""),
+            nodes: Array.isArray(wf.nodes) ? wf.nodes : [],
+            edges: Array.isArray(wf.edges) ? wf.edges : [],
+            updatedAt: wf.updated_at || new Date().toISOString(),
+          },
+        });
+      }
+
+      // Both Prisma and Supabase failed.
+      console.error("[workflow PUT] both Prisma and Supabase failed:", {
+        prismaError: prismaErr instanceof Error ? prismaErr.message : String(prismaErr),
+        supabaseError: supaResult.error,
+      });
+
+      return NextResponse.json(
+        {
+          error:
+            supaResult.error ||
+            "No se pudo guardar el flujo. Verifica la configuración de la base de datos.",
+        },
+        { status: 503 }
+      );
+    }
   } catch (err) {
     // Log the full error with context for debugging.
     console.error("[workflow PUT] error:", {

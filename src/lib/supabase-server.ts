@@ -155,11 +155,15 @@ export async function supabaseUpsertDemoWorkflow(
 
     if (existing) {
       // Update the existing workflow with the latest template.
+      // NOTE: Supabase schema uses `nodes` and `edges` (jsonb arrays),
+      // NOT `nodes_json`/`edges_json` (those are Prisma/SQLite names).
+      const nodesArr = safeParseJsonArray(workflow.nodesJson);
+      const edgesArr = safeParseJsonArray(workflow.edgesJson);
       await client
         .from("workflows")
         .update({
-          nodes_json: workflow.nodesJson,
-          edges_json: workflow.edgesJson,
+          nodes: nodesArr,
+          edges: edgesArr,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id as string);
@@ -172,8 +176,8 @@ export async function supabaseUpsertDemoWorkflow(
       .insert({
         project_id: projectId,
         name: workflow.name,
-        nodes_json: workflow.nodesJson,
-        edges_json: workflow.edgesJson,
+        nodes: safeParseJsonArray(workflow.nodesJson),
+        edges: safeParseJsonArray(workflow.edgesJson),
       })
       .select("id")
       .single();
@@ -185,5 +189,103 @@ export async function supabaseUpsertDemoWorkflow(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, created: false, error: msg };
+  }
+}
+
+/**
+ * Safely parse a JSON string into an array.
+ * Returns [] on any parse error.
+ */
+function safeParseJsonArray(json: string): unknown[] {
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Try to update a workflow in Supabase by id.
+ * Uses the service role key (bypasses RLS).
+ *
+ * Returns { ok, error? } — does NOT throw.
+ */
+export async function supabaseUpdateWorkflow(
+  workflowId: string,
+  userId: string,
+  patch: {
+    name?: string;
+    nodes?: unknown[];
+    edges?: unknown[];
+  }
+): Promise<{ ok: boolean; error?: string; workflow?: Record<string, unknown> }> {
+  const client = getSupabaseServer();
+  if (!client) {
+    return { ok: false, error: "Supabase not configured" };
+  }
+
+  try {
+    // Build the update patch with correct column names (nodes/edges, not nodes_json).
+    const updateData: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (patch.name !== undefined) updateData.name = patch.name;
+    if (patch.nodes !== undefined) updateData.nodes = patch.nodes;
+    if (patch.edges !== undefined) updateData.edges = patch.edges;
+
+    // Update with user_id filter (defense in depth, though service role bypasses RLS).
+    const { data, error } = await client
+      .from("workflows")
+      .update(updateData)
+      .eq("id", workflowId)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true, workflow: data as Record<string, unknown> };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Try to fetch a workflow from Supabase by id.
+ * Uses the service role key (bypasses RLS).
+ */
+export async function supabaseGetWorkflow(
+  workflowId: string,
+  userId: string
+): Promise<{ ok: boolean; error?: string; workflow?: Record<string, unknown> }> {
+  const client = getSupabaseServer();
+  if (!client) {
+    return { ok: false, error: "Supabase not configured" };
+  }
+
+  try {
+    const { data, error } = await client
+      .from("workflows")
+      .select("*")
+      .eq("id", workflowId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    if (!data) {
+      return { ok: false, error: "Not found" };
+    }
+
+    return { ok: true, workflow: data as Record<string, unknown> };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
   }
 }
