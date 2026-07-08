@@ -102,7 +102,21 @@ function PayFlowNodeInner({ id, data, selected }: NodeProps) {
   const isError = (data as { __error?: boolean }).__error;
 
   const showTarget = nodeType !== "start";
-  const outputs = meta?.outputs || [];
+
+  // Determine outputs: condition nodes with payment_status/payment_outcome
+  // variable use 4 payment outputs; otherwise use the node metadata outputs.
+  let outputs = meta?.outputs || [];
+  if (
+    nodeType === "condition" &&
+    (nodeData.variable === "payment_status" || nodeData.variable === "payment_outcome")
+  ) {
+    outputs = [
+      { id: "payment_success", label: "Éxito" },
+      { id: "payment_failed", label: "Fallido" },
+      { id: "payment_pending", label: "Pendiente" },
+      { id: "error", label: "Error" },
+    ];
+  }
 
   function handleDelete(e: React.MouseEvent) {
     e.stopPropagation();

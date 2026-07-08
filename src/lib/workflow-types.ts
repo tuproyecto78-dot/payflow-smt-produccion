@@ -228,6 +228,7 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     category: "payment",
     color: "#6366f1",
     outputs: [
+      { id: "out", label: "Siguiente" },
       { id: "payment_success", label: "Éxito" },
       { id: "payment_failed", label: "Fallido" },
       { id: "payment_pending", label: "Pendiente" },

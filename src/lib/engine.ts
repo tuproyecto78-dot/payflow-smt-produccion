@@ -187,6 +187,31 @@ export async function executeWorkflow(
           const operator = (data.operator as "equals" | "not_equals" | "contains" | "greater_than" | "less_than") || "equals";
           const value = String(data.value ?? "");
           const left = ctx.variables[variable];
+
+          // ─── Payment status branching (4-way) ──────────────────────
+          // When the condition variable is payment_status or payment_outcome,
+          // the node acts as a 4-way branch: the nextHandle is the actual
+          // payment outcome value (payment_success, payment_failed,
+          // payment_pending, or error), matching the 4 output handles.
+          if (
+            (variable === "payment_status" || variable === "payment_outcome") &&
+            typeof left === "string" &&
+            left &&
+            (left === "payment_success" || left === "payment_failed" || left === "payment_pending" || left === "error")
+          ) {
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "success",
+              message: `Estado del pago: ${left} → bifurcación a ${left}`,
+              durationMs: Date.now() - startedAt,
+            });
+            nextHandle = left;
+            break;
+          }
+
+          // ─── Standard 2-way condition (true/false) ─────────────────
           const result = compareValues(left, operator, value);
           log(ctx, {
             nodeId: node.id,
@@ -322,6 +347,19 @@ export async function executeWorkflow(
             durationMs: Date.now() - startedAt,
           });
           nextHandle = outcome;
+
+          // ─── Support "out" handle for create_payment ────────────────
+          // If there's an edge with sourceHandle="out" from this node,
+          // use "out" instead of the outcome. This allows the pattern:
+          //   create_payment (out) → condition (payment_status 4-way) → whatsapp-*
+          // If no "out" edge exists, fall back to the outcome handle
+          // (direct 4-way branching from create_payment).
+          const hasOutEdge = edges.some(
+            (e) => e.source === node.id && (e.sourceHandle || null) === "out"
+          );
+          if (hasOutEdge) {
+            nextHandle = "out";
+          }
           break;
         }
 
