@@ -279,7 +279,7 @@ const DEMO_WHATSAPP_IA_PAYPHONE_NODES: FlowNode[] = [
       label: "Mensaje pago fallido",
       phoneNumber: "+593987654321",
       message:
-        "Tu pago no pudo ser procesado. Intenta nuevamente con un nuevo link seguro PayPhone.",
+        "No pudimos confirmar tu pago. Puedes intentar nuevamente o contactar al comercio.",
     },
   },
   {
@@ -290,7 +290,7 @@ const DEMO_WHATSAPP_IA_PAYPHONE_NODES: FlowNode[] = [
       label: "Mensaje error",
       phoneNumber: "+593987654321",
       message:
-        "Ocurrió un error procesando tu pago. Por favor intenta nuevamente en unos minutos.",
+        "Ocurrió un problema al generar el pago. Un asesor revisará tu caso.",
     },
   },
   {

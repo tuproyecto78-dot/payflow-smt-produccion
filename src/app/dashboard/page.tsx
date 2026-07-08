@@ -8,10 +8,12 @@ import { Workflow, History, CreditCard, Sparkles, FolderKanban, Loader2 } from "
 export default function DashboardHome() {
   const { user } = useAuthStore();
   const [projects, setProjects] = useState<any[]>([]);
+  const [activeFlowCount, setActiveFlowCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadProjects();
+    loadFlowCount();
   }, []);
 
   async function loadProjects() {
@@ -24,6 +26,21 @@ export default function DashboardHome() {
       }
     } catch { /* no DB */ }
     finally { setLoading(false); }
+  }
+
+  async function loadFlowCount() {
+    try {
+      const res = await fetch("/api/workflows", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        // Count only active (non-desactivated) flows.
+        const active = (data.workflows || []).filter(
+          (w: { name: string; status: string }) =>
+            !w.name.startsWith("[Desactivado]") && w.status !== "draft"
+        ).length;
+        setActiveFlowCount(active);
+      }
+    } catch { /* no DB */ }
   }
 
   return (
@@ -44,7 +61,7 @@ export default function DashboardHome() {
       </div>
 
       <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-        <StatCard title="Flujos activos" value={String(projects.length)} icon={<Workflow className="size-5" />} />
+        <StatCard title="Flujos activos" value={String(activeFlowCount)} icon={<Workflow className="size-5" />} />
         <StatCard title="Ejecuciones" value="0" icon={<History className="size-5" />} />
         <StatCard title="Pagos" value="$0" icon={<CreditCard className="size-5" />} />
       </div>

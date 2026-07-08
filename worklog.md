@@ -1298,3 +1298,45 @@ Stage Summary:
 - /dashboard/flujos shows the admin's projects ("Admin Workspace" containing the demo flow, "Negocio Sin Pagos" containing "Solo IA").
 - The login bug (env-admin fake userId) is fixed at the root cause — the session now uses the real Prisma admin user ID.
 - No platform structure, login UX, landing, dashboard page, clients, solicitudes, PayPhone API Link, env vars, or Supabase Auth were changed.
+
+---
+Task ID: restore-demo-workflow-v2
+Agent: main agent (Z.ai Code)
+Task: Restaurar el flujo de ejemplo con endpoint admin-only, botón restaurar, tarjeta mejorada y mensajes actualizados
+
+Work Log:
+- Updated src/lib/templates.ts: changed Fallido message to "No pudimos confirmar tu pago. Puedes intentar nuevamente o contactar al comercio." and Error message to "Ocurrió un problema al generar el pago. Un asesor revisará tu caso." per new spec.
+- Created POST /api/workflows/restore-demo (src/app/api/workflows/restore-demo/route.ts):
+  - Admin/super_admin only (returns 403 otherwise)
+  - Idempotent: finds existing "Flujo demo WhatsApp + IA + PayPhone" by name in admin's project; if exists, UPDATES it with latest template (propagates message edits); if not, CREATES it
+  - Creates "Admin Workspace" project if missing
+  - Logs audit: workflow_demo_restored with action (created|updated), node_count, edge_count
+  - Returns { ok, workflowId, action, workflowName, message }
+- Added GET /api/workflows (src/app/api/workflows/route.ts): lists all workflows for the current user across all their projects. Each workflow includes derived provider, channel, status, nodeCount. Preserved the existing POST handler.
+- Rewrote src/app/dashboard/flujos/page.tsx:
+  - Fetches /api/workflows (instead of /api/projects) to render workflow cards
+  - Each card shows: name, project name, node count, status badge (Activo/Desactivado/Borrador), provider badge (PayPhone API Link / Mock), channel badge (WhatsApp)
+  - 4 buttons per card: Ver, Probar simulador, Duplicar, Desactivar
+  - "Restaurar flujo de ejemplo" button (admin only, calls POST /api/workflows/restore-demo)
+  - "Crear flujo sugerido" button (existing, unchanged)
+  - Empty state includes both "Restaurar flujo de ejemplo" and "Crear flujo sugerido" buttons
+  - Duplicar creates a new empty workflow with "(copia)" suffix in the same project
+  - Desactivar renames the workflow with "[Desactivado] " prefix (soft-deactivate)
+- Updated src/app/dashboard/page.tsx: "Flujos activos" stat card now fetches /api/workflows and counts active (non-desactivated, non-draft) workflows. Previously used projects.length which was incorrect.
+- Ran POST /api/workflows/restore-demo via browser to update the existing demo flow with the new Fallido/Error messages. Action: "updated" (idempotent — no duplicate created).
+- Verification (browser end-to-end):
+  - /dashboard shows "Flujos activos: 3" (was 2) — counts actual active workflows ✓
+  - /dashboard/flujos shows 3 workflow cards with status badges, provider badges, channel badges, and 4 buttons each ✓
+  - "Restaurar flujo de ejemplo" button visible (admin only) ✓
+  - Demo flow card shows "PayPhone API Link" + "WhatsApp" badges + "Activo" status ✓
+  - Demo flow messages in DB match the new spec (Fallido + Error updated) ✓
+  - POST /api/workflows/restore-demo returns { ok: true, action: "updated" } ✓
+  - bun run lint: 0 errors, 0 warnings ✓
+  - /, /login, /dashboard, /dashboard/flujos, Crear flujo automático, Configuración PayPhone, Supabase Auth, navegación, simulador — all verified working ✓
+
+Stage Summary:
+- The example flow "Flujo demo WhatsApp + IA + PayPhone" is restored with 10 nodes, provider=payphone, mode=payphone_api_link, and the exact messages from the spec (including updated Fallido and Error messages).
+- /dashboard shows "Flujos activos: 3" (real count of active workflows).
+- /dashboard/flujos shows workflow cards (not project cards) with Estado, Proveedor, Canal, and 4 buttons (Ver, Probar simulador, Duplicar, Desactivar).
+- Admin-only "Restaurar flujo de ejemplo" button calls POST /api/workflows/restore-demo (idempotent, audit logged).
+- No platform structure, login, landing, clientes, solicitudes, PayPhone API Link, env vars, or Supabase Auth were changed.
