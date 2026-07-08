@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
+import { demoProject } from "@/lib/workflows/demo-workflow";
 
 /**
  * GET /api/projects
  * Returns user's projects. Gracefully handles missing DATABASE_URL.
  *
- * For admin users, auto-seeds the demo flow if they have 0 projects
- * (critical for Vercel ephemeral databases).
+ * For admin users with 0 projects, includes the demo project as fallback
+ * so the dashboard never shows an empty state.
  */
 export async function GET() {
   const session = await getSession();
@@ -16,7 +17,16 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Try Prisma — if not available, return empty list
+  let projects: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    createdAt: string;
+    updatedAt: string;
+    _count?: { workflows: number };
+  }> = [];
+
+  // Try Prisma — if not available, we'll fall back to the demo project.
   try {
     const { db } = await import("@/lib/db");
 
@@ -29,16 +39,36 @@ export async function GET() {
       await ensureDemoFlowForAdmin(session.userId);
     }
 
-    const projects = await db.project.findMany({
+    const dbProjects = await db.project.findMany({
       where: { userId: session.userId },
       orderBy: { updatedAt: "desc" },
       include: { _count: { select: { workflows: true } } },
     });
-    return NextResponse.json({ projects });
+    projects = dbProjects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      createdAt: p.createdAt.toISOString(),
+      updatedAt: p.updatedAt.toISOString(),
+      _count: { workflows: p._count?.workflows ?? 0 },
+    }));
   } catch {
-    // Prisma not available (no DATABASE_URL in production without Supabase)
-    return NextResponse.json({ projects: [] });
+    // Prisma not available — we'll fall back to the demo project below.
   }
+
+  // If no projects were found, include the demo project as fallback.
+  if (projects.length === 0) {
+    projects.push({
+      id: demoProject.id,
+      name: demoProject.name,
+      description: demoProject.description,
+      createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+      updatedAt: new Date().toISOString(),
+      _count: { workflows: 1 },
+    });
+  }
+
+  return NextResponse.json({ projects });
 }
 
 /**

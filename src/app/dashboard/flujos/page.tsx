@@ -68,16 +68,12 @@ export default function FlujosPage() {
         toast.error("No tienes permisos para esta acción.");
         return;
       }
-      if (res.status === 503) {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.error || "Base de datos no disponible. Verifica la configuración del servidor.");
-        return;
-      }
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "No se pudo restaurar el flujo de ejemplo.");
         return;
       }
+      // Success — show the message (works for both supabase and demo-fallback)
       toast.success(data.message || "Flujo de ejemplo restaurado.");
       await loadWorkflows();
     } catch {

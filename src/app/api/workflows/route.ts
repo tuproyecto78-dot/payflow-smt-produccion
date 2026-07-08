@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
+import { getDemoFlowItem } from "@/lib/workflows/demo-workflow";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +14,8 @@ export const dynamic = "force-dynamic";
  * Each workflow includes: id, name, projectId, projectName, nodeCount,
  * updatedAt, and a derived provider/channel/status for display.
  *
- * For admin users, auto-seeds the demo flow if they have 0 workflows
- * (critical for Vercel ephemeral databases).
- *
- * Used by /dashboard/flujos to render workflow cards.
+ * For admin users with 0 workflows, includes the demo flow as fallback
+ * so the dashboard never shows an empty state.
  */
 export async function GET() {
   const session = await getSession();
@@ -24,9 +23,21 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const workflows: Array<{
+    id: string;
+    name: string;
+    projectId: string;
+    projectName: string;
+    nodeCount: number;
+    status: string;
+    provider: string | null;
+    channel: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
+
   try {
     // Auto-seed: for admin users, ensure they have the demo flow.
-    // This is critical for Vercel where the DB is ephemeral.
     const isAdmin =
       session.role === ROLES.ADMIN || session.role === ROLES.SUPER_ADMIN;
     if (isAdmin) {
@@ -50,19 +61,6 @@ export async function GET() {
       },
     });
 
-    const workflows: Array<{
-      id: string;
-      name: string;
-      projectId: string;
-      projectName: string;
-      nodeCount: number;
-      status: string;
-      provider: string | null;
-      channel: string | null;
-      createdAt: Date;
-      updatedAt: Date;
-    }> = [];
-
     for (const p of projects) {
       for (const w of p.workflows) {
         let nodes: Array<{ type?: string; data?: Record<string, unknown> }> = [];
@@ -71,10 +69,8 @@ export async function GET() {
         } catch {
           nodes = [];
         }
-        // Derive provider + channel from node types/data.
         const hasPayment = nodes.some((n) => n.type === "create_payment" || n.type === "payment");
         const hasWhatsapp = nodes.some((n) => n.type === "whatsapp");
-        const hasAi = nodes.some((n) => n.type === "ai_agent");
         const paymentNode = nodes.find((n) => n.type === "create_payment" || n.type === "payment");
         const provider = paymentNode?.data?.provider
           ? String(paymentNode.data.provider)
@@ -86,7 +82,6 @@ export async function GET() {
         if (hasWhatsapp) channel = "WhatsApp";
 
         let status = "active";
-        // If the workflow has 0 nodes, mark as draft.
         if (nodes.length === 0) status = "draft";
 
         workflows.push({
@@ -103,15 +98,20 @@ export async function GET() {
         });
       }
     }
-
-    // Sort by updatedAt desc.
-    workflows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-
-    return NextResponse.json({ workflows });
   } catch (err) {
-    console.error("[/api/workflows GET] error:", err);
-    return NextResponse.json({ workflows: [] });
+    // DB not available — we'll fall back to the demo flow below.
+    console.error("[/api/workflows GET] DB error, using demo fallback:", err);
   }
+
+  // If no workflows were found (DB empty or unavailable), include the demo flow.
+  if (workflows.length === 0) {
+    workflows.push(getDemoFlowItem());
+  }
+
+  // Sort by updatedAt desc.
+  workflows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+  return NextResponse.json({ workflows });
 }
 
 /**

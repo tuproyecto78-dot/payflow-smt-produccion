@@ -1,40 +1,37 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { requireAdmin, unauthorizedResponse, forbiddenResponse } from "@/lib/auth/require-session";
 import { rateLimit, getClientIP, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
 import { TEMPLATES } from "@/lib/templates";
+import { supabaseUpsertDemoWorkflow } from "@/lib/supabase-server";
+import { demoWorkflow } from "@/lib/workflows/demo-workflow";
 
 export const dynamic = "force-dynamic";
-
-const ADMIN_PROJECT_NAME = "Admin Workspace";
 
 /**
  * POST /api/workflows/restore-demo
  *
- * Restores ALL demo workflows for the authenticated admin.
- * Currently restores:
- *   - "Cobro por WhatsApp con IA" (classic demo, Mock provider)
- *   - "Flujo demo WhatsApp + IA + PayPhone" (PayPhone API Link demo)
+ * Restores the "Cobro por WhatsApp con IA" demo workflow.
  *
  * Behavior:
  *   - Admin/super_admin only (401 if no session, 403 if not admin).
- *   - Idempotent: if a workflow with the same name already exists, it is
- *     UPDATED with the latest template. It is NOT duplicated.
- *   - If the admin project does not exist, it is created.
- *   - Audit log: workflow_demo_restored.
+ *   - Tries to save to Supabase (workflows table) using service role key.
+ *   - If Supabase is not configured or fails, returns demo-fallback so the
+ *     UI still shows the demo flow.
+ *   - Idempotent: if the workflow already exists, it's updated (not duplicated).
+ *   - Audit log: workflow_demo_restored (best-effort).
  *
- * Returns:
- *   {
- *     success: true,
- *     restored: [{ workflowName, action: "created" | "updated" }],
- *   }
+ * Response (success, saved to Supabase):
+ *   { success: true, workflowName: "Cobro por WhatsApp con IA", created: true }
+ *
+ * Response (success, fallback — no DB):
+ *   { success: true, workflowName: "Cobro por WhatsApp con IA", created: false, source: "demo-fallback" }
  */
 export async function POST(req: Request) {
   const admin = await requireAdmin();
   if (!admin) {
-    // Check if there's a session at all to return the right status code.
-    const session = await import("@/lib/session").then((m) => m.getSession());
+    const { getSession } = await import("@/lib/session");
+    const session = await getSession();
     if (!session) return unauthorizedResponse();
     return forbiddenResponse();
   }
@@ -44,98 +41,69 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: RATE_LIMIT_ERROR }, { status: 429 });
   }
 
-  try {
-    const results: Array<{ workflowName: string; action: "created" | "updated" }> = [];
+  const workflowName = demoWorkflow.name;
 
-    // 1. Ensure the admin has a project.
-    let project;
-    try {
-      project = await db.project.findFirst({
-        where: { userId: admin.userId, name: ADMIN_PROJECT_NAME },
-        select: { id: true },
-      });
+  // Try Supabase first (no DATABASE_URL, no Prisma).
+  const nodesJson = JSON.stringify(
+    TEMPLATES.find((t) => t.name === workflowName)?.nodes || demoWorkflow.nodes
+  );
+  const edgesJson = JSON.stringify(
+    TEMPLATES.find((t) => t.name === workflowName)?.edges || demoWorkflow.edges
+  );
 
-      if (!project) {
-        project = await db.project.create({
-          data: {
-            name: ADMIN_PROJECT_NAME,
-            description: "Proyecto predeterminado del administrador de PayFlow SMT.",
-            userId: admin.userId,
-          },
-          select: { id: true },
-        });
-      }
-    } catch (err) {
-      console.error("[restore-demo] DB project lookup/create failed:", err);
-      return NextResponse.json(
-        { error: "No se pudo acceder a la base de datos. Si estás en Vercel, verifica que DATABASE_URL esté configurada." },
-        { status: 503 }
-      );
-    }
+  const result = await supabaseUpsertDemoWorkflow(admin.userId, {
+    name: workflowName,
+    nodesJson,
+    edgesJson,
+  });
 
-    // 2. Restore ALL templates (idempotent).
-    for (const tpl of TEMPLATES) {
-      try {
-        const existing = await db.workflow.findFirst({
-          where: { projectId: project.id, name: tpl.name },
-          select: { id: true },
-        });
-
-        if (!existing) {
-          await db.workflow.create({
-            data: {
-              name: tpl.name,
-              projectId: project.id,
-              nodesJson: JSON.stringify(tpl.nodes),
-              edgesJson: JSON.stringify(tpl.edges),
-            },
-          });
-          results.push({ workflowName: tpl.name, action: "created" });
-        } else {
-          // Update with the latest template (propagates message edits).
-          await db.workflow.update({
-            where: { id: existing.id },
-            data: {
-              nodesJson: JSON.stringify(tpl.nodes),
-              edgesJson: JSON.stringify(tpl.edges),
-            },
-          });
-          results.push({ workflowName: tpl.name, action: "updated" });
-        }
-
-        // Audit log (best-effort).
-        void logAudit({
-          userId: admin.userId,
-          action: "workflow_demo_restored",
-          entityType: "workflow",
-          ipAddress: ip,
-          metadata: {
-            workflow_name: tpl.name,
-            action: results[results.length - 1].action,
-            node_count: tpl.nodes.length,
-            edge_count: tpl.edges.length,
-          },
-        });
-      } catch (err) {
-        console.error(`[restore-demo] Failed to restore "${tpl.name}":`, err);
-        // Continue with the next template.
-      }
-    }
-
-    if (results.length === 0) {
-      return NextResponse.json(
-        { error: "No se pudo restaurar ningún flujo. Revisa los logs del servidor." },
-        { status: 500 }
-      );
-    }
+  if (result.ok) {
+    // Best-effort audit log.
+    void logAudit({
+      userId: admin.userId,
+      action: "workflow_demo_restored",
+      entityType: "workflow",
+      entityId: result.id || null,
+      ipAddress: ip,
+      metadata: {
+        workflow_name: workflowName,
+        action: result.created ? "created" : "updated",
+        source: "supabase",
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      restored: results,
-      message: `Se restauraron ${results.length} flujo(s) de ejemplo.`,
+      workflowName,
+      created: result.created,
+      source: "supabase",
+      message: result.created
+        ? "Flujo de ejemplo creado en Supabase."
+        : "Flujo de ejemplo actualizado en Supabase.",
     });
-  } catch (err) {
-    console.error("[/api/workflows/restore-demo] error:", err);
-    return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
   }
+
+  // Fallback: return demo-fallback so the UI shows the demo anyway.
+  console.warn("[restore-demo] Supabase failed, using demo-fallback:", result.error);
+
+  void logAudit({
+    userId: admin.userId,
+    action: "workflow_demo_restored",
+    entityType: "workflow",
+    ipAddress: ip,
+    metadata: {
+      workflow_name: workflowName,
+      action: "demo-fallback",
+      source: "demo-fallback",
+      reason: result.error || "supabase_unavailable",
+    },
+  });
+
+  return NextResponse.json({
+    success: true,
+    workflowName,
+    created: false,
+    source: "demo-fallback",
+    message: "Flujo de ejemplo cargado localmente (modo demo). La base de datos no está disponible.",
+  });
 }
