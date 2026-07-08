@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import {
   isSupabaseConfigured,
-  getSupabaseUser,
   createServerClientHelper,
 } from "@/lib/supabase";
 import {
@@ -169,45 +168,57 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  if (isSupabaseConfigured) {
-    const user = await getSupabaseUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const supabase = await createServerClientHelper();
-    const { data, error } = await supabase.from("subscription_requests").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
-    return NextResponse.json({ requests: data || [] });
-  }
-
+  // Use our JWT session (NOT getSupabaseUser which reads a cookie we don't set).
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const requests = await db.subscriptionRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
-  return NextResponse.json({
-    requests: requests.map((r) => ({
-      id: r.id,
-      selectedPlan: r.selectedPlan,
-      selectedPlanLabel: r.selectedPlanLabel,
-      selectedPlanPrice: r.selectedPlanPrice,
-      fullName: r.fullName,
-      countryCode: r.countryCode,
-      phoneNumber: r.phoneNumber,
-      email: r.email,
-      documentId: r.documentId,
-      businessName: r.businessName,
-      businessType: r.businessType,
-      country: r.country,
-      city: r.city,
-      paymentProvider: r.paymentProvider,
-      payphoneBusinessStatus: r.payphoneBusinessStatus,
-      payphonePreregistrationStatus: r.payphonePreregistrationStatus,
-      hasPayphoneBusiness: r.hasPayphoneBusiness,
-      startPaymentsConfig: r.startPaymentsConfig,
-      consentAccepted: r.consentAccepted,
-      subscriptionStatus: r.subscriptionStatus,
-      activatedClientId: r.activatedClientId,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    })),
-  });
+
+  // If Supabase is configured, query subscription_requests from Supabase.
+  if (isSupabaseConfigured) {
+    try {
+      const supabase = await createServerClientHelper();
+      const { data, error } = await supabase.from("subscription_requests").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return NextResponse.json({ requests: data || [] });
+    } catch (err) {
+      console.error("[subscriptions GET] Supabase query failed, falling back to Prisma:", err);
+      // Fall through to Prisma
+    }
+  }
+
+  // Prisma fallback (local dev / ephemeral Vercel DB).
+  try {
+    const requests = await db.subscriptionRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    return NextResponse.json({
+      requests: requests.map((r) => ({
+        id: r.id,
+        selectedPlan: r.selectedPlan,
+        selectedPlanLabel: r.selectedPlanLabel,
+        selectedPlanPrice: r.selectedPlanPrice,
+        fullName: r.fullName,
+        countryCode: r.countryCode,
+        phoneNumber: r.phoneNumber,
+        email: r.email,
+        documentId: r.documentId,
+        businessName: r.businessName,
+        businessType: r.businessType,
+        country: r.country,
+        city: r.city,
+        paymentProvider: r.paymentProvider,
+        payphoneBusinessStatus: r.payphoneBusinessStatus,
+        payphonePreregistrationStatus: r.payphonePreregistrationStatus,
+        hasPayphoneBusiness: r.hasPayphoneBusiness,
+        startPaymentsConfig: r.startPaymentsConfig,
+        consentAccepted: r.consentAccepted,
+        subscriptionStatus: r.subscriptionStatus,
+        activatedClientId: r.activatedClientId,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+    });
+  } catch (err) {
+    console.error("[subscriptions GET] Prisma query failed:", err);
+    return NextResponse.json({ requests: [] });
+  }
 }
 
 export const dynamic = "force-dynamic";

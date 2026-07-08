@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const adminEmail = (process.env.ADMIN_EMAIL || "admin@payflow.smt")
       .toLowerCase()
       .trim();
-    const adminPassword = process.env.ADMIN_INITIAL_PASSWORD || "admin123";
+    const adminPassword = process.env.ADMIN_INITIAL_PASSWORD || "PayFlow2026Admin!";
     const isAdminEmail = normalizedEmail === adminEmail;
 
     // ─── Mode 1: Supabase Auth (production) ──────────────────────────

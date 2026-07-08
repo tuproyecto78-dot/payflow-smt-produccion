@@ -246,6 +246,15 @@ export default function SolicitudesPage() {
     setError(null);
     try {
       const res = await fetch("/api/subscriptions", { credentials: "include" });
+      if (res.status === 401) {
+        setError("Tu sesión expiró. Inicia sesión nuevamente.");
+        setTimeout(() => { window.location.href = "/login?next=/dashboard/solicitudes"; }, 2000);
+        return;
+      }
+      if (res.status === 403) {
+        setError("No tienes permisos para esta acción.");
+        return;
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(
