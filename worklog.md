@@ -1379,3 +1379,44 @@ Stage Summary:
 - This works on both local dev AND Vercel (ephemeral DB) because the auto-seed runs on every API request.
 - The auto-seed is idempotent: if the demo flow already exists, it does nothing.
 - Admin users will ALWAYS see at least 1 project + 1 active flow, even on a fresh Vercel deployment.
+
+---
+Task ID: add-visual-demo-workflow
+Agent: main agent (Z.ai Code)
+Task: Restaurar el flujo demo "Cobro por WhatsApp con IA" + crear ruta del editor visual sin cambiar la estructura del dashboard
+
+Work Log:
+- Updated src/lib/auto-seed.ts: now seeds ALL templates (not just the PayPhone demo), so "Cobro por WhatsApp con IA" is also auto-seeded for admin users. Both demo flows now appear on every /dashboard and /dashboard/flujos load.
+- Created /dashboard/flujos/[id] route (src/app/dashboard/flujos/[id]/page.tsx):
+  - Fetches the workflow by ID from /api/workflows/[id]
+  - Renders the existing EditorView component (src/components/editor/editor-view.tsx) which uses ReactFlow
+  - Top breadcrumb bar: "Flujos / [workflow name]" with back button
+  - Editor fills the remaining viewport height (h-screen)
+  - Loading and error states handled
+- Updated /dashboard (src/app/dashboard/page.tsx):
+  - Now fetches BOTH /api/projects and /api/workflows in parallel
+  - "Proyectos" section shows project cards, each containing its workflows as sub-cards
+  - Each workflow card shows: name, "WhatsApp + IA + pagos" subtitle, node count, status badge ("En prueba" / "Desactivado" / "Borrador"), and 3 buttons: Abrir (link to /dashboard/flujos/[id]), Simulador, Ejecutar
+  - "Flujos activos" stat card counts actual active workflows
+- Updated /dashboard/flujos (src/app/dashboard/flujos/page.tsx):
+  - "Ver" button now navigates to /dashboard/flujos/[id] (was a toast notification)
+  - "Probar simulador" button also navigates to the editor
+  - Added useRouter and Link imports
+
+Verification (browser end-to-end):
+- /dashboard shows "Flujos activos: 3" + "Proyectos" section with "Admin Workspace" project containing "Cobro por WhatsApp con IA" (En prueba) + "Flujo demo WhatsApp + IA + PayPhone" (En prueba), each with Abrir/Simulador/Ejecutar buttons ✓
+- Clicking "Abrir" navigates to /dashboard/flujos/[id] and opens the visual editor ✓
+- Editor renders 10 nodes (Inicio → Bienvenida WhatsApp → Agente IA → Crear pago → Condición → WhatsApp éxito/fallido/pendiente/error → Fin) ✓
+- Editor left panel shows: CANALES (WhatsApp), PAGOS (Crear pago, Verificar pago, Esperar confirmación, Pago exitoso, Pago fallido, Pago pendiente), INTELIGENCIA (Agente IA), INTEGRACIONES (API/Webhook), FLUJO (Inicio, Condición, Mensaje, Pregunta, Fin) ✓
+- Editor top buttons: Volver, Plantillas, Simulador, Guardar, Ejecutar ✓
+- Canvas shows nodes connected with edges (13 edges) ✓
+- / (landing), /login, /dashboard, /dashboard/flujos all return 200 ✓
+- bun run lint: 0 errors, 0 warnings ✓
+- No platform structure, login, landing, clientes, solicitudes, PayPhone API Link, env vars, or Supabase Auth changed ✓
+- No DB reset, no data deletion ✓
+
+Stage Summary:
+- The classic "Cobro por WhatsApp con IA" demo flow is restored and visible in /dashboard (inside the "Proyectos" section) and /dashboard/flujos.
+- A new visual editor route /dashboard/flujos/[id] opens the existing ReactFlow-based editor with the demo flow loaded.
+- The dashboard structure (sidebar, stat cards, project section) is preserved — only the project cards now show their workflows with open/simulator/execute buttons.
+- Both demo flows ("Cobro por WhatsApp con IA" + "Flujo demo WhatsApp + IA + PayPhone") auto-seed on every admin page load, so they appear even on fresh Vercel deployments.

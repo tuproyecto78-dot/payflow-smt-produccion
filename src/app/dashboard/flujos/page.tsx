@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Workflow, Sparkles, Loader2, RotateCcw, Eye, Play, Copy, Power } from "lucide-react";
@@ -22,6 +24,7 @@ interface FlowItem {
 }
 
 export default function FlujosPage() {
+  const router = useRouter();
   const [workflows, setWorkflows] = useState<FlowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createFlowOpen, setCreateFlowOpen] = useState(false);
@@ -226,24 +229,26 @@ export default function FlujosPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2 mt-auto">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => toast.info("Abre el flujo desde el editor visual para verlo completo.")}
-                  >
-                    <Eye className="size-3.5 mr-1" />
-                    Ver
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs"
-                    onClick={() => toast.info("El simulador estará disponible en el editor del flujo.")}
-                  >
-                    <Play className="size-3.5 mr-1" />
-                    Probar simulador
-                  </Button>
+                  <Link href={`/dashboard/flujos/${w.id}`}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                    >
+                      <Eye className="size-3.5 mr-1" />
+                      Ver
+                    </Button>
+                  </Link>
+                  <Link href={`/dashboard/flujos/${w.id}`}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                    >
+                      <Play className="size-3.5 mr-1" />
+                      Probar simulador
+                    </Button>
+                  </Link>
                   <Button
                     size="sm"
                     variant="outline"

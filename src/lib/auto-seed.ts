@@ -18,11 +18,14 @@ import { TEMPLATES } from "@/lib/templates";
 import { logAudit } from "@/lib/audit";
 
 const ADMIN_PROJECT_NAME = "Admin Workspace";
-const DEMO_TEMPLATE_NAME = "Flujo demo WhatsApp + IA + PayPhone";
 
 /**
- * Ensure the admin user has a project and the demo workflow.
+ * Ensure the admin user has a project and ALL template workflows.
  * Returns true if something was created, false if everything already existed.
+ *
+ * Templates seeded:
+ *   - "Cobro por WhatsApp con IA" (the classic demo flow)
+ *   - "Flujo demo WhatsApp + IA + PayPhone" (the PayPhone API Link demo)
  */
 export async function ensureDemoFlowForAdmin(userId: string): Promise<boolean> {
   let createdSomething = false;
@@ -46,21 +49,20 @@ export async function ensureDemoFlowForAdmin(userId: string): Promise<boolean> {
       createdSomething = true;
     }
 
-    // 2. Ensure the demo workflow exists in that project.
-    const demoTpl = TEMPLATES.find((t) => t.name === DEMO_TEMPLATE_NAME);
-    if (demoTpl) {
+    // 2. Ensure ALL template workflows exist in that project (idempotent).
+    for (const tpl of TEMPLATES) {
       const existing = await db.workflow.findFirst({
-        where: { projectId: project.id, name: DEMO_TEMPLATE_NAME },
+        where: { projectId: project.id, name: tpl.name },
         select: { id: true },
       });
 
       if (!existing) {
         await db.workflow.create({
           data: {
-            name: DEMO_TEMPLATE_NAME,
+            name: tpl.name,
             projectId: project.id,
-            nodesJson: JSON.stringify(demoTpl.nodes),
-            edgesJson: JSON.stringify(demoTpl.edges),
+            nodesJson: JSON.stringify(tpl.nodes),
+            edgesJson: JSON.stringify(tpl.edges),
           },
         });
         createdSomething = true;
@@ -72,10 +74,10 @@ export async function ensureDemoFlowForAdmin(userId: string): Promise<boolean> {
           entityType: "workflow",
           ipAddress: null,
           metadata: {
-            workflow_name: DEMO_TEMPLATE_NAME,
+            workflow_name: tpl.name,
             action: "auto_seeded",
-            node_count: demoTpl.nodes.length,
-            edge_count: demoTpl.edges.length,
+            node_count: tpl.nodes.length,
+            edge_count: tpl.edges.length,
             project_id: project.id,
           },
         });
