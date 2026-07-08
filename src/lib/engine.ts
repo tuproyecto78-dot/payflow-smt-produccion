@@ -449,43 +449,80 @@ export async function executeWorkflow(
           }
           let aiContent = "";
 
-          // ─── Call Z.ai directly via fetch (no config file needed) ───
-          // Reads env vars: ZAI_API_KEY, ZAI_BASE_URL, ZAI_MODEL
-          const zaiApiKey = process.env.ZAI_API_KEY;
-          const zaiBaseUrl = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
-          const zaiModel = process.env.ZAI_MODEL || "glm-5.1";
-
-          // Default mock response used when Z.ai is not available.
+          // ─── Dynamic AI provider routing ────────────────────────────
+          // Reads AI_PROVIDER env var and routes to the correct provider.
+          // Supported: "openrouter", "zai", "mock" (default).
+          const aiProvider = (process.env.AI_PROVIDER || "mock").toLowerCase();
           const mockResponse = "Confirmo que deseas continuar con el pago.";
 
+          // Resolve provider config based on AI_PROVIDER.
+          let providerName: string;
+          let apiKey: string | undefined;
+          let baseUrl: string;
+          let model: string;
+          let endpoint: string;
+
+          if (aiProvider === "openrouter") {
+            providerName = "openrouter";
+            apiKey = process.env.OPENROUTER_API_KEY;
+            baseUrl = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+            model = process.env.OPENROUTER_MODEL || "openrouter/free";
+            endpoint = `${baseUrl}/chat/completions`;
+          } else if (aiProvider === "zai") {
+            providerName = "zai";
+            apiKey = process.env.ZAI_API_KEY;
+            baseUrl = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
+            model = process.env.ZAI_MODEL || "glm-5.1";
+            endpoint = `${baseUrl}/chat/completions`;
+          } else {
+            providerName = "mock";
+            apiKey = undefined;
+            baseUrl = "";
+            model = "mock";
+            endpoint = "";
+          }
+
           console.log("[engine] AI agent execution:", {
-            provider: "zai",
-            model: zaiModel,
-            endpoint: `${zaiBaseUrl}/chat/completions`,
-            hasApiKey: !!zaiApiKey,
+            provider: providerName,
+            model,
+            endpoint,
+            hasApiKey: !!apiKey,
           });
 
-          if (!zaiApiKey) {
-            // Missing API key — use mock fallback so the flow doesn't crash.
+          if (providerName === "mock") {
+            // Mock provider — no external call.
+            aiContent = mockResponse;
+            log(ctx, {
+              nodeId: node.id,
+              nodeType: node.type as NodeType,
+              nodeLabel: label,
+              status: "info",
+              message: "AI_PROVIDER=mock. Se usó respuesta simulada (sin IA real).",
+              durationMs: Date.now() - startedAt,
+            });
+          } else if (!apiKey) {
+            // Missing API key for the selected provider.
+            const keyName = providerName === "openrouter" ? "OPENROUTER_API_KEY" : "ZAI_API_KEY";
             aiContent = mockResponse;
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "error",
-              message: "Falta ZAI_API_KEY en las variables de entorno. Se usó respuesta simulada.",
+              message: `Falta ${keyName} en las variables de entorno. Se usó respuesta simulada.`,
               durationMs: Date.now() - startedAt,
             });
           } else {
+            // Call the selected provider via OpenAI-compatible Chat Completions.
             try {
-              const res = await fetch(`${zaiBaseUrl}/chat/completions`, {
+              const res = await fetch(endpoint, {
                 method: "POST",
                 headers: {
-                  Authorization: `Bearer ${zaiApiKey}`,
+                  Authorization: `Bearer ${apiKey}`,
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  model: zaiModel,
+                  model,
                   messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: prompt },
@@ -497,24 +534,29 @@ export async function executeWorkflow(
 
               if (!res.ok) {
                 const errText = await res.text().catch(() => "");
-                console.error("[engine] Z.ai API error:", {
+                console.error(`[engine] ${providerName} API error:`, {
+                  provider: providerName,
                   status: res.status,
                   statusText: res.statusText,
                   body: errText.slice(0, 500),
                 });
 
-                // Build a short, clear error message based on the HTTP status.
+                // Build a short, clear error message based on HTTP status.
                 let shortMsg: string;
                 if (res.status === 401 || res.status === 403) {
-                  shortMsg = "ZAI_API_KEY inválida o sin permisos. Verifica tu API key en Vercel.";
+                  shortMsg = providerName === "openrouter"
+                    ? "OPENROUTER_API_KEY inválida o sin permisos. Verifica tu API key en Vercel."
+                    : "ZAI_API_KEY inválida o sin permisos. Verifica tu API key en Vercel.";
                 } else if (res.status === 429) {
-                  shortMsg = "Saldo insuficiente en Z.ai. Recarga tu cuenta en z.ai para usar la IA real.";
+                  shortMsg = providerName === "openrouter"
+                    ? "Límite de uso alcanzado en OpenRouter. Intenta nuevamente más tarde."
+                    : "Saldo insuficiente en Z.ai. Recarga tu cuenta en z.ai para usar la IA real.";
                 } else if (res.status === 404) {
-                  shortMsg = `Modelo "${zaiModel}" no encontrado en Z.ai. Verifica ZAI_MODEL en Vercel.`;
+                  shortMsg = `Modelo "${model}" no encontrado en ${providerName}. Verifica la variable de modelo en Vercel.`;
                 } else if (res.status >= 500) {
-                  shortMsg = `Z.ai no disponible (HTTP ${res.status}). Intenta nuevamente.`;
+                  shortMsg = `${providerName} no disponible (HTTP ${res.status}). Intenta nuevamente.`;
                 } else {
-                  shortMsg = `Z.ai devolvió HTTP ${res.status}.`;
+                  shortMsg = `Falló ${providerName} (HTTP ${res.status}).`;
                 }
 
                 aiContent = mockResponse;
@@ -530,14 +572,16 @@ export async function executeWorkflow(
                 const data = await res.json();
                 aiContent = data?.choices?.[0]?.message?.content || mockResponse;
 
-                console.log("[engine] Z.ai success:", {
-                  model: zaiModel,
+                console.log(`[engine] ${providerName} success:`, {
+                  provider: providerName,
+                  model,
+                  httpStatus: res.status,
                   responseLength: aiContent.length,
                   responsePreview: aiContent.slice(0, 100),
                 });
               }
             } catch (err) {
-              console.error("[engine] Z.ai fetch failed:", err instanceof Error ? err.message : String(err));
+              console.error(`[engine] ${providerName} fetch failed:`, err instanceof Error ? err.message : String(err));
               // Network error — use mock fallback so the flow continues.
               aiContent = mockResponse;
               log(ctx, {
@@ -545,7 +589,7 @@ export async function executeWorkflow(
                 nodeType: node.type as NodeType,
                 nodeLabel: label,
                 status: "error",
-                message: "No se pudo conectar con Z.ai (error de red). Se usó respuesta simulada.",
+                message: `No se pudo conectar con ${providerName} (error de red). Se usó respuesta simulada.`,
                 durationMs: Date.now() - startedAt,
               });
             }
