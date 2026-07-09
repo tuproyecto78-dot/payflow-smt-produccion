@@ -78,7 +78,14 @@ export function getPayphoneConfig(): PayPhoneRuntimeConfig {
   // Resolve environment
   let env: PayPhoneEnv;
   if (rawEnv === "disabled") {
-    env = "disabled";
+    // If credentials exist, treat "disabled" as "production" (user probably
+    // forgot to change PAYPHONE_ENV after setting credentials).
+    if (token && storeId) {
+      console.log("[payphone] PAYPHONE_ENV=disabled but credentials exist, using production");
+      env = "production";
+    } else {
+      env = "disabled";
+    }
   } else if (rawEnv === "production" || rawEnv === "sandbox" || rawEnv === "test") {
     env = rawEnv === "test" ? "sandbox" : rawEnv;
   } else if (!rawEnv) {

@@ -23,15 +23,21 @@ export interface AIProviderConfig {
 
 /**
  * Get the current AI provider config from env vars.
+ *
+ * Priority order:
+ * 1. AI_PROVIDER=openrouter → use OpenRouter
+ * 2. AI_PROVIDER=zai → use Z.ai
+ * 3. AI_PROVIDER=auto (or unset) → try Z.ai first, then OpenRouter, then mock
+ * 4. AI_PROVIDER=mock → local fallback only
  */
 export function getAIConfig(): AIProviderConfig {
-  const provider = (process.env.AI_PROVIDER || "mock").toLowerCase().trim() as AIProviderName;
+  const provider = (process.env.AI_PROVIDER || "auto").toLowerCase().trim() as AIProviderName;
 
+  // ─── OpenRouter ────────────────────────────────────────────────────
   if (provider === "openrouter") {
     const apiKey = process.env.OPENROUTER_API_KEY?.trim() || null;
     const baseUrl = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
     let model = process.env.OPENROUTER_MODEL?.trim() || "";
-    // "openrouter/free" is NOT a valid model — replace with a valid free model
     if (!model || model === "openrouter/free" || model === "free") {
       model = "meta-llama/llama-3.2-3b-instruct:free";
       console.log("[ai] Model 'openrouter/free' is invalid, using default:", model);
@@ -47,10 +53,11 @@ export function getAIConfig(): AIProviderConfig {
     };
   }
 
+  // ─── Z.ai ──────────────────────────────────────────────────────────
   if (provider === "zai") {
     const apiKey = process.env.ZAI_API_KEY?.trim() || null;
     const baseUrl = process.env.ZAI_BASE_URL?.trim() || "https://api.z.ai/api/coding/paas/v4";
-    const model = process.env.ZAI_MODEL?.trim() || "glm-5.1";
+    const model = process.env.ZAI_MODEL?.trim() || "glm-4-flash";
     return {
       provider: "zai",
       configured: !!apiKey,
@@ -60,6 +67,46 @@ export function getAIConfig(): AIProviderConfig {
       model,
       endpoint: `${baseUrl}/chat/completions`,
     };
+  }
+
+  // ─── Auto: try Z.ai first, then OpenRouter ─────────────────────────
+  if (provider === "auto" || provider === "mock") {
+    // Try Z.ai first
+    const zaiKey = process.env.ZAI_API_KEY?.trim() || null;
+    if (zaiKey) {
+      const zaiBase = process.env.ZAI_BASE_URL?.trim() || "https://api.z.ai/api/coding/paas/v4";
+      const zaiModel = process.env.ZAI_MODEL?.trim() || "glm-4-flash";
+      console.log("[ai] Auto: using Z.ai (ZAI_API_KEY found)");
+      return {
+        provider: "zai",
+        configured: true,
+        hasApiKey: true,
+        apiKey: zaiKey,
+        baseUrl: zaiBase,
+        model: zaiModel,
+        endpoint: `${zaiBase}/chat/completions`,
+      };
+    }
+
+    // Try OpenRouter
+    const orKey = process.env.OPENROUTER_API_KEY?.trim() || null;
+    if (orKey) {
+      const orBase = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
+      let orModel = process.env.OPENROUTER_MODEL?.trim() || "";
+      if (!orModel || orModel === "openrouter/free" || orModel === "free") {
+        orModel = "meta-llama/llama-3.2-3b-instruct:free";
+      }
+      console.log("[ai] Auto: using OpenRouter (OPENROUTER_API_KEY found)");
+      return {
+        provider: "openrouter",
+        configured: true,
+        hasApiKey: true,
+        apiKey: orKey,
+        baseUrl: orBase,
+        model: orModel,
+        endpoint: `${orBase}/chat/completions`,
+      };
+    }
   }
 
   return {
