@@ -64,7 +64,7 @@ type AgentTone = "amable" | "profesional" | "cercano" | "formal" | "comercial" |
 type AgentMode = "vender" | "cobrar" | "agendar" | "completo";
 type PaymentProvider = "none" | "payphone" | "mock";
 type AmountMode = "fixed" | "variable";
-type BusinessTypeKey = "medica" | "clinica" | "abogado" | "comercio" | "ecommerce" | "belleza" | "spa" | "restaurante" | "educacion" | "profesional" | "otro";
+type BusinessTypeKey = "medica" | "clinica" | "abogado" | "comercio" | "ecommerce" | "belleza" | "spa" | "restaurante" | "educacion" | "profesional" | "bienes_raices" | "otro";
 type ScheduleDays = "lun-vie" | "lun-sab" | "todos" | "personalizado";
 type ScheduleHours = "08-17" | "09-18" | "10-19" | "24h" | "personalizado";
 type TemplateId =
@@ -206,6 +206,7 @@ const BUSINESS_TYPES: Array<{ value: BusinessTypeKey; label: string; product: st
   { value: "restaurante", label: "Restaurante", product: "Pedido de comida", welcome: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte a tomar tu pedido, confirmar detalles y procesar tu pago por WhatsApp." },
   { value: "educacion", label: "Educación", product: "Matrícula / mensualidad / curso", welcome: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte con información de cursos, matrículas, mensualidades y pagos." },
   { value: "profesional", label: "Servicios profesionales", product: "Servicio profesional", welcome: "¡Hola! 👋 Bienvenido/a. Estoy aquí para ayudarte a coordinar tu servicio y gestionar el pago de forma segura." },
+  { value: "bienes_raices", label: "Bienes raíces", product: "Captación de clientes / agenda de visitas / información de propiedades", welcome: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestra inmobiliaria. Puedo ayudarte con información de propiedades, agendar visitas y guiarte en el proceso de reserva." },
   { value: "otro", label: "Otro", product: "Servicio principal", welcome: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestro negocio. Puedo ayudarte con información, atención y pagos por WhatsApp." },
 ];
 

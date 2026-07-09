@@ -32,6 +32,19 @@ interface FlowAssistantResponse {
 // ─── Local fallback suggestions by business type ─────────────────────
 
 const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQuestion: string }> = {
+  bienes_raices: {
+    template: "ia_agenda_payphone",
+    businessType: "bienes_raices",
+    mainProductOrService: "Captación de clientes / agenda de visitas / información de propiedades",
+    welcomeMessage: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestra inmobiliaria. Puedo ayudarte con información de propiedades, agendar visitas y guiarte en el proceso de reserva.",
+    agentTone: "profesional",
+    scheduleDays: "lun-sab",
+    scheduleHours: "09h00 - 18h00",
+    modules: ["ai_agent", "agenda", "payphone"],
+    paymentProvider: "payphone_api_link",
+    reply: "Perfecto. Para una inmobiliaria te recomiendo la plantilla IA + Agenda + PayPhone Business. El asistente puede captar compradores, agendar visitas, filtrar por presupuesto y cobrar reservas con link seguro PayPhone. Sugiero un tono profesional y horario de lunes a sábado 9h-18h. ¿Quieres que incluya cobro de reservas con PayPhone?",
+    nextQuestion: "¿Quieres que el asistente también filtre compradores por presupuesto o ciudad?",
+  },
   clinica: {
     template: "ia_payphone",
     businessType: "clinica",
@@ -127,13 +140,15 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
 
 function detectBusinessType(message: string): string {
   const lower = message.toLowerCase();
+  if (lower.includes("inmobiliaria") || lower.includes("bienes raíces") || lower.includes("bienes raices") || lower.includes("propiedades") || lower.includes("casas") || lower.includes("departamentos") || lower.includes("terrenos") || lower.includes("alquil")) return "bienes_raices";
   if (lower.includes("clínica") || lower.includes("clinica")) return "clinica";
-  if (lower.includes("médic") || lower.includes("medic") || lower.includes("consultorio")) return "medica";
+  if (lower.includes("médic") || lower.includes("medic") || lower.includes("consultorio") || lower.includes("doctor")) return "medica";
   if (lower.includes("restaurante") || lower.includes("comida") || lower.includes("pedido")) return "restaurante";
   if (lower.includes("spa") || lower.includes("tratamiento")) return "spa";
+  if (lower.includes("belleza") || lower.includes("salón") || lower.includes("salon")) return "spa";
   if (lower.includes("tienda") || lower.includes("comercio") || lower.includes("vender") || lower.includes("venta")) return "tienda";
   if (lower.includes("abogado") || lower.includes("legal") || lower.includes("despacho")) return "default";
-  if (lower.includes("educación") || lower.includes("curso") || lower.includes("matrícula")) return "default";
+  if (lower.includes("educación") || lower.includes("educacion") || lower.includes("curso") || lower.includes("matrícula") || lower.includes("matricula")) return "default";
   return "default";
 }
 
@@ -199,7 +214,22 @@ export async function POST(req: Request) {
 
     if (apiKey) {
       try {
-        const systemPrompt = `Eres "Asistente PayFlow", un asistente IA que ayuda a configurar flujos de automatización de WhatsApp para PayFlow SMT.
+        const systemPrompt = `Eres "Asistente PayFlow", un copiloto IA que ayuda a configurar flujos de automatización de WhatsApp para PayFlow SMT.
+
+ACTÚA COMO UN ASESOR HUMANO:
+- Haz UNA pregunta a la vez, no todas juntas.
+- Escucha la respuesta del usuario y adapta tu siguiente pregunta.
+- Sé cálido, breve y específico.
+- Cuando tengas suficiente información, genera sugerencias estructuradas.
+
+FLUJO DE PREGUNTAS:
+1. ¿Qué tipo de negocio tienes?
+2. ¿Qué quieres automatizar por WhatsApp?
+3. ¿Quieres responder preguntas, vender, agendar o cobrar?
+4. ¿Tienes PayPhone Business o quieres cobrar con link seguro PayPhone?
+5. ¿Cuál es tu horario?
+6. ¿Qué tono quieres que use el agente?
+7. ¿Quieres que cree el flujo sugerido?
 
 REGLAS:
 1. NUNCA confirmes pagos exitosos.
@@ -209,15 +239,18 @@ REGLAS:
 5. NO uses "API Sale" ni "cobro sin salir de WhatsApp".
 6. Responde en español, de forma breve y amable.
 7. Sugiere configuración basada en el tipo de negocio del usuario.
+8. Incluye "Bienes raíces" como tipo de negocio (inmobiliaria, propiedades).
 
 Devuelve SOLO JSON válido con esta estructura:
-{"reply":"...","suggestions":{"template":"...","businessType":"...","mainProductOrService":"...","welcomeMessage":"...","agentTone":"...","scheduleDays":"...","scheduleHours":"...","modules":[],"paymentProvider":"..."},"warnings":[],"missingFields":[],"nextQuestion":"..."}
+{"reply":"texto conversacional","suggestions":{"template":"...","businessType":"...","mainProductOrService":"...","welcomeMessage":"...","agentTone":"...","scheduleDays":"...","scheduleHours":"...","modules":[],"paymentProvider":"..."},"warnings":[],"missingFields":[],"nextQuestion":"..."}
 
-Templates disponibles: solo_ia, ia_agenda, ia_catalogo, ia_payphone, ia_agenda_payphone
-BusinessTypes: medica, clinica, abogado, comercio, ecommerce, belleza, spa, restaurante, educacion, profesional, otro
+Templates: solo_ia, ia_agenda, ia_catalogo, ia_payphone, ia_agenda_payphone, agente_completo
+BusinessTypes: medica, clinica, abogado, comercio, ecommerce, belleza, spa, restaurante, educacion, profesional, bienes_raices, otro
 AgentTones: amable, profesional, cercano, formal, comercial, empatico
 ScheduleDays: lun-vie, lun-sab, todos, personalizado
-PaymentProviders: payphone_api_link, mock, none`;
+PaymentProviders: payphone_api_link, mock, none
+
+Si el usuario aún no ha dado suficiente información, devuelve suggestions vacío y nextQuestion con la siguiente pregunta.`;
 
         const res = await fetch(endpoint, {
           method: "POST",
