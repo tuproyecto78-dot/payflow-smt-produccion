@@ -49,12 +49,21 @@ export function FlowAssistantPanel({
     {
       role: "assistant",
       content:
-        "¡Hola! Soy el Asistente PayFlow. Cuéntame qué tipo de negocio tienes y qué quieres automatizar por WhatsApp.",
+        "¡Hola! Soy el Asistente PayFlow. Te ayudaré a crear un flujo de WhatsApp paso a paso. Primero dime: ¿qué tipo de negocio tienes y qué quieres automatizar?",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiStatus, setAiStatus] = useState<{ provider: string; configured: boolean; model: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Check AI status on mount
+    fetch("/api/ai/status", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setAiStatus(d))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -136,7 +145,20 @@ export function FlowAssistantPanel({
             </div>
             <div>
               <h3 className="text-sm font-semibold">Asistente PayFlow</h3>
-              <p className="text-[10px] text-muted-foreground">Copiloto IA para crear flujos</p>
+              <div className="flex items-center gap-1.5">
+                {aiStatus ? (
+                  <>
+                    <span className={`size-1.5 rounded-full ${aiStatus.configured ? "bg-emerald-500" : "bg-amber-500"}`} />
+                    <span className="text-[10px] text-muted-foreground">
+                      {aiStatus.configured
+                        ? `IA: ${aiStatus.provider} · ${aiStatus.model}`
+                        : "IA: modo local (fallback)"}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Verificando IA…</span>
+                )}
+              </div>
             </div>
           </div>
           <Button variant="ghost" size="icon" className="size-8" onClick={onClose}>

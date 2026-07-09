@@ -294,12 +294,34 @@ export async function POST(req: Request) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
+      let errBody: { error?: { message?: string; code?: number } } = {};
+      try { errBody = JSON.parse(errText); } catch {}
+
+      const errMsg = errBody?.error?.message || errText.slice(0, 200) || `HTTP ${res.status}`;
+
       console.warn("[/api/ai/flow-assistant] AI HTTP error:", {
         status: res.status,
         body: errText.slice(0, 300),
       });
-      // Fall back to local
-      return NextResponse.json(localFallback(userMessage));
+
+      // Return a clear error message to the user (not the fallback)
+      let userMsg: string;
+      if (res.status === 401 || res.status === 403) {
+        userMsg = "La API key de OpenRouter no es válida. Verifica OPENROUTER_API_KEY en Vercel.";
+      } else if (res.status === 404) {
+        userMsg = `El modelo "${cfg.model}" no fue encontrado en OpenRouter. Verifica OPENROUTER_MODEL en Vercel. Modelos gratuitos: meta-llama/llama-3.2-3b-instruct:free, google/gemini-flash-1.5:free`;
+      } else if (res.status === 429) {
+        userMsg = "Límite de uso alcanzado en OpenRouter. Intenta nuevamente más tarde.";
+      } else {
+        userMsg = `Error de OpenRouter (HTTP ${res.status}): ${errMsg}`;
+      }
+
+      return NextResponse.json({
+        reply: userMsg,
+        suggestions: {},
+        warnings: ["AI_PROVIDER_ERROR"],
+        missingFields: [],
+      } satisfies FlowAssistantResponse);
     }
 
     const data = await res.json();
