@@ -30,7 +30,12 @@ export function getAIConfig(): AIProviderConfig {
   if (provider === "openrouter") {
     const apiKey = process.env.OPENROUTER_API_KEY?.trim() || null;
     const baseUrl = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
-    const model = process.env.OPENROUTER_MODEL?.trim() || "meta-llama/llama-3.2-3b-instruct:free";
+    let model = process.env.OPENROUTER_MODEL?.trim() || "";
+    // "openrouter/free" is NOT a valid model — replace with a valid free model
+    if (!model || model === "openrouter/free" || model === "free") {
+      model = "meta-llama/llama-3.2-3b-instruct:free";
+      console.log("[ai] Model 'openrouter/free' is invalid, using default:", model);
+    }
     return {
       provider: "openrouter",
       configured: !!apiKey,
