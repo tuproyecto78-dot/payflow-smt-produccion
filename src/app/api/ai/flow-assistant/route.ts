@@ -307,13 +307,26 @@ export async function POST(req: Request) {
       // Return a clear error message to the user (not the fallback)
       let userMsg: string;
       if (res.status === 401 || res.status === 403) {
-        userMsg = "La API key de OpenRouter no es válida. Verifica OPENROUTER_API_KEY en Vercel.";
+        userMsg = "La API key de OpenRouter no es válida. Verifica OPENROUTER_API_KEY en Vercel. Mientras tanto, puedo ayudarte con sugerencias locales.";
       } else if (res.status === 404) {
-        userMsg = `El modelo "${cfg.model}" no fue encontrado en OpenRouter. Verifica OPENROUTER_MODEL en Vercel. Modelos gratuitos: meta-llama/llama-3.2-3b-instruct:free, google/gemini-flash-1.5:free`;
+        userMsg = `El modelo "${cfg.model}" no fue encontrado en OpenRouter. Verifica OPENROUTER_MODEL en Vercel. Modelos gratuitos válidos: meta-llama/llama-3.2-3b-instruct:free, google/gemini-flash-1.5:free. Mientras tanto, puedo ayudarte con sugerencias locales.`;
       } else if (res.status === 429) {
-        userMsg = "Límite de uso alcanzado en OpenRouter. Intenta nuevamente más tarde.";
+        userMsg = "OpenRouter ha alcanzado el límite de uso gratuito. Puedes esperar unos minutos e intentar nuevamente, o cambiar a un modelo de pago en OpenRouter. Mientras tanto, te ayudo con sugerencias locales basadas en tu negocio.";
       } else {
-        userMsg = `Error de OpenRouter (HTTP ${res.status}): ${errMsg}`;
+        userMsg = `Error de OpenRouter (HTTP ${res.status}). Mientras tanto, puedo ayudarte con sugerencias locales.`;
+      }
+
+      // For 429 (rate limit), also provide local suggestions so the user
+      // can still work while waiting for the rate limit to reset
+      if (res.status === 429) {
+        const fallback = localFallback(userMessage);
+        return NextResponse.json({
+          reply: userMsg + "\n\n" + fallback.reply,
+          suggestions: fallback.suggestions,
+          warnings: ["AI_RATE_LIMITED"],
+          missingFields: [],
+          nextQuestion: fallback.nextQuestion,
+        } satisfies FlowAssistantResponse);
       }
 
       return NextResponse.json({

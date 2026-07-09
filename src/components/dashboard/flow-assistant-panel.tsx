@@ -58,12 +58,15 @@ export function FlowAssistantPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Check AI status on mount
-    fetch("/api/ai/status", { credentials: "include" })
+    // Check AI status on mount — force fresh fetch (no cache)
+    fetch("/api/ai/status", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setAiStatus(d))
-      .catch(() => {});
-  }, []);
+      .then((d) => {
+        setAiStatus(d);
+        console.log("[flow-assistant] AI status:", d);
+      })
+      .catch((e) => console.warn("[flow-assistant] AI status fetch failed:", e));
+  }, [open]);
 
   useEffect(() => {
     if (scrollRef.current) {
