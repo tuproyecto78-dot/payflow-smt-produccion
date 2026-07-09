@@ -1,10 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, Sparkles, Loader2, Eye, Play, Copy, Power, RotateCcw } from "lucide-react";
+import {
+  Workflow,
+  Sparkles,
+  Loader2,
+  Eye,
+  Play,
+  Copy,
+  Power,
+  RotateCcw,
+  Edit3,
+  Trash2,
+  History,
+} from "lucide-react";
 import { toast } from "sonner";
 import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
 
@@ -21,16 +33,75 @@ interface FlowItem {
   updatedAt: string;
 }
 
+interface ActionEntry {
+  id: string;
+  action: string;
+  flowName: string;
+  flowId: string;
+  timestamp: string;
+  details?: string;
+}
+
+const HISTORY_KEY = "payflow_flow_history";
+
+function loadHistory(): ActionEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(entries: ActionEntry[]) {
+  try {
+    // Keep only last 50 entries.
+    const trimmed = entries.slice(0, 50);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+  } catch {
+    // ignore
+  }
+}
+
+function addHistoryEntry(entry: Omit<ActionEntry, "id" | "timestamp">) {
+  const newEntry: ActionEntry = {
+    ...entry,
+    id: `hist_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+  };
+  const current = loadHistory();
+  const updated = [newEntry, ...current];
+  saveHistory(updated);
+  return newEntry;
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  flow_created: "Flujo creado",
+  flow_edited: "Flujo editado",
+  flow_deleted: "Flujo eliminado",
+  flow_duplicated: "Flujo duplicado",
+  flow_deactivated: "Flujo desactivado",
+  flow_activated: "Flujo activado",
+  flow_executed: "Flujo ejecutado",
+  demo_reset: "Demo restablecido",
+  flow_saved: "Flujo guardado",
+};
+
 export default function FlujosPage() {
   const [workflows, setWorkflows] = useState<FlowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createFlowOpen, setCreateFlowOpen] = useState(false);
+  const [history, setHistory] = useState<ActionEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     loadWorkflows();
+    setHistory(loadHistory());
   }, []);
 
-  async function loadWorkflows() {
+  const loadWorkflows = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/workflows", { credentials: "include" });
@@ -43,8 +114,11 @@ export default function FlujosPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
+  function refreshHistory() {
+    setHistory(loadHistory());
+  }
 
   async function handleDuplicate(w: FlowItem) {
     try {
@@ -61,7 +135,14 @@ export default function FlujosPage() {
         toast.error("No se pudo duplicar el flujo.");
         return;
       }
-      toast.success("Flujo duplicado (copia en blanco). Cópialo desde el editor.");
+      addHistoryEntry({
+        action: "flow_duplicated",
+        flowName: w.name,
+        flowId: w.id,
+        details: `Duplicado como "${w.name} (copia)"`,
+      });
+      refreshHistory();
+      toast.success("Flujo duplicado.");
       await loadWorkflows();
     } catch {
       toast.error("Error de red al duplicar.");
@@ -69,27 +150,69 @@ export default function FlujosPage() {
   }
 
   async function handleDeactivate(w: FlowItem) {
-    // Renaming the flow with a "[Desactivado]" prefix is a soft-deactivate.
     try {
       const res = await fetch(`/api/workflows/${w.id}`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: w.name.replace(/^\[Desactivado\]\s*/, "").startsWith("[Desactivado]")
-            ? w.name
-            : `[Desactivado] ${w.name}`,
+          name: `[Desactivado] ${w.name}`,
         }),
       });
       if (!res.ok) {
         toast.error("No se pudo desactivar el flujo.");
         return;
       }
+      addHistoryEntry({
+        action: "flow_deactivated",
+        flowName: w.name,
+        flowId: w.id,
+      });
+      refreshHistory();
       toast.success("Flujo desactivado.");
       await loadWorkflows();
     } catch {
       toast.error("Error de red al desactivar.");
     }
+  }
+
+  async function handleDelete(w: FlowItem) {
+    if (!confirm(`¿Eliminar el flujo "${w.name}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/workflows/${w.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok && res.status !== 404) {
+        toast.error("No se pudo eliminar el flujo.");
+        return;
+      }
+      addHistoryEntry({
+        action: "flow_deleted",
+        flowName: w.name,
+        flowId: w.id,
+      });
+      refreshHistory();
+      toast.success("Flujo eliminado.");
+      await loadWorkflows();
+    } catch {
+      toast.error("Error de red al eliminar.");
+    }
+  }
+
+  function handleResetDemo(w: FlowItem) {
+    try {
+      localStorage.removeItem(`payflow_demo_workflow_${w.id}`);
+    } catch {}
+    addHistoryEntry({
+      action: "demo_reset",
+      flowName: w.name,
+      flowId: w.id,
+    });
+    refreshHistory();
+    toast.success("Flujo demo restablecido. Abre el flujo para verlo.");
   }
 
   const providerLabel = (p: string | null) => {
@@ -107,11 +230,85 @@ export default function FlujosPage() {
           <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Flujos</h1>
           <p className="text-muted-foreground mt-1">Canales de pago automatizados por WhatsApp</p>
         </div>
-        <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
-          <Sparkles className="size-4 mr-2" />
-          Crear flujo sugerido
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              refreshHistory();
+              setShowHistory(!showHistory);
+            }}
+          >
+            <History className="size-4 mr-2" />
+            Historial
+            {history.length > 0 && (
+              <Badge variant="secondary" className="ml-2 text-[10px] h-5">
+                {history.length}
+              </Badge>
+            )}
+          </Button>
+          <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
+            <Sparkles className="size-4 mr-2" />
+            Crear flujo sugerido
+          </Button>
+        </div>
       </div>
+
+      {/* Panel de historial */}
+      {showHistory && (
+        <div className="mb-6 rounded-xl border bg-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <History className="size-4 text-purple-500" />
+              Historial de acciones
+            </h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => {
+                if (confirm("¿Borrar todo el historial?")) {
+                  localStorage.removeItem(HISTORY_KEY);
+                  setHistory([]);
+                  toast.success("Historial borrado.");
+                }
+              }}
+            >
+              Borrar historial
+            </Button>
+          </div>
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No hay acciones registradas todavía.
+            </p>
+          ) : (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {history.map((h) => (
+                <div
+                  key={h.id}
+                  className="flex items-center gap-3 text-xs px-3 py-2 rounded-lg bg-background/50 border border-border/40"
+                >
+                  <span className="size-2 rounded-full bg-purple-500 shrink-0" />
+                  <span className="font-medium shrink-0">
+                    {ACTION_LABELS[h.action] || h.action}
+                  </span>
+                  <span className="text-muted-foreground truncate flex-1">
+                    {h.flowName}
+                    {h.details ? ` · ${h.details}` : ""}
+                  </span>
+                  <span className="text-muted-foreground/60 text-[10px] shrink-0">
+                    {new Date(h.timestamp).toLocaleString("es-EC", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
@@ -122,27 +319,27 @@ export default function FlujosPage() {
           <Workflow className="size-12 mx-auto text-muted-foreground/40 mb-4" />
           <h3 className="text-lg font-semibold mb-1">No hay flujos creados</h3>
           <p className="text-muted-foreground text-sm mb-4">
-            Crea tu primer flujo automático o restaura el flujo de ejemplo para empezar.
+            Crea tu primer flujo automático para empezar.
           </p>
-          <div className="flex gap-2 justify-center">
-            <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
-              <Sparkles className="size-4 mr-2" />
-              Crear flujo sugerido
-            </Button>
-          </div>
+          <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
+            <Sparkles className="size-4 mr-2" />
+            Crear flujo sugerido
+          </Button>
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {workflows.map((w) => {
             const isInactive = w.name.startsWith("[Desactivado]");
             const isDemo = w.id === "demo-cobro-whatsapp-ia";
-            const statusLabel = isInactive ? "Desactivado" : isDemo ? "En prueba" : w.status === "draft" ? "Borrador" : "Activo";
+            const statusLabel = isInactive
+              ? "Desactivado"
+              : isDemo
+              ? "En prueba"
+              : w.status === "draft"
+              ? "Borrador"
+              : "Activo";
             const statusColor = isInactive
               ? "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300"
-              : isDemo
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-              : w.status === "draft"
-              ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
               : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
             const providerText = providerLabel(w.provider);
             return (
@@ -180,31 +377,20 @@ export default function FlujosPage() {
 
                 <div className="flex flex-wrap gap-2 mt-auto">
                   <Link href={`/dashboard/flujos/${w.id}`}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                    >
+                    <Button size="sm" variant="outline" className="h-8 text-xs">
                       <Eye className="size-3.5 mr-1" />
                       Abrir
                     </Button>
                   </Link>
                   <Link href={`/dashboard/flujos/${w.id}`}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                    >
-                      <Play className="size-3.5 mr-1" />
-                      Simulador
+                    <Button size="sm" variant="outline" className="h-8 text-xs">
+                      <Edit3 className="size-3.5 mr-1" />
+                      Editar
                     </Button>
                   </Link>
                   <Link href={`/dashboard/flujos/${w.id}`}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                    >
+                    <Button size="sm" variant="outline" className="h-8 text-xs">
+                      <Play className="size-3.5 mr-1" />
                       Ejecutar
                     </Button>
                   </Link>
@@ -213,15 +399,10 @@ export default function FlujosPage() {
                       size="sm"
                       variant="outline"
                       className="h-8 text-xs"
-                      onClick={() => {
-                        try {
-                          localStorage.removeItem(`payflow_demo_workflow_${w.id}`);
-                        } catch {}
-                        toast.success("Flujo demo restablecido. Abre el flujo para verlo.");
-                      }}
+                      onClick={() => handleResetDemo(w)}
                     >
                       <RotateCcw className="size-3.5 mr-1" />
-                      Restablecer demo
+                      Restablecer
                     </Button>
                   )}
                   <Button
@@ -243,6 +424,17 @@ export default function FlujosPage() {
                     <Power className="size-3.5 mr-1" />
                     {isInactive ? "Desactivado" : "Desactivar"}
                   </Button>
+                  {!isDemo && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                      onClick={() => handleDelete(w)}
+                    >
+                      <Trash2 className="size-3.5 mr-1" />
+                      Eliminar
+                    </Button>
+                  )}
                 </div>
               </div>
             );
@@ -254,6 +446,12 @@ export default function FlujosPage() {
         open={createFlowOpen}
         onOpenChange={setCreateFlowOpen}
         onCreated={async (_workflowId, _projectId) => {
+          addHistoryEntry({
+            action: "flow_created",
+            flowName: "Nuevo flujo",
+            flowId: _workflowId,
+          });
+          refreshHistory();
           toast.success("Flujo creado correctamente");
           setCreateFlowOpen(false);
           await loadWorkflows();
