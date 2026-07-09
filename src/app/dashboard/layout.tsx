@@ -20,21 +20,26 @@ import {
   Loader2,
   Users,
   Settings,
+  UserPlus,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { key: "dashboard", label: "Panel", href: "/dashboard", icon: LayoutDashboard },
-  { key: "flujos", label: "Flujos", href: "/dashboard/flujos", icon: Workflow },
-  { key: "ejecuciones", label: "Ejecuciones", href: "/dashboard/ejecuciones", icon: History },
-  { key: "solicitudes", label: "Solicitudes", href: "/dashboard/solicitudes", icon: Inbox },
-  { key: "clientes", label: "Clientes", href: "/dashboard/clientes", icon: Users },
-  { key: "payphone", label: "PayPhone", href: "/dashboard", icon: CreditCard },
-  { key: "agent", label: "Agente IA", href: "/dashboard", icon: Bot },
-  { key: "catalog", label: "Catálogo", href: "/dashboard", icon: Package },
-  { key: "agenda", label: "Agenda", href: "/dashboard", icon: CalendarClock },
-  { key: "legal", label: "Legal", href: "/dashboard", icon: Shield },
-  { key: "configuracion", label: "Configuración", href: "/dashboard/configuracion", icon: Settings },
+  { key: "dashboard", label: "Panel", href: "/dashboard", icon: LayoutDashboard, adminOnly: false },
+  { key: "flujos", label: "Flujos", href: "/dashboard/flujos", icon: Workflow, adminOnly: false },
+  { key: "ejecuciones", label: "Ejecuciones", href: "/dashboard/ejecuciones", icon: History, adminOnly: false },
+  { key: "nuevos-clientes", label: "Nuevos clientes", href: "/dashboard/nuevos-clientes", icon: UserPlus, adminOnly: true },
+  { key: "clientes-activos", label: "Clientes activos", href: "/dashboard/clientes-activos", icon: Users, adminOnly: true },
+  { key: "solicitudes", label: "Solicitudes", href: "/dashboard/solicitudes", icon: Inbox, adminOnly: true },
+  { key: "clientes", label: "Clientes", href: "/dashboard/clientes", icon: Users, adminOnly: true },
+  { key: "historial", label: "Historial", href: "/dashboard/historial", icon: ScrollText, adminOnly: true },
+  { key: "payphone", label: "PayPhone", href: "/dashboard", icon: CreditCard, adminOnly: true },
+  { key: "agent", label: "Agente IA", href: "/dashboard", icon: Bot, adminOnly: false },
+  { key: "catalog", label: "Catálogo", href: "/dashboard", icon: Package, adminOnly: false },
+  { key: "agenda", label: "Agenda", href: "/dashboard", icon: CalendarClock, adminOnly: false },
+  { key: "legal", label: "Legal", href: "/dashboard", icon: Shield, adminOnly: true },
+  { key: "configuracion", label: "Configuración", href: "/dashboard/configuracion", icon: Settings, adminOnly: false },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -90,7 +95,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </Link>
 
         <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1 min-h-0 overflow-y-auto">
-          {NAV_ITEMS.filter(item => isAdmin || ["dashboard", "flujos", "ejecuciones", "configuracion"].includes(item.key)).map((item) => {
+          {NAV_ITEMS.filter(item => isAdmin || !item.adminOnly).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
             return (

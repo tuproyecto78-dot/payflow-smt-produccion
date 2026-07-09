@@ -79,12 +79,25 @@ export function getPayphoneConfig(): PayPhoneRuntimeConfig {
   let env: PayPhoneEnv;
   if (rawEnv === "disabled") {
     env = "disabled";
-  } else if (rawEnv === "production" || rawEnv === "sandbox") {
-    env = rawEnv;
+  } else if (rawEnv === "production" || rawEnv === "sandbox" || rawEnv === "test") {
+    env = rawEnv === "test" ? "sandbox" : rawEnv;
   } else if (!rawEnv) {
-    env = "not_configured";
+    // PAYPHONE_ENV not set — if TOKEN and STORE_ID exist, default to production.
+    // This is critical for Vercel deployments where the user set TOKEN + STORE_ID
+    // but didn't set PAYPHONE_ENV. We should NOT mark as "not_configured" or
+    // "disabled" in that case.
+    if (token && storeId) {
+      env = "production";
+    } else {
+      env = "not_configured";
+    }
   } else {
-    env = "not_configured";
+    // Unknown value — treat as production if credentials exist.
+    if (token && storeId) {
+      env = "production";
+    } else {
+      env = "not_configured";
+    }
   }
 
   const mode: PayPhoneMode = rawMode === "sale" ? "sale" : "link";
@@ -99,12 +112,12 @@ export function getPayphoneConfig(): PayPhoneRuntimeConfig {
   } else {
     if (!token) missingVars.push("PAYPHONE_TOKEN");
     if (!storeId) missingVars.push("PAYPHONE_STORE_ID");
-    if (env === "not_configured") missingVars.push("PAYPHONE_ENV");
   }
 
+  // Configured = not disabled + has token + has storeId
+  // (PAYPHONE_ENV is NOT required if token + storeId exist)
   const configured =
     env !== "disabled" &&
-    env !== "not_configured" &&
     tokenConfigured &&
     storeIdConfigured;
 
@@ -195,6 +208,8 @@ export function getSafePayphoneStatus() {
     storeIdConfigured: cfg.storeIdConfigured,
     storeIdLastFour: cfg.storeIdLastFour,
     storeIdMasked: maskStoreId(cfg.storeId),
+    apiLinkEnabled: cfg.configured && cfg.mode === "link",
+    apiSaleEnabled: false,
     externalNotificationEnabled: cfg.externalNotificationEnabled,
     preregistrationEnabled: cfg.preregistrationEnabled,
     missingVars: cfg.missingVars,
