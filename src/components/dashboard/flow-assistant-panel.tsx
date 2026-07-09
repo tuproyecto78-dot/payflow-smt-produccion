@@ -1,0 +1,253 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Bot, Send, Loader2, X, Sparkles, Check } from "lucide-react";
+import { toast } from "sonner";
+
+export interface AISuggestion {
+  template?: string;
+  businessType?: string;
+  mainProductOrService?: string;
+  welcomeMessage?: string;
+  agentTone?: string;
+  scheduleDays?: string;
+  scheduleHours?: string;
+  modules?: string[];
+  paymentProvider?: string;
+}
+
+interface FlowAssistantPanelProps {
+  open: boolean;
+  onClose: () => void;
+  onApply: (suggestions: AISuggestion) => void;
+  currentStep?: string;
+}
+
+interface ChatMessage {
+  role: "assistant" | "user";
+  content: string;
+  suggestions?: AISuggestion;
+}
+
+const EXAMPLES = [
+  "Tengo una clínica y quiero cobrar consultas.",
+  "Tengo un restaurante y quiero recibir pedidos.",
+  "Tengo un spa y quiero agendar citas con anticipo.",
+  "Tengo una tienda y quiero vender por WhatsApp.",
+];
+
+export function FlowAssistantPanel({
+  open,
+  onClose,
+  onApply,
+  currentStep,
+}: FlowAssistantPanelProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content:
+        "¡Hola! Soy el Asistente PayFlow. Cuéntame qué tipo de negocio tienes y qué quieres automatizar por WhatsApp.",
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
+  async function sendMessage(text: string) {
+    if (!text.trim() || loading) return;
+
+    const userMsg: ChatMessage = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/ai/flow-assistant", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: text,
+          currentStep: currentStep || "template",
+        }),
+      });
+
+      const data = await res.json();
+
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: data.reply || "Lo siento, no pude procesar tu solicitud.",
+        suggestions: data.suggestions || {},
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content:
+            "No pude conectar con el asistente IA. Puedes configurar el flujo manualmente en los pasos siguientes.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function applySuggestions(suggestions: AISuggestion) {
+    onApply(suggestions);
+    toast.success("Sugerencias aplicadas al formulario.");
+    onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-md h-full bg-card border-l border-border flex flex-col shadow-xl">
+        {/* Header */}
+        <div className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="size-8 rounded-lg bg-purple-100 dark:bg-purple-500/20 flex items-center justify-center">
+              <Bot className="size-5 text-purple-600 dark:text-purple-300" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">Asistente PayFlow</h3>
+              <p className="text-[10px] text-muted-foreground">Copiloto IA para crear flujos</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" className="size-8" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        {/* Chat messages */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto pf-scroll p-4 space-y-3"
+        >
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                  msg.role === "user"
+                    ? "bg-purple-500 text-white"
+                    : "bg-muted text-foreground"
+                }`}
+              >
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                {/* Suggestion cards */}
+                {msg.suggestions &&
+                  Object.keys(msg.suggestions).length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-[10px] font-semibold uppercase opacity-70">
+                        Sugerencias:
+                      </p>
+                      {msg.suggestions.template && (
+                        <div className="text-[11px] bg-background/50 rounded px-2 py-1">
+                          Plantilla: <strong>{msg.suggestions.template}</strong>
+                        </div>
+                      )}
+                      {msg.suggestions.businessType && (
+                        <div className="text-[11px] bg-background/50 rounded px-2 py-1">
+                          Tipo: <strong>{msg.suggestions.businessType}</strong>
+                        </div>
+                      )}
+                      {msg.suggestions.mainProductOrService && (
+                        <div className="text-[11px] bg-background/50 rounded px-2 py-1">
+                          Servicio: <strong>{msg.suggestions.mainProductOrService}</strong>
+                        </div>
+                      )}
+                      {msg.suggestions.agentTone && (
+                        <div className="text-[11px] bg-background/50 rounded px-2 py-1">
+                          Tono: <strong>{msg.suggestions.agentTone}</strong>
+                        </div>
+                      )}
+                      {msg.suggestions.paymentProvider && (
+                        <div className="text-[11px] bg-background/50 rounded px-2 py-1">
+                          Pago: <strong>{msg.suggestions.paymentProvider}</strong>
+                        </div>
+                      )}
+                      <Button
+                        size="sm"
+                        className="w-full h-7 text-xs mt-2 bg-emerald-500 hover:bg-emerald-600 text-white"
+                        onClick={() => applySuggestions(msg.suggestions!)}
+                      >
+                        <Check className="size-3 mr-1" />
+                        Aplicar sugerencias
+                      </Button>
+                    </div>
+                  )}
+              </div>
+            </div>
+          ))}
+
+          {/* Examples */}
+          {messages.length === 1 && !loading && (
+            <div className="space-y-1.5 pt-2">
+              <p className="text-[10px] text-muted-foreground font-semibold uppercase">Ejemplos:</p>
+              {EXAMPLES.map((ex, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendMessage(ex)}
+                  className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted/50 transition-colors"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-muted rounded-lg px-3 py-2">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input */}
+        <div className="shrink-0 border-t border-border p-3">
+          <div className="flex gap-2">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage(input);
+                }
+              }}
+              placeholder="Escribe tu mensaje..."
+              className="text-sm"
+              disabled={loading}
+            />
+            <Button
+              size="icon"
+              onClick={() => sendMessage(input)}
+              disabled={loading || !input.trim()}
+              className="bg-purple-500 hover:bg-purple-600 text-white shrink-0"
+            >
+              <Send className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

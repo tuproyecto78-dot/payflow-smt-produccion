@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { FlowAssistantPanel, type AISuggestion } from "./flow-assistant-panel";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -795,6 +796,7 @@ export function CreateFlowDialog({
   const [manual, setManual] = useState<Record<string, string>>({ ...EMPTY_MANUAL });
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [recommendationDismissed, setRecommendationDismissed] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
 
   // Step 4: Modules
   const [modules, setModules] = useState({
@@ -1392,6 +1394,16 @@ export function CreateFlowDialog({
               <DialogTitle className="flex items-center gap-2 text-base sm:text-lg mb-3">
                 <Sparkles className="size-5 text-purple-500" />
                 Crear flujo automático
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-7 text-xs border-purple-300 text-purple-600 hover:bg-purple-50 dark:border-purple-500/40 dark:text-purple-300 dark:hover:bg-purple-500/10"
+                  onClick={() => setAiAssistantOpen(true)}
+                >
+                  <Bot className="size-3.5 mr-1" />
+                  Crear con IA
+                </Button>
               </DialogTitle>
             </DialogHeader>
             <StepIndicator step={step} completed={completedSteps} />
@@ -2456,6 +2468,48 @@ export function CreateFlowDialog({
         onConfirm={confirmImport}
         onIgnore={ignoreImport}
         importing={importing}
+      />
+
+      {/* AI Assistant Panel */}
+      <FlowAssistantPanel
+        open={aiAssistantOpen}
+        onClose={() => setAiAssistantOpen(false)}
+        currentStep={String(step)}
+        onApply={(suggestions: AISuggestion) => {
+          // Apply suggestions to the form (user approved)
+          if (suggestions.template) {
+            setSelectedTemplate(suggestions.template as TemplateId);
+            completedSteps.push(1);
+          }
+          if (suggestions.businessType) {
+            setForm((f) => ({ ...f, business_type: suggestions.businessType! }));
+          }
+          if (suggestions.mainProductOrService) {
+            setForm((f) => ({ ...f, product_or_service: suggestions.mainProductOrService! }));
+          }
+          if (suggestions.welcomeMessage) {
+            setForm((f) => ({ ...f, welcome_message: suggestions.welcomeMessage! }));
+          }
+          if (suggestions.agentTone) {
+            setForm((f) => ({ ...f, agent_tone: suggestions.agentTone as AgentTone }));
+          }
+          if (suggestions.scheduleDays) {
+            setForm((f) => ({ ...f, schedule_days: suggestions.scheduleDays as ScheduleDays }));
+          }
+          if (suggestions.scheduleHours) {
+            setForm((f) => ({ ...f, schedule_hours: suggestions.scheduleHours as ScheduleHours }));
+          }
+          if (suggestions.paymentProvider) {
+            const usesPayphone = suggestions.paymentProvider === "payphone_api_link";
+            setModules((m) => ({
+              ...m,
+              uses_payphone: usesPayphone,
+              payment_provider: usesPayphone ? "payphone" : "none",
+            }));
+          }
+          // Move to step 2 (Negocio) so the user can review the applied suggestions
+          setStep(2);
+        }}
       />
     </>
   );
