@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { getAIConfig, logAIConfig } from "@/lib/ai/config";
 
 export const dynamic = "force-dynamic";
 
 interface FlowAssistantRequest {
   userMessage?: string;
   currentStep?: string;
-  currentForm?: Record<string, unknown>;
   conversationHistory?: Array<{ role: string; content: string }>;
 }
 
@@ -30,7 +30,51 @@ interface FlowAssistantResponse {
   nextQuestion?: string;
 }
 
-// ─── Local fallback suggestions by business type ─────────────────────
+// ─── System prompt ────────────────────────────────────────────────────
+
+const SYSTEM_PROMPT = `Eres "Asistente PayFlow", un copiloto IA experto en crear flujos de WhatsApp con IA, agenda, catálogo y PayPhone API Link.
+
+ACTÚA COMO UN ASESOR HUMANO:
+- Haz UNA pregunta a la vez, no todas juntas.
+- Escucha la respuesta del usuario y adapta tu siguiente pregunta.
+- Sé cálido, breve y específico.
+- Mantén el contexto de toda la conversación.
+- Cuando tengas suficiente información, genera sugerencias estructuradas.
+
+SI EL USUARIO PREGUNTA "¿En qué me puedes ayudar?":
+Responde: "Puedo ayudarte a elegir la plantilla correcta, redactar mensajes de WhatsApp, definir preguntas para tus clientes, configurar agenda, catálogo o PayPhone, validar si falta información y dejar listo el flujo para probarlo."
+
+FLUJO DE PREGUNTAS:
+1. ¿Qué tipo de negocio tienes?
+2. ¿Qué quieres automatizar por WhatsApp?
+3. ¿Quieres responder preguntas, vender, agendar o cobrar?
+4. ¿Quieres cobrar con link seguro PayPhone?
+5. ¿Cuál es tu horario?
+6. ¿Qué tono quieres que use el agente?
+7. ¿Quieres que cree el flujo sugerido?
+
+REGLAS:
+1. NUNCA confirmes pagos exitosos.
+2. NO pidas tokens ni StoreID al usuario.
+3. NO muestres secretos ni credenciales.
+4. Usa siempre "PayPhone API Link" o "link seguro PayPhone".
+5. NO uses "API Sale" ni "cobro sin salir de WhatsApp".
+6. Responde en español, de forma breve y amable.
+7. Incluye "Bienes raíces" como tipo de negocio (inmobiliaria, propiedades).
+8. Si el usuario saluda, responde explicando brevemente cómo puedes ayudar.
+
+Devuelve SOLO JSON válido:
+{"reply":"texto conversacional","suggestions":{"template":"...","businessType":"...","mainProductOrService":"...","welcomeMessage":"...","agentTone":"...","scheduleDays":"...","scheduleHours":"...","modules":[],"paymentProvider":"..."},"warnings":[],"missingFields":[],"nextQuestion":"..."}
+
+Templates: solo_ia, ia_agenda, ia_catalogo, ia_payphone, ia_agenda_payphone, agente_completo
+BusinessTypes: medica, clinica, abogado, comercio, ecommerce, belleza, spa, restaurante, educacion, profesional, bienes_raices, otro
+AgentTones: amable, profesional, cercano, formal, comercial, empatico
+ScheduleDays: lun-vie, lun-sab, todos, personalizado
+PaymentProviders: payphone_api_link, mock, none
+
+Si el usuario aún no ha dado suficiente información, devuelve suggestions vacío {} y nextQuestion con la siguiente pregunta.`;
+
+// ─── Local fallback suggestions ───────────────────────────────────────
 
 const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQuestion: string }> = {
   bienes_raices: {
@@ -43,7 +87,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "09h00 - 18h00",
     modules: ["ai_agent", "agenda", "payphone"],
     paymentProvider: "payphone_api_link",
-    reply: "Perfecto. Para una inmobiliaria te recomiendo la plantilla IA + Agenda + PayPhone Business. El asistente puede captar compradores, agendar visitas, filtrar por presupuesto y cobrar reservas con link seguro PayPhone. Sugiero un tono profesional y horario de lunes a sábado 9h-18h. ¿Quieres que incluya cobro de reservas con PayPhone?",
+    reply: "Para una inmobiliaria te recomiendo IA + Agenda + PayPhone Business. El asistente puede captar compradores, agendar visitas, filtrar por presupuesto y cobrar reservas con link seguro PayPhone. ¿Quieres incluir cobro de reservas?",
     nextQuestion: "¿Quieres que el asistente también filtre compradores por presupuesto o ciudad?",
   },
   clinica: {
@@ -56,7 +100,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "09h00 - 18h00",
     modules: ["ai_agent", "payphone"],
     paymentProvider: "payphone_api_link",
-    reply: "Perfecto. Para una clínica recomiendo: plantilla IA + PayPhone Business, tipo de negocio Clínica, servicio 'Cita médica / consulta especializada', tono empático y horario de lunes a viernes 9h-18h. ¿Quieres que aplique estas sugerencias?",
+    reply: "Para una clínica recomiendo IA + PayPhone, tono empático. ¿Quieres que aplique estas sugerencias?",
     nextQuestion: "¿Cuál es el número de WhatsApp de la clínica?",
   },
   medica: {
@@ -69,7 +113,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "08h00 - 17h00",
     modules: ["ai_agent", "payphone"],
     paymentProvider: "payphone_api_link",
-    reply: "Para un consultorio médico sugiero: plantilla IA + PayPhone Business, tono empático, horario lunes a viernes 8h-17h. ¿Aplico estas sugerencias?",
+    reply: "Para un consultorio médico sugiero IA + PayPhone, tono empático. ¿Aplico estas sugerencias?",
     nextQuestion: "¿Cuál es el número de WhatsApp del consultorio?",
   },
   restaurante: {
@@ -82,7 +126,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "11h00 - 22h00",
     modules: ["ai_agent", "catalog"],
     paymentProvider: "mock",
-    reply: "Para un restaurante recomiendo: plantilla IA + Catálogo, servicio 'Pedido de comida', tono comercial, horario todos los días 11h-22h. ¿Quieres que aplique estas sugerencias?",
+    reply: "Para un restaurante recomiendo IA + Catálogo, tono comercial. ¿Quieres que aplique estas sugerencias?",
     nextQuestion: "¿Cuál es el número de WhatsApp del restaurante?",
   },
   spa: {
@@ -95,7 +139,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "09h00 - 19h00",
     modules: ["ai_agent", "agenda", "payphone"],
     paymentProvider: "payphone_api_link",
-    reply: "Para un spa sugiero: plantilla IA + Agenda + PayPhone, servicio 'Reserva de tratamiento', tono amable, horario lunes a sábado 9h-19h con anticipo. ¿Aplico estas sugerencias?",
+    reply: "Para un spa sugiero IA + Agenda + PayPhone, tono amable. ¿Aplico estas sugerencias?",
     nextQuestion: "¿Cuál es el número de WhatsApp del spa?",
   },
   tienda: {
@@ -108,21 +152,8 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "09h00 - 18h00",
     modules: ["ai_agent", "catalog"],
     paymentProvider: "mock",
-    reply: "Para una tienda recomiendo: plantilla IA + Catálogo, servicio 'Venta de productos', tono comercial. ¿Quieres que aplique estas sugerencias?",
+    reply: "Para una tienda recomiendo IA + Catálogo, tono comercial. ¿Aplico estas sugerencias?",
     nextQuestion: "¿Cuál es el número de WhatsApp de la tienda?",
-  },
-  comercio: {
-    template: "ia_catalogo",
-    businessType: "comercio",
-    mainProductOrService: "Venta de productos",
-    welcomeMessage: "¡Hola! 👋 Bienvenido/a. Estoy aquí para ayudarte con tus compras, disponibilidad de productos y pagos por WhatsApp.",
-    agentTone: "comercial",
-    scheduleDays: "lun-vie",
-    scheduleHours: "09h00 - 18h00",
-    modules: ["ai_agent", "catalog"],
-    paymentProvider: "mock",
-    reply: "Para un comercio recomiendo: plantilla IA + Catálogo, tono comercial. ¿Aplico estas sugerencias?",
-    nextQuestion: "¿Cuál es el número de WhatsApp del negocio?",
   },
   default: {
     template: "solo_ia",
@@ -134,7 +165,7 @@ const LOCAL_SUGGESTIONS: Record<string, FlowSuggestions & { reply: string; nextQ
     scheduleHours: "09h00 - 18h00",
     modules: ["ai_agent"],
     paymentProvider: "none",
-    reply: "Entiendo. Te sugiero comenzar con la plantilla 'Solo IA' y un tono amable. Puedes ajustar los detalles en cada paso. ¿Quieres que aplique estas sugerencias?",
+    reply: "Te sugiero comenzar con la plantilla 'Solo IA' y un tono amable. Puedes ajustar los detalles en cada paso. ¿Quieres que aplique estas sugerencias?",
     nextQuestion: "¿Cuál es el nombre de tu negocio?",
   },
 };
@@ -145,26 +176,37 @@ function detectBusinessType(message: string): string {
   if (lower.includes("clínica") || lower.includes("clinica")) return "clinica";
   if (lower.includes("médic") || lower.includes("medic") || lower.includes("consultorio") || lower.includes("doctor")) return "medica";
   if (lower.includes("restaurante") || lower.includes("comida") || lower.includes("pedido")) return "restaurante";
-  if (lower.includes("spa") || lower.includes("tratamiento")) return "spa";
-  if (lower.includes("belleza") || lower.includes("salón") || lower.includes("salon")) return "spa";
+  if (lower.includes("spa") || lower.includes("tratamiento") || lower.includes("belleza") || lower.includes("salón") || lower.includes("salon")) return "spa";
   if (lower.includes("tienda") || lower.includes("comercio") || lower.includes("vender") || lower.includes("venta")) return "tienda";
   if (lower.includes("abogado") || lower.includes("legal") || lower.includes("despacho")) return "default";
   if (lower.includes("educación") || lower.includes("educacion") || lower.includes("curso") || lower.includes("matrícula") || lower.includes("matricula")) return "default";
   return "default";
 }
 
+function localFallback(userMessage: string): FlowAssistantResponse {
+  const detectedType = detectBusinessType(userMessage);
+  const local = LOCAL_SUGGESTIONS[detectedType] || LOCAL_SUGGESTIONS.default;
+  return {
+    reply: local.reply,
+    suggestions: {
+      template: local.template,
+      businessType: local.businessType,
+      mainProductOrService: local.mainProductOrService,
+      welcomeMessage: local.welcomeMessage,
+      agentTone: local.agentTone,
+      scheduleDays: local.scheduleDays,
+      scheduleHours: local.scheduleHours,
+      modules: local.modules,
+      paymentProvider: local.paymentProvider,
+    },
+    warnings: [],
+    missingFields: [],
+    nextQuestion: local.nextQuestion,
+  };
+}
+
 /**
  * POST /api/ai/flow-assistant
- *
- * AI-powered flow creation assistant. Uses the configured AI provider
- * (OpenRouter/Z.ai) to suggest flow configuration based on the user's
- * message. Falls back to local suggestions if AI is not available.
- *
- * SECURITY:
- *   - API keys are NEVER exposed to the frontend.
- *   - The AI can NEVER confirm payments.
- *   - No tokens, StoreID, or secrets are returned.
- *   - Uses "PayPhone API Link" and "link seguro PayPhone" terminology.
  */
 export async function POST(req: Request) {
   const session = await getSession();
@@ -193,203 +235,118 @@ export async function POST(req: Request) {
     } satisfies FlowAssistantResponse);
   }
 
-  // ─── Try AI provider if configured ────────────────────────────────
-  const aiProvider = (process.env.AI_PROVIDER || "mock").toLowerCase();
+  // ─── Get AI config ─────────────────────────────────────────────────
+  const cfg = getAIConfig();
+  logAIConfig();
 
-  if (aiProvider !== "mock") {
-    let apiKey: string | undefined;
-    let endpoint: string;
-    let model: string;
+  // ─── If mock or no API key, use local fallback ─────────────────────
+  if (cfg.provider === "mock" || !cfg.hasApiKey) {
+    console.log("[/api/ai/flow-assistant] Using local fallback (no AI configured)");
+    return NextResponse.json(localFallback(userMessage));
+  }
 
-    if (aiProvider === "openrouter") {
-      apiKey = process.env.OPENROUTER_API_KEY;
-      const baseUrl = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
-      model = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.2-3b-instruct:free";
-      endpoint = `${baseUrl}/chat/completions`;
-    } else {
-      apiKey = process.env.ZAI_API_KEY;
-      const baseUrl = process.env.ZAI_BASE_URL || "https://api.z.ai/api/coding/paas/v4";
-      model = process.env.ZAI_MODEL || "glm-5.1";
-      endpoint = `${baseUrl}/chat/completions`;
-    }
+  // ─── Build messages with conversation history ──────────────────────
+  const historyMessages: Array<{ role: string; content: string }> = [
+    { role: "system", content: SYSTEM_PROMPT },
+  ];
 
-    if (apiKey) {
-      try {
-        const systemPrompt = `Eres "Asistente PayFlow", un copiloto IA que ayuda a configurar flujos de automatización de WhatsApp para PayFlow SMT.
-
-ACTÚA COMO UN ASESOR HUMANO:
-- Haz UNA pregunta a la vez, no todas juntas.
-- Escucha la respuesta del usuario y adapta tu siguiente pregunta.
-- Sé cálido, breve y específico.
-- Cuando tengas suficiente información, genera sugerencias estructuradas.
-- Mantén el contexto de toda la conversación anterior.
-
-FLUJO DE PREGUNTAS:
-1. ¿Qué tipo de negocio tienes?
-2. ¿Qué quieres automatizar por WhatsApp?
-3. ¿Quieres responder preguntas, vender, agendar o cobrar?
-4. ¿Tienes PayPhone Business o quieres cobrar con link seguro PayPhone?
-5. ¿Cuál es tu horario?
-6. ¿Qué tono quieres que use el agente?
-7. ¿Quieres que cree el flujo sugerido?
-
-REGLAS:
-1. NUNCA confirmes pagos exitosos.
-2. NO pidas tokens ni StoreID al usuario.
-3. NO muestres secretos ni credenciales.
-4. Usa siempre "PayPhone API Link" o "link seguro PayPhone".
-5. NO uses "API Sale" ni "cobro sin salir de WhatsApp".
-6. Responde en español, de forma breve y amable.
-7. Sugiere configuración basada en el tipo de negocio del usuario.
-8. Incluye "Bienes raíces" como tipo de negocio (inmobiliaria, propiedades).
-9. Si el usuario saluda o pregunta qué puedes hacer, responde explicando brevemente cómo puedes ayudar.
-
-Devuelve SOLO JSON válido con esta estructura:
-{"reply":"texto conversacional","suggestions":{"template":"...","businessType":"...","mainProductOrService":"...","welcomeMessage":"...","agentTone":"...","scheduleDays":"...","scheduleHours":"...","modules":[],"paymentProvider":"..."},"warnings":[],"missingFields":[],"nextQuestion":"..."}
-
-Templates: solo_ia, ia_agenda, ia_catalogo, ia_payphone, ia_agenda_payphone, agente_completo
-BusinessTypes: medica, clinica, abogado, comercio, ecommerce, belleza, spa, restaurante, educacion, profesional, bienes_raices, otro
-AgentTones: amable, profesional, cercano, formal, comercial, empatico
-ScheduleDays: lun-vie, lun-sab, todos, personalizado
-PaymentProviders: payphone_api_link, mock, none
-
-Si el usuario aún no ha dado suficiente información, devuelve suggestions vacío y nextQuestion con la siguiente pregunta.`;
-
-        // Build messages array with conversation history for context
-        const historyMessages: Array<{ role: string; content: string }> = [
-          { role: "system", content: systemPrompt },
-        ];
-
-        // Add conversation history (up to last 10 messages to keep token count reasonable)
-        const history = body.conversationHistory || [];
-        const recentHistory = history.slice(-10);
-        for (const msg of recentHistory) {
-          if (msg.role === "user" || msg.role === "assistant") {
-            historyMessages.push({
-              role: msg.role,
-              content: msg.content,
-            });
-          }
-        }
-
-        // Add the current user message (if not already in history)
-        const lastMsg = recentHistory[recentHistory.length - 1];
-        if (!lastMsg || lastMsg.content !== userMessage) {
-          historyMessages.push({ role: "user", content: userMessage });
-        }
-
-        console.log("[/api/ai/flow-assistant] calling AI:", {
-          provider: aiProvider,
-          model,
-          messageCount: historyMessages.length,
-          hasApiKey: !!apiKey,
-        });
-
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            ...(aiProvider === "openrouter" && {
-              "HTTP-Referer": "https://payflow-smt.vercel.app",
-              "X-Title": "PayFlow SMT",
-            }),
-          },
-          body: JSON.stringify({
-            model,
-            messages: historyMessages,
-            temperature: 0.4,
-            max_tokens: 600,
-          }),
-          cache: "no-store",
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const content = data?.choices?.[0]?.message?.content || "";
-
-          console.log("[/api/ai/flow-assistant] AI response received:", {
-            contentLength: content.length,
-            contentPreview: content.slice(0, 200),
-          });
-
-          // Try to parse JSON from the AI response
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              const parsed = JSON.parse(jsonMatch[0]);
-              return NextResponse.json({
-                reply: String(parsed.reply || content.slice(0, 500)).slice(0, 500),
-                suggestions: {
-                  template: parsed.suggestions?.template,
-                  businessType: parsed.suggestions?.businessType,
-                  mainProductOrService: parsed.suggestions?.mainProductOrService,
-                  welcomeMessage: parsed.suggestions?.welcomeMessage,
-                  agentTone: parsed.suggestions?.agentTone,
-                  scheduleDays: parsed.suggestions?.scheduleDays,
-                  scheduleHours: parsed.suggestions?.scheduleHours,
-                  modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
-                  paymentProvider: parsed.suggestions?.paymentProvider || "none",
-                },
-                warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
-                missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
-                nextQuestion: parsed.nextQuestion,
-              } satisfies FlowAssistantResponse);
-            } catch {
-              // JSON parse failed — use the raw content as reply
-              console.warn("[/api/ai/flow-assistant] JSON parse failed, using raw content");
-              return NextResponse.json({
-                reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
-                suggestions: {},
-                warnings: [],
-                missingFields: [],
-              } satisfies FlowAssistantResponse);
-            }
-          } else {
-            // No JSON found — use the raw content as reply
-            console.warn("[/api/ai/flow-assistant] No JSON in AI response, using raw content");
-            return NextResponse.json({
-              reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
-              suggestions: {},
-              warnings: [],
-              missingFields: [],
-            } satisfies FlowAssistantResponse);
-          }
-        } else {
-          // AI returned HTTP error
-          const errText = await res.text().catch(() => "");
-          console.warn("[/api/ai/flow-assistant] AI HTTP error:", {
-            status: res.status,
-            body: errText.slice(0, 300),
-          });
-        }
-        // AI failed — fall through to local fallback
-        console.warn("[/api/ai/flow-assistant] AI provider failed, using local fallback");
-      } catch (err) {
-        console.warn("[/api/ai/flow-assistant] AI fetch failed:", err);
-      }
+  const history = body.conversationHistory || [];
+  const recentHistory = history.slice(-10);
+  for (const msg of recentHistory) {
+    if (msg.role === "user" || msg.role === "assistant") {
+      historyMessages.push({ role: msg.role, content: msg.content });
     }
   }
 
-  // ─── Local fallback ───────────────────────────────────────────────
-  const detectedType = detectBusinessType(userMessage);
-  const local = LOCAL_SUGGESTIONS[detectedType] || LOCAL_SUGGESTIONS.default;
+  // Add current user message if not already last in history
+  const lastMsg = recentHistory[recentHistory.length - 1];
+  if (!lastMsg || lastMsg.content !== userMessage) {
+    historyMessages.push({ role: "user", content: userMessage });
+  }
 
-  return NextResponse.json({
-    reply: local.reply,
-    suggestions: {
-      template: local.template,
-      businessType: local.businessType,
-      mainProductOrService: local.mainProductOrService,
-      welcomeMessage: local.welcomeMessage,
-      agentTone: local.agentTone,
-      scheduleDays: local.scheduleDays,
-      scheduleHours: local.scheduleHours,
-      modules: local.modules,
-      paymentProvider: local.paymentProvider,
-    },
-    warnings: [],
-    missingFields: [],
-    nextQuestion: local.nextQuestion,
-  } satisfies FlowAssistantResponse);
+  console.log("[/api/ai/flow-assistant] calling AI:", {
+    provider: cfg.provider,
+    model: cfg.model,
+    endpoint: cfg.endpoint,
+    messageCount: historyMessages.length,
+  });
+
+  // ─── Call AI provider ──────────────────────────────────────────────
+  try {
+    const res = await fetch(cfg.endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.apiKey}`,
+        "Content-Type": "application/json",
+        ...(cfg.provider === "openrouter" && {
+          "HTTP-Referer": "https://payflow-smt.vercel.app",
+          "X-Title": "PayFlow SMT",
+        }),
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: historyMessages,
+        temperature: 0.4,
+        max_tokens: 600,
+      }),
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn("[/api/ai/flow-assistant] AI HTTP error:", {
+        status: res.status,
+        body: errText.slice(0, 300),
+      });
+      // Fall back to local
+      return NextResponse.json(localFallback(userMessage));
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+
+    console.log("[/api/ai/flow-assistant] AI response:", {
+      contentLength: content.length,
+      contentPreview: content.slice(0, 200),
+    });
+
+    // Try to parse JSON from the AI response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return NextResponse.json({
+          reply: String(parsed.reply || content.slice(0, 500)).slice(0, 500),
+          suggestions: {
+            template: parsed.suggestions?.template,
+            businessType: parsed.suggestions?.businessType,
+            mainProductOrService: parsed.suggestions?.mainProductOrService,
+            welcomeMessage: parsed.suggestions?.welcomeMessage,
+            agentTone: parsed.suggestions?.agentTone,
+            scheduleDays: parsed.suggestions?.scheduleDays,
+            scheduleHours: parsed.suggestions?.scheduleHours,
+            modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
+            paymentProvider: parsed.suggestions?.paymentProvider || "none",
+          },
+          warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+          missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
+          nextQuestion: parsed.nextQuestion,
+        } satisfies FlowAssistantResponse);
+      } catch {
+        // JSON parse failed — use raw content as reply
+        console.warn("[/api/ai/flow-assistant] JSON parse failed, using raw content");
+      }
+    }
+
+    // No JSON found — use raw content as reply (this is a REAL AI response)
+    return NextResponse.json({
+      reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
+      suggestions: {},
+      warnings: [],
+      missingFields: [],
+    } satisfies FlowAssistantResponse);
+  } catch (err) {
+    console.warn("[/api/ai/flow-assistant] AI fetch failed:", err instanceof Error ? err.message : String(err));
+    return NextResponse.json(localFallback(userMessage));
+  }
 }
