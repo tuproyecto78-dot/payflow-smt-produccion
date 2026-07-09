@@ -272,19 +272,20 @@ export async function POST(req: Request) {
   });
 
   // ─── Call AI provider ──────────────────────────────────────────────
-  try {
-    const res = await fetch(cfg.endpoint, {
+  // Helper function to call any AI provider
+  async function callProvider(providerCfg: { provider: string; apiKey: string; endpoint: string; model: string; }): Promise<{ ok: boolean; content: string; status: number; statusText: string; }> {
+    const res = await fetch(providerCfg.endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
+        Authorization: `Bearer ${providerCfg.apiKey}`,
         "Content-Type": "application/json",
-        ...(cfg.provider === "openrouter" && {
+        ...(providerCfg.provider === "openrouter" && {
           "HTTP-Referer": "https://payflow-smt.vercel.app",
           "X-Title": "PayFlow SMT",
         }),
       },
       body: JSON.stringify({
-        model: cfg.model,
+        model: providerCfg.model,
         messages: historyMessages,
         temperature: 0.4,
         max_tokens: 600,
@@ -293,95 +294,210 @@ export async function POST(req: Request) {
     });
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      let errBody: { error?: { message?: string; code?: number } } = {};
-      try { errBody = JSON.parse(errText); } catch {}
+      return { ok: false, content: "", status: res.status, statusText: res.statusText };
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    return { ok: true, content, status: res.status, statusText: "OK" };
+  }
 
-      const errMsg = errBody?.error?.message || errText.slice(0, 200) || `HTTP ${res.status}`;
+  // ─── Try primary provider ──────────────────────────────────────────
+  try {
+    console.log("[/api/ai/flow-assistant] calling primary AI:", {
+      provider: cfg.provider,
+      model: cfg.model,
+      endpoint: cfg.endpoint,
+      messageCount: historyMessages.length,
+    });
 
-      console.warn("[/api/ai/flow-assistant] AI HTTP error:", {
-        status: res.status,
-        body: errText.slice(0, 300),
+    const result = await callProvider({
+      provider: cfg.provider,
+      apiKey: cfg.apiKey!,
+      endpoint: cfg.endpoint,
+      model: cfg.model,
+    });
+
+    if (result.ok) {
+      console.log("[/api/ai/flow-assistant] primary AI success:", {
+        contentLength: result.content.length,
+        contentPreview: result.content.slice(0, 200),
       });
 
-      // Return a clear error message to the user (not the fallback)
-      let userMsg: string;
-      if (res.status === 401 || res.status === 403) {
-        userMsg = "La API key de OpenRouter no es válida. Verifica OPENROUTER_API_KEY en Vercel. Mientras tanto, puedo ayudarte con sugerencias locales.";
-      } else if (res.status === 404) {
-        userMsg = `El modelo "${cfg.model}" no fue encontrado en OpenRouter. Verifica OPENROUTER_MODEL en Vercel. Modelos gratuitos válidos: meta-llama/llama-3.2-3b-instruct:free, google/gemini-flash-1.5:free. Mientras tanto, puedo ayudarte con sugerencias locales.`;
-      } else if (res.status === 429) {
-        userMsg = "OpenRouter ha alcanzado el límite de uso gratuito. Puedes esperar unos minutos e intentar nuevamente, o cambiar a un modelo de pago en OpenRouter. Mientras tanto, te ayudo con sugerencias locales basadas en tu negocio.";
-      } else {
-        userMsg = `Error de OpenRouter (HTTP ${res.status}). Mientras tanto, puedo ayudarte con sugerencias locales.`;
+      // Try to parse JSON from the AI response
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return NextResponse.json({
+            reply: String(parsed.reply || result.content.slice(0, 500)).slice(0, 500),
+            suggestions: {
+              template: parsed.suggestions?.template,
+              businessType: parsed.suggestions?.businessType,
+              mainProductOrService: parsed.suggestions?.mainProductOrService,
+              welcomeMessage: parsed.suggestions?.welcomeMessage,
+              agentTone: parsed.suggestions?.agentTone,
+              scheduleDays: parsed.suggestions?.scheduleDays,
+              scheduleHours: parsed.suggestions?.scheduleHours,
+              modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
+              paymentProvider: parsed.suggestions?.paymentProvider || "none",
+            },
+            warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+            missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
+            nextQuestion: parsed.nextQuestion,
+          } satisfies FlowAssistantResponse);
+        } catch {
+          // JSON parse failed — use raw content
+        }
       }
 
-      // For 429 (rate limit), also provide local suggestions so the user
-      // can still work while waiting for the rate limit to reset
-      if (res.status === 429) {
-        const fallback = localFallback(userMessage);
-        return NextResponse.json({
-          reply: userMsg + "\n\n" + fallback.reply,
-          suggestions: fallback.suggestions,
-          warnings: ["AI_RATE_LIMITED"],
-          missingFields: [],
-          nextQuestion: fallback.nextQuestion,
-        } satisfies FlowAssistantResponse);
-      }
-
+      // No JSON — use raw content as reply (this is a REAL AI response)
       return NextResponse.json({
-        reply: userMsg,
+        reply: result.content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
         suggestions: {},
-        warnings: ["AI_PROVIDER_ERROR"],
+        warnings: [],
         missingFields: [],
       } satisfies FlowAssistantResponse);
     }
 
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content || "";
+    // ─── Primary failed — try fallback providers ─────────────────────
+    console.warn("[/api/ai/flow-assistant] primary AI failed:", result.status);
 
-    console.log("[/api/ai/flow-assistant] AI response:", {
-      contentLength: content.length,
-      contentPreview: content.slice(0, 200),
-    });
+    // If primary was OpenRouter and ZAI_API_KEY exists, try Z.ai
+    if (cfg.provider === "openrouter") {
+      const zaiKey = process.env.ZAI_API_KEY?.trim();
+      if (zaiKey) {
+        const zaiBase = process.env.ZAI_BASE_URL?.trim() || "https://api.z.ai/api/coding/paas/v4";
+        const zaiModel = process.env.ZAI_MODEL?.trim() || "glm-4-flash";
+        console.log("[/api/ai/flow-assistant] falling back to Z.ai:", { model: zaiModel });
 
-    // Try to parse JSON from the AI response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return NextResponse.json({
-          reply: String(parsed.reply || content.slice(0, 500)).slice(0, 500),
-          suggestions: {
-            template: parsed.suggestions?.template,
-            businessType: parsed.suggestions?.businessType,
-            mainProductOrService: parsed.suggestions?.mainProductOrService,
-            welcomeMessage: parsed.suggestions?.welcomeMessage,
-            agentTone: parsed.suggestions?.agentTone,
-            scheduleDays: parsed.suggestions?.scheduleDays,
-            scheduleHours: parsed.suggestions?.scheduleHours,
-            modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
-            paymentProvider: parsed.suggestions?.paymentProvider || "none",
-          },
-          warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
-          missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
-          nextQuestion: parsed.nextQuestion,
-        } satisfies FlowAssistantResponse);
-      } catch {
-        // JSON parse failed — use raw content as reply
-        console.warn("[/api/ai/flow-assistant] JSON parse failed, using raw content");
+        try {
+          const zaiResult = await callProvider({
+            provider: "zai",
+            apiKey: zaiKey,
+            endpoint: `${zaiBase}/chat/completions`,
+            model: zaiModel,
+          });
+
+          if (zaiResult.ok) {
+            console.log("[/api/ai/flow-assistant] Z.ai fallback success:", {
+              contentLength: zaiResult.content.length,
+            });
+
+            const jsonMatch = zaiResult.content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return NextResponse.json({
+                  reply: String(parsed.reply || zaiResult.content.slice(0, 500)).slice(0, 500),
+                  suggestions: {
+                    template: parsed.suggestions?.template,
+                    businessType: parsed.suggestions?.businessType,
+                    mainProductOrService: parsed.suggestions?.mainProductOrService,
+                    welcomeMessage: parsed.suggestions?.welcomeMessage,
+                    agentTone: parsed.suggestions?.agentTone,
+                    scheduleDays: parsed.suggestions?.scheduleDays,
+                    scheduleHours: parsed.suggestions?.scheduleHours,
+                    modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
+                    paymentProvider: parsed.suggestions?.paymentProvider || "none",
+                  },
+                  warnings: [],
+                  missingFields: [],
+                  nextQuestion: parsed.nextQuestion,
+                } satisfies FlowAssistantResponse);
+              } catch {}
+            }
+
+            return NextResponse.json({
+              reply: zaiResult.content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
+              suggestions: {},
+              warnings: [],
+              missingFields: [],
+            } satisfies FlowAssistantResponse);
+          }
+          console.warn("[/api/ai/flow-assistant] Z.ai also failed:", zaiResult.status);
+        } catch (zaiErr) {
+          console.warn("[/api/ai/flow-assistant] Z.ai fetch failed:", zaiErr);
+        }
       }
     }
 
-    // No JSON found — use raw content as reply (this is a REAL AI response)
+    // If primary was Z.ai and OPENROUTER_API_KEY exists, try OpenRouter
+    if (cfg.provider === "zai") {
+      const orKey = process.env.OPENROUTER_API_KEY?.trim();
+      if (orKey) {
+        const orBase = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
+        let orModel = process.env.OPENROUTER_MODEL?.trim() || "meta-llama/llama-3.2-3b-instruct:free";
+        if (orModel === "openrouter/free" || orModel === "free") {
+          orModel = "meta-llama/llama-3.2-3b-instruct:free";
+        }
+        console.log("[/api/ai/flow-assistant] falling back to OpenRouter:", { model: orModel });
+
+        try {
+          const orResult = await callProvider({
+            provider: "openrouter",
+            apiKey: orKey,
+            endpoint: `${orBase}/chat/completions`,
+            model: orModel,
+          });
+
+          if (orResult.ok) {
+            const jsonMatch = orResult.content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return NextResponse.json({
+                  reply: String(parsed.reply || orResult.content.slice(0, 500)).slice(0, 500),
+                  suggestions: {
+                    template: parsed.suggestions?.template,
+                    businessType: parsed.suggestions?.businessType,
+                    mainProductOrService: parsed.suggestions?.mainProductOrService,
+                    welcomeMessage: parsed.suggestions?.welcomeMessage,
+                    agentTone: parsed.suggestions?.agentTone,
+                    scheduleDays: parsed.suggestions?.scheduleDays,
+                    scheduleHours: parsed.suggestions?.scheduleHours,
+                    modules: Array.isArray(parsed.suggestions?.modules) ? parsed.suggestions.modules : [],
+                    paymentProvider: parsed.suggestions?.paymentProvider || "none",
+                  },
+                  warnings: [],
+                  missingFields: [],
+                  nextQuestion: parsed.nextQuestion,
+                } satisfies FlowAssistantResponse);
+              } catch {}
+            }
+
+            return NextResponse.json({
+              reply: orResult.content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
+              suggestions: {},
+              warnings: [],
+              missingFields: [],
+            } satisfies FlowAssistantResponse);
+          }
+        } catch (orErr) {
+          console.warn("[/api/ai/flow-assistant] OpenRouter fallback failed:", orErr);
+        }
+      }
+    }
+
+    // ─── All AI providers failed — use local fallback ────────────────
+    console.warn("[/api/ai/flow-assistant] All AI providers failed, using local fallback");
+    const fallback = localFallback(userMessage);
     return NextResponse.json({
-      reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
-      suggestions: {},
-      warnings: [],
+      reply: "No pude conectar con la IA en este momento, pero te ayudo con sugerencias locales.\n\n" + fallback.reply,
+      suggestions: fallback.suggestions,
+      warnings: ["AI_UNAVAILABLE"],
       missingFields: [],
+      nextQuestion: fallback.nextQuestion,
     } satisfies FlowAssistantResponse);
+
   } catch (err) {
     console.warn("[/api/ai/flow-assistant] AI fetch failed:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json(localFallback(userMessage));
+    const fallback = localFallback(userMessage);
+    return NextResponse.json({
+      reply: "No pude conectar con la IA en este momento, pero te ayudo con sugerencias locales.\n\n" + fallback.reply,
+      suggestions: fallback.suggestions,
+      warnings: ["AI_UNAVAILABLE"],
+      missingFields: [],
+      nextQuestion: fallback.nextQuestion,
+    } satisfies FlowAssistantResponse);
   }
 }
