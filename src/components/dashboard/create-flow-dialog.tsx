@@ -178,7 +178,7 @@ const TEMPLATES: Array<{
   { id: "solo_ia", name: "Solo IA", icon: MessageSquare, desc: "WhatsApp + IA + respuesta + humano", tag: "Sin pagos", color: "emerald" },
   { id: "ia_agenda", name: "IA + Agenda", icon: CalendarClock, desc: "WhatsApp + IA + agenda de citas", tag: "Agenda", color: "sky" },
   { id: "ia_catalogo", name: "IA + Catálogo", icon: ShoppingCart, desc: "WhatsApp + IA + productos", tag: "Catálogo", color: "amber" },
-  { id: "ia_payphone", name: "IA + PayPhone", icon: CreditCard, desc: "WhatsApp + IA + cobro PayPhone", tag: "PayPhone", color: "violet" },
+  { id: "ia_payphone", name: "IA + PayPhone Business", icon: CreditCard, desc: "WhatsApp + IA + Link de Pago PayPhone", tag: "PayPhone", color: "violet" },
   { id: "ia_agenda_payphone", name: "IA + Agenda + PayPhone", icon: CalendarCheck, desc: "Citas + cobro de anticipo", tag: "Agenda + PayPhone", color: "rose" },
   { id: "agente_completo", name: "Agente completo", icon: Bot, desc: "Vende, cobra, agenda y deriva", tag: "Completo", color: "purple" },
 ];

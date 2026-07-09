@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, Sparkles, Loader2, ExternalLink, Eye, Play, Copy, Power, RotateCcw } from "lucide-react";
+import { Workflow, Sparkles, Loader2, Eye, Play, Copy, Power, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { CreateFlowDialog } from "@/components/dashboard/create-flow-dialog";
 
@@ -107,18 +107,10 @@ export default function FlujosPage() {
           <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Flujos</h1>
           <p className="text-muted-foreground mt-1">Canales de pago automatizados por WhatsApp</p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/dashboard/flujos/demo-cobro-whatsapp-ia">
-            <Button variant="outline">
-              <ExternalLink className="size-4 mr-2" />
-              Abrir flujo demo
-            </Button>
-          </Link>
-          <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
-            <Sparkles className="size-4 mr-2" />
-            Crear flujo sugerido
-          </Button>
-        </div>
+        <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
+          <Sparkles className="size-4 mr-2" />
+          Crear flujo sugerido
+        </Button>
       </div>
 
       {loading ? (
@@ -133,12 +125,6 @@ export default function FlujosPage() {
             Crea tu primer flujo automático o restaura el flujo de ejemplo para empezar.
           </p>
           <div className="flex gap-2 justify-center">
-            <Link href="/dashboard/flujos/demo-cobro-whatsapp-ia">
-              <Button variant="outline">
-                <ExternalLink className="size-4 mr-2" />
-                Abrir flujo demo
-              </Button>
-            </Link>
             <Button onClick={() => setCreateFlowOpen(true)} className="bg-purple-500 hover:bg-purple-600 text-white">
               <Sparkles className="size-4 mr-2" />
               Crear flujo sugerido
