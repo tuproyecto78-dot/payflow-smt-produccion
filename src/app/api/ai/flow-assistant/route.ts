@@ -7,6 +7,7 @@ interface FlowAssistantRequest {
   userMessage?: string;
   currentStep?: string;
   currentForm?: Record<string, unknown>;
+  conversationHistory?: Array<{ role: string; content: string }>;
 }
 
 interface FlowSuggestions {
@@ -221,6 +222,7 @@ ACTÚA COMO UN ASESOR HUMANO:
 - Escucha la respuesta del usuario y adapta tu siguiente pregunta.
 - Sé cálido, breve y específico.
 - Cuando tengas suficiente información, genera sugerencias estructuradas.
+- Mantén el contexto de toda la conversación anterior.
 
 FLUJO DE PREGUNTAS:
 1. ¿Qué tipo de negocio tienes?
@@ -240,6 +242,7 @@ REGLAS:
 6. Responde en español, de forma breve y amable.
 7. Sugiere configuración basada en el tipo de negocio del usuario.
 8. Incluye "Bienes raíces" como tipo de negocio (inmobiliaria, propiedades).
+9. Si el usuario saluda o pregunta qué puedes hacer, responde explicando brevemente cómo puedes ayudar.
 
 Devuelve SOLO JSON válido con esta estructura:
 {"reply":"texto conversacional","suggestions":{"template":"...","businessType":"...","mainProductOrService":"...","welcomeMessage":"...","agentTone":"...","scheduleDays":"...","scheduleHours":"...","modules":[],"paymentProvider":"..."},"warnings":[],"missingFields":[],"nextQuestion":"..."}
@@ -251,6 +254,36 @@ ScheduleDays: lun-vie, lun-sab, todos, personalizado
 PaymentProviders: payphone_api_link, mock, none
 
 Si el usuario aún no ha dado suficiente información, devuelve suggestions vacío y nextQuestion con la siguiente pregunta.`;
+
+        // Build messages array with conversation history for context
+        const historyMessages: Array<{ role: string; content: string }> = [
+          { role: "system", content: systemPrompt },
+        ];
+
+        // Add conversation history (up to last 10 messages to keep token count reasonable)
+        const history = body.conversationHistory || [];
+        const recentHistory = history.slice(-10);
+        for (const msg of recentHistory) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            historyMessages.push({
+              role: msg.role,
+              content: msg.content,
+            });
+          }
+        }
+
+        // Add the current user message (if not already in history)
+        const lastMsg = recentHistory[recentHistory.length - 1];
+        if (!lastMsg || lastMsg.content !== userMessage) {
+          historyMessages.push({ role: "user", content: userMessage });
+        }
+
+        console.log("[/api/ai/flow-assistant] calling AI:", {
+          provider: aiProvider,
+          model,
+          messageCount: historyMessages.length,
+          hasApiKey: !!apiKey,
+        });
 
         const res = await fetch(endpoint, {
           method: "POST",
@@ -264,12 +297,9 @@ Si el usuario aún no ha dado suficiente información, devuelve suggestions vac�
           },
           body: JSON.stringify({
             model,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userMessage },
-            ],
-            temperature: 0.3,
-            max_tokens: 500,
+            messages: historyMessages,
+            temperature: 0.4,
+            max_tokens: 600,
           }),
           cache: "no-store",
         });
@@ -277,13 +307,19 @@ Si el usuario aún no ha dado suficiente información, devuelve suggestions vac�
         if (res.ok) {
           const data = await res.json();
           const content = data?.choices?.[0]?.message?.content || "";
+
+          console.log("[/api/ai/flow-assistant] AI response received:", {
+            contentLength: content.length,
+            contentPreview: content.slice(0, 200),
+          });
+
           // Try to parse JSON from the AI response
           const jsonMatch = content.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             try {
               const parsed = JSON.parse(jsonMatch[0]);
               return NextResponse.json({
-                reply: String(parsed.reply || "").slice(0, 500),
+                reply: String(parsed.reply || content.slice(0, 500)).slice(0, 500),
                 suggestions: {
                   template: parsed.suggestions?.template,
                   businessType: parsed.suggestions?.businessType,
@@ -300,9 +336,32 @@ Si el usuario aún no ha dado suficiente información, devuelve suggestions vac�
                 nextQuestion: parsed.nextQuestion,
               } satisfies FlowAssistantResponse);
             } catch {
-              // JSON parse failed — fall through to local fallback
+              // JSON parse failed — use the raw content as reply
+              console.warn("[/api/ai/flow-assistant] JSON parse failed, using raw content");
+              return NextResponse.json({
+                reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
+                suggestions: {},
+                warnings: [],
+                missingFields: [],
+              } satisfies FlowAssistantResponse);
             }
+          } else {
+            // No JSON found — use the raw content as reply
+            console.warn("[/api/ai/flow-assistant] No JSON in AI response, using raw content");
+            return NextResponse.json({
+              reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.",
+              suggestions: {},
+              warnings: [],
+              missingFields: [],
+            } satisfies FlowAssistantResponse);
           }
+        } else {
+          // AI returned HTTP error
+          const errText = await res.text().catch(() => "");
+          console.warn("[/api/ai/flow-assistant] AI HTTP error:", {
+            status: res.status,
+            body: errText.slice(0, 300),
+          });
         }
         // AI failed — fall through to local fallback
         console.warn("[/api/ai/flow-assistant] AI provider failed, using local fallback");

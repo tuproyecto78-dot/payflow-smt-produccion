@@ -66,11 +66,20 @@ export function FlowAssistantPanel({
     if (!text.trim() || loading) return;
 
     const userMsg: ChatMessage = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setInput("");
     setLoading(true);
 
     try {
+      // Send conversation history so the AI can maintain context
+      const conversationHistory = newMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
       const res = await fetch("/api/ai/flow-assistant", {
         method: "POST",
         credentials: "include",
@@ -78,6 +87,7 @@ export function FlowAssistantPanel({
         body: JSON.stringify({
           userMessage: text,
           currentStep: currentStep || "template",
+          conversationHistory,
         }),
       });
 
