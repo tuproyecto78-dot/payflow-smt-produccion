@@ -190,79 +190,82 @@ export async function POST(req: Request) {
     let content = "";
 
     if (cfg.mode === "gemini") {
-      // ─── Gemini API call ──────────────────────────────────────────
-      // Build contents array: system prompt in first user message + history
-      const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+      // ─── Gemini API call with model fallback ──────────────────────
+      const FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash"];
+      const modelsToTry = [cfg.model, ...FALLBACK_MODELS.filter((m) => m !== cfg.model)];
+      let geminiSuccess = false;
+      let geminiError = "";
 
-      // Include system prompt + user message as first content if no history
-      if (history.length === 0) {
-        contents.push({
-          role: "user",
-          parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario: ${userMessage}` }],
-        });
-      } else {
-        // Add history
-        for (const msg of history.slice(-10)) {
-          if (msg.role === "user" || msg.role === "assistant") {
-            contents.push({
-              role: msg.role === "assistant" ? "model" : "user",
-              parts: [{ text: msg.content }],
-            });
+      for (const tryModel of modelsToTry) {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${tryModel}:generateContent?key=${cfg.apiKey}`;
+
+        // Build contents for this attempt
+        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+        if (history.length === 0) {
+          contents.push({ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario: ${userMessage}` }] });
+        } else {
+          for (const msg of history.slice(-10)) {
+            if (msg.role === "user" || msg.role === "assistant") {
+              contents.push({ role: msg.role === "assistant" ? "model" : "user", parts: [{ text: msg.content }] });
+            }
+          }
+          const last = contents[contents.length - 1];
+          if (!last || last.role !== "user" || last.parts[0]?.text !== userMessage) {
+            contents.push({ role: "user", parts: [{ text: userMessage }] });
           }
         }
-        // Add current user message
-        const last = contents[contents.length - 1];
-        if (!last || last.role !== "user" || last.parts[0]?.text !== userMessage) {
-          contents.push({ role: "user", parts: [{ text: userMessage }] });
+
+        console.log("[/api/ai/flow-assistant] trying Gemini model:", tryModel);
+
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents,
+              generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
+            }),
+            cache: "no-store",
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            content = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            if (data?.candidates?.[0]?.finishReason === "SAFETY") {
+              content = "Lo siento, no puedo responder a eso. ¿Puedes reformular tu pregunta?";
+            }
+            console.log("[/api/ai/flow-assistant] Gemini success with model:", tryModel, "length:", content.length);
+            geminiSuccess = true;
+            break; // Success, stop trying
+          }
+
+          const errText = await res.text().catch(() => "");
+          console.warn("[/api/ai/flow-assistant] Gemini error with model:", tryModel, "status:", res.status);
+
+          // If 404 (model not found), try next model
+          if (res.status === 404) {
+            geminiError = `Modelo ${tryModel} no disponible (404)`;
+            continue;
+          }
+
+          // For other errors, stop and report
+          geminiError = `[Error Gemini ${res.status}] ${errText.slice(0, 200)}`;
+          break;
+        } catch (fetchErr) {
+          console.warn("[/api/ai/flow-assistant] Gemini fetch error with model:", tryModel, fetchErr);
+          geminiError = `Error de red con modelo ${tryModel}`;
+          continue;
         }
       }
 
-      const geminiBody = {
-        contents,
-        generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
-      };
-
-      console.log("[/api/ai/flow-assistant] Gemini request:", {
-        endpoint: cfg.endpoint,
-        contentCount: contents.length,
-        model: cfg.model,
-      });
-
-      const res = await fetch(`${cfg.endpoint}?key=${cfg.apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiBody),
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        console.warn("[/api/ai/flow-assistant] Gemini HTTP error:", {
-          status: res.status,
-          statusText: res.statusText,
-          body: errText.slice(0, 500),
-        });
-
-        // Return fallback with error info
+      if (!geminiSuccess || !content) {
+        console.warn("[/api/ai/flow-assistant] All Gemini models failed:", geminiError);
         const fallback = localFallback(userMessage, "gemini_error");
         return NextResponse.json({
           ...fallback,
-          reply: `[Error Gemini ${res.status}] ${errText.slice(0, 200)}\n\n${fallback.reply}`,
+          reply: `${geminiError}\n\n${fallback.reply}`,
           warnings: ["GEMINI_ERROR"],
         });
-      }
-
-      const data = await res.json();
-      content = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-      console.log("[/api/ai/flow-assistant] Gemini success:", {
-        contentLength: content.length,
-        contentPreview: content.slice(0, 200),
-      });
-
-      // Check for blocked content
-      if (data?.candidates?.[0]?.finishReason === "SAFETY") {
-        content = "Lo siento, no puedo responder a eso. ¿Puedes reformular tu pregunta?";
       }
 
     } else {
