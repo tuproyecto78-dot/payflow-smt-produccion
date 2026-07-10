@@ -1,15 +1,16 @@
 /**
  * PayFlow SMT — AI provider configuration (server-only).
  *
- * Reads env vars: AI_PROVIDER, OPENROUTER_API_KEY, OPENROUTER_BASE_URL,
- * OPENROUTER_MODEL, ZAI_API_KEY, ZAI_BASE_URL, ZAI_MODEL.
+ * Reads env vars: AI_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL,
+ * OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL,
+ * ZAI_API_KEY, ZAI_BASE_URL, ZAI_MODEL.
  *
  * NEVER exposes API keys to the frontend.
  */
 
 import "server-only";
 
-export type AIProviderName = "openrouter" | "zai" | "mock";
+export type AIProviderName = "gemini" | "openrouter" | "zai" | "auto" | "mock";
 
 export interface AIProviderConfig {
   provider: AIProviderName;
@@ -19,19 +20,39 @@ export interface AIProviderConfig {
   baseUrl: string;
   model: string;
   endpoint: string;
+  /** "gemini" for Gemini API format, "openai" for OpenAI-compatible format */
+  mode: "gemini" | "openai";
 }
 
 /**
  * Get the current AI provider config from env vars.
  *
  * Priority order:
- * 1. AI_PROVIDER=openrouter → use OpenRouter
- * 2. AI_PROVIDER=zai → use Z.ai
- * 3. AI_PROVIDER=auto (or unset) → try Z.ai first, then OpenRouter, then mock
- * 4. AI_PROVIDER=mock → local fallback only
+ * 1. AI_PROVIDER=gemini → use Gemini
+ * 2. AI_PROVIDER=openrouter → use OpenRouter
+ * 3. AI_PROVIDER=zai → use Z.ai
+ * 4. AI_PROVIDER=auto (or unset) → try Gemini, then Z.ai, then OpenRouter
+ * 5. AI_PROVIDER=mock → local fallback only
  */
 export function getAIConfig(): AIProviderConfig {
   const provider = (process.env.AI_PROVIDER || "auto").toLowerCase().trim() as AIProviderName;
+
+  // ─── Gemini ────────────────────────────────────────────────────────
+  if (provider === "gemini") {
+    const apiKey = process.env.GEMINI_API_KEY?.trim() || null;
+    const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+    const baseUrl = "https://generativelanguage.googleapis.com/v1beta";
+    return {
+      provider: "gemini",
+      configured: !!apiKey,
+      hasApiKey: !!apiKey,
+      apiKey,
+      baseUrl,
+      model,
+      endpoint: `${baseUrl}/models/${model}:generateContent`,
+      mode: "gemini",
+    };
+  }
 
   // ─── OpenRouter ────────────────────────────────────────────────────
   if (provider === "openrouter") {
@@ -40,7 +61,6 @@ export function getAIConfig(): AIProviderConfig {
     let model = process.env.OPENROUTER_MODEL?.trim() || "";
     if (!model || model === "openrouter/free" || model === "free") {
       model = "meta-llama/llama-3.2-3b-instruct:free";
-      console.log("[ai] Model 'openrouter/free' is invalid, using default:", model);
     }
     return {
       provider: "openrouter",
@@ -50,6 +70,7 @@ export function getAIConfig(): AIProviderConfig {
       baseUrl,
       model,
       endpoint: `${baseUrl}/chat/completions`,
+      mode: "openai",
     };
   }
 
@@ -66,13 +87,32 @@ export function getAIConfig(): AIProviderConfig {
       baseUrl,
       model,
       endpoint: `${baseUrl}/chat/completions`,
+      mode: "openai",
     };
   }
 
-  // ─── Auto: try Z.ai first, then OpenRouter ─────────────────────────
+  // ─── Auto: try Gemini, then Z.ai, then OpenRouter ──────────────────
   if (provider === "auto" || provider === "mock") {
-    // Try Z.ai first
-    const zaiKey = process.env.ZAI_API_KEY?.trim() || null;
+    // Try Gemini first
+    const gemKey = process.env.GEMINI_API_KEY?.trim();
+    if (gemKey) {
+      const gemModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+      const gemBase = "https://generativelanguage.googleapis.com/v1beta";
+      console.log("[ai] Auto: using Gemini (GEMINI_API_KEY found)");
+      return {
+        provider: "gemini",
+        configured: true,
+        hasApiKey: true,
+        apiKey: gemKey,
+        baseUrl: gemBase,
+        model: gemModel,
+        endpoint: `${gemBase}/models/${gemModel}:generateContent`,
+        mode: "gemini",
+      };
+    }
+
+    // Try Z.ai
+    const zaiKey = process.env.ZAI_API_KEY?.trim();
     if (zaiKey) {
       const zaiBase = process.env.ZAI_BASE_URL?.trim() || "https://api.z.ai/api/coding/paas/v4";
       const zaiModel = process.env.ZAI_MODEL?.trim() || "glm-4-flash";
@@ -85,15 +125,16 @@ export function getAIConfig(): AIProviderConfig {
         baseUrl: zaiBase,
         model: zaiModel,
         endpoint: `${zaiBase}/chat/completions`,
+        mode: "openai",
       };
     }
 
     // Try OpenRouter
-    const orKey = process.env.OPENROUTER_API_KEY?.trim() || null;
+    const orKey = process.env.OPENROUTER_API_KEY?.trim();
     if (orKey) {
       const orBase = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
-      let orModel = process.env.OPENROUTER_MODEL?.trim() || "";
-      if (!orModel || orModel === "openrouter/free" || orModel === "free") {
+      let orModel = process.env.OPENROUTER_MODEL?.trim() || "meta-llama/llama-3.2-3b-instruct:free";
+      if (orModel === "openrouter/free" || orModel === "free") {
         orModel = "meta-llama/llama-3.2-3b-instruct:free";
       }
       console.log("[ai] Auto: using OpenRouter (OPENROUTER_API_KEY found)");
@@ -105,6 +146,7 @@ export function getAIConfig(): AIProviderConfig {
         baseUrl: orBase,
         model: orModel,
         endpoint: `${orBase}/chat/completions`,
+        mode: "openai",
       };
     }
   }
@@ -117,6 +159,7 @@ export function getAIConfig(): AIProviderConfig {
     baseUrl: "",
     model: "mock",
     endpoint: "",
+    mode: "openai",
   };
 }
 
@@ -130,6 +173,8 @@ export function getSafeAIStatus() {
     configured: cfg.configured,
     model: cfg.model,
     hasApiKey: cfg.hasApiKey,
+    mode: cfg.mode,
+    missing: cfg.hasApiKey ? [] : [`${cfg.provider.toUpperCase()}_API_KEY`],
   };
 }
 
@@ -137,10 +182,9 @@ export function getSafeAIStatus() {
  * Log safe AI config info (no API keys).
  */
 export function logAIConfig() {
-  const cfg = getAIConfig();
-  console.log("[ai] provider:", cfg.provider);
-  console.log("[ai] configured:", cfg.configured);
-  console.log("[ai] hasApiKey:", cfg.hasApiKey);
-  console.log("[ai] model:", cfg.model);
-  console.log("[ai] endpoint:", cfg.endpoint);
+  console.log("[ai] provider:", process.env.AI_PROVIDER || "auto");
+  console.log("[ai] gemini configured:", Boolean(process.env.GEMINI_API_KEY));
+  console.log("[ai] gemini model:", process.env.GEMINI_MODEL || "gemini-2.5-flash");
+  console.log("[ai] openrouter configured:", Boolean(process.env.OPENROUTER_API_KEY));
+  console.log("[ai] zai configured:", Boolean(process.env.ZAI_API_KEY));
 }
