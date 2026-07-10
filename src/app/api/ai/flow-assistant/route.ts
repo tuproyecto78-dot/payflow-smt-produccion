@@ -74,33 +74,49 @@ Si el usuario aún no ha dado suficiente información, devuelve suggestions vac�
 // ─── Local fallback ───────────────────────────────────────────────────
 
 function localFallback(userMessage: string, reason: string): FlowAssistantResponse {
-  const l = userMessage.toLowerCase();
-  let suggestions: FlowSuggestions = {
-    template: "solo_ia", businessType: "otro",
-    mainProductOrService: "Servicio principal",
-    welcomeMessage: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestro negocio. Puedo ayudarte con información, atención y pagos por WhatsApp.",
-    agentTone: "amable", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00",
-    modules: ["ai_agent"], paymentProvider: "none",
-  };
+  const l = userMessage.toLowerCase().trim();
+
+  // Greeting — don't suggest Solo IA
+  if (l === "hola" || l === "buenos" || l === "buenas" || l === "hi" || l === "hello" || l === "saludos") {
+    return { source: "fallback", reply: "¡Hola! Te ayudo a crear tu flujo paso a paso. Primero dime: ¿qué tipo de negocio tienes y qué quieres automatizar por WhatsApp?", suggestions: {}, warnings: [], missingFields: [], nextQuestion: "¿Qué tipo de negocio tienes?", fallbackUsed: true, fallbackReason: reason };
+  }
+  // Help question
+  if (l.includes("ayudar") || l.includes("qué puedes") || l.includes("que puedes") || l.includes("cómo funciona") || l.includes("como funciona")) {
+    return { source: "fallback", reply: "Puedo ayudarte a elegir la plantilla correcta, redactar mensajes de WhatsApp, definir preguntas para tus clientes, configurar agenda, catálogo o PayPhone, validar si falta información y dejar listo el flujo para probarlo. ¿Qué tipo de negocio tienes?", suggestions: {}, warnings: [], missingFields: [], nextQuestion: "¿Qué tipo de negocio tienes?", fallbackUsed: true, fallbackReason: reason };
+  }
+
+  let suggestions: FlowSuggestions = { template: "solo_ia", businessType: "otro", mainProductOrService: "Servicio principal", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestro negocio. Puedo ayudarte con información, atención y pagos por WhatsApp.", agentTone: "amable", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00", modules: ["ai_agent"], paymentProvider: "none" };
   let reply = "Te sugiero comenzar con la plantilla 'Solo IA' y un tono amable. ¿Quieres que aplique estas sugerencias?";
   let nextQuestion = "¿Cuál es el nombre de tu negocio?";
 
-  if (l.includes("inmobiliaria") || l.includes("bienes raíces") || l.includes("bienes raices") || l.includes("propiedades") || l.includes("casas") || l.includes("departamentos")) {
+  if (l.includes("inmobiliaria") || l.includes("bienes raíces") || l.includes("bienes raices") || l.includes("propiedades") || l.includes("casas") || l.includes("departamentos") || l.includes("alquil") || l.includes("terrenos")) {
     suggestions = { template: "ia_agenda_payphone", businessType: "bienes_raices", mainProductOrService: "Captación de clientes / agenda de visitas / información de propiedades", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual de nuestra inmobiliaria. Puedo ayudarte con información de propiedades, agendar visitas y guiarte en el proceso de reserva.", agentTone: "profesional", scheduleDays: "lun-sab", scheduleHours: "09h00 - 18h00", modules: ["ai_agent", "agenda", "payphone"], paymentProvider: "payphone_api_link" };
-    reply = "Para una inmobiliaria te recomiendo IA + Agenda + PayPhone. ¿Quieres incluir cobro de reservas?";
-    nextQuestion = "¿Quieres que el asistente filtre compradores por presupuesto?";
-  } else if (l.includes("clínica") || l.includes("clinica") || l.includes("médic") || l.includes("doctor")) {
-    suggestions = { template: "ia_payphone", businessType: "clinica", mainProductOrService: "Cita médica / consulta especializada", welcomeMessage: "¡Hola! 👋 Bienvenido/a a nuestra clínica.", agentTone: "empatico", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00", modules: ["ai_agent", "payphone"], paymentProvider: "payphone_api_link" };
-    reply = "Para una clínica recomiendo IA + PayPhone, tono empático.";
+    reply = "Para una inmobiliaria te recomiendo IA + Agenda + PayPhone Business. El asistente puede captar compradores, agendar visitas, filtrar por presupuesto y cobrar reservas con link seguro PayPhone.";
+    nextQuestion = "¿Quieres captar compradores, vendedores o ambos?";
+  } else if (l.includes("clínica") || l.includes("clinica") || l.includes("médic") || l.includes("medic") || l.includes("doctor") || l.includes("consultorio")) {
+    suggestions = { template: "ia_agenda", businessType: "clinica", mainProductOrService: "Cita médica / consulta especializada", welcomeMessage: "¡Hola! 👋 Bienvenido/a a nuestra clínica. Estoy aquí para ayudarte con información, citas y pagos de forma rápida y segura.", agentTone: "empatico", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00", modules: ["ai_agent", "agenda"], paymentProvider: "none" };
+    reply = "Para una clínica recomiendo IA + Agenda, tono empático.";
     nextQuestion = "¿Cuál es el número de WhatsApp de la clínica?";
   } else if (l.includes("restaurante") || l.includes("comida") || l.includes("pedido")) {
-    suggestions = { template: "ia_catalogo", businessType: "restaurante", mainProductOrService: "Pedido de comida", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte a tomar tu pedido.", agentTone: "comercial", scheduleDays: "todos", scheduleHours: "11h00 - 22h00", modules: ["ai_agent", "catalog"], paymentProvider: "mock" };
+    suggestions = { template: "ia_catalogo", businessType: "restaurante", mainProductOrService: "Pedido de comida", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Puedo ayudarte a tomar tu pedido, confirmar detalles y procesar tu pago por WhatsApp.", agentTone: "comercial", scheduleDays: "todos", scheduleHours: "11h00 - 22h00", modules: ["ai_agent", "catalog"], paymentProvider: "mock" };
     reply = "Para un restaurante recomiendo IA + Catálogo, tono comercial.";
     nextQuestion = "¿Cuál es el número de WhatsApp del restaurante?";
+  } else if (l.includes("ecommerce") || l.includes("tienda online") || l.includes("online store")) {
+    suggestions = { template: "ia_catalogo", businessType: "ecommerce", mainProductOrService: "Compra online", welcomeMessage: "¡Hola! 👋 Bienvenido/a a nuestra tienda online. Puedo ayudarte a elegir productos, confirmar tu pedido y completar el pago.", agentTone: "comercial", scheduleDays: "todos", scheduleHours: "24h", modules: ["ai_agent", "catalog", "payphone"], paymentProvider: "payphone_api_link" };
+    reply = "Para ecommerce recomiendo IA + Catálogo + PayPhone, tono comercial.";
+    nextQuestion = "¿Cuál es el número de WhatsApp de la tienda?";
   } else if (l.includes("spa") || l.includes("belleza") || l.includes("salón") || l.includes("salon")) {
-    suggestions = { template: "ia_agenda_payphone", businessType: "spa", mainProductOrService: "Reserva de tratamiento", welcomeMessage: "¡Hola! 👋 Bienvenido/a a nuestro spa.", agentTone: "amable", scheduleDays: "lun-sab", scheduleHours: "09h00 - 19h00", modules: ["ai_agent", "agenda", "payphone"], paymentProvider: "payphone_api_link" };
+    suggestions = { template: "ia_agenda_payphone", businessType: "spa", mainProductOrService: "Reserva de tratamiento", welcomeMessage: "¡Hola! 👋 Bienvenido/a a nuestro spa. Puedo ayudarte a reservar tu tratamiento, revisar horarios disponibles y gestionar tu pago.", agentTone: "amable", scheduleDays: "lun-sab", scheduleHours: "09h00 - 19h00", modules: ["ai_agent", "agenda", "payphone"], paymentProvider: "payphone_api_link" };
     reply = "Para un spa sugiero IA + Agenda + PayPhone, tono amable.";
     nextQuestion = "¿Cuál es el número de WhatsApp del spa?";
+  } else if (l.includes("abogado") || l.includes("legal") || l.includes("despacho")) {
+    suggestions = { template: "ia_agenda", businessType: "abogado", mainProductOrService: "Consulta legal", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Soy el asistente virtual del despacho. Puedo ayudarte a coordinar una consulta legal y gestionar el pago de forma segura.", agentTone: "profesional", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00", modules: ["ai_agent", "agenda"], paymentProvider: "none" };
+    reply = "Para un abogado sugiero IA + Agenda, tono profesional.";
+    nextQuestion = "¿Cuál es el número de WhatsApp del despacho?";
+  } else if (l.includes("tienda") || l.includes("comercio") || l.includes("vender") || l.includes("venta")) {
+    suggestions = { template: "ia_catalogo", businessType: "comercio", mainProductOrService: "Venta de productos", welcomeMessage: "¡Hola! 👋 Bienvenido/a. Estoy aquí para ayudarte con tus compras, disponibilidad de productos y pagos por WhatsApp.", agentTone: "comercial", scheduleDays: "lun-vie", scheduleHours: "09h00 - 18h00", modules: ["ai_agent", "catalog"], paymentProvider: "mock" };
+    reply = "Para una tienda recomiendo IA + Catálogo, tono comercial.";
+    nextQuestion = "¿Cuál es el número de WhatsApp de la tienda?";
   }
 
   return { source: "fallback", reply, suggestions, warnings: [], missingFields: [], nextQuestion, fallbackUsed: true, fallbackReason: reason };
@@ -244,27 +260,46 @@ export async function POST(req: Request) {
 
           // If 404 (model not found), try next model
           if (res.status === 404) {
-            geminiError = `Modelo ${tryModel} no disponible (404)`;
+            geminiError = "model_not_found";
             continue;
           }
 
+          // If 429 (quota exceeded), stop trying — all models share the same quota
+          if (res.status === 429) {
+            geminiError = "quota_exceeded";
+            break;
+          }
+
           // For other errors, stop and report
-          geminiError = `[Error Gemini ${res.status}] ${errText.slice(0, 200)}`;
+          geminiError = "api_error";
           break;
         } catch (fetchErr) {
           console.warn("[/api/ai/flow-assistant] Gemini fetch error with model:", tryModel, fetchErr);
-          geminiError = `Error de red con modelo ${tryModel}`;
+          geminiError = "network_error";
           continue;
         }
       }
 
       if (!geminiSuccess || !content) {
-        console.warn("[/api/ai/flow-assistant] All Gemini models failed:", geminiError);
-        const fallback = localFallback(userMessage, "gemini_error");
+        console.warn("[/api/ai/flow-assistant] Gemini failed:", geminiError);
+
+        // Build friendly message based on error type
+        let friendlyMsg: string;
+        if (geminiError === "quota_exceeded") {
+          friendlyMsg = "La IA avanzada no está disponible temporalmente por límite de cuota. Activé el asistente local inteligente para ayudarte a crear el flujo.";
+        } else if (geminiError === "model_not_found") {
+          friendlyMsg = "El modelo de IA configurado no está disponible. Activé el asistente local inteligente para ayudarte.";
+        } else if (geminiError === "network_error") {
+          friendlyMsg = "No pude conectar con la IA avanzada. Activé el asistente local inteligente para ayudarte.";
+        } else {
+          friendlyMsg = "La IA avanzada no está disponible en este momento. Activé el asistente local inteligente para ayudarte.";
+        }
+
+        const fallback = localFallback(userMessage, geminiError);
         return NextResponse.json({
           ...fallback,
-          reply: `${geminiError}\n\n${fallback.reply}`,
-          warnings: ["GEMINI_ERROR"],
+          reply: `${friendlyMsg}\n\n${fallback.reply}`,
+          warnings: [geminiError === "quota_exceeded" ? "AI_QUOTA_EXCEEDED" : "AI_ERROR"],
         });
       }
 
