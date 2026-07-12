@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, Send, Loader2, X, Sparkles, Check } from "lucide-react";
+import { Bot, Send, Loader2, X, Sparkles, Check, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 export interface AISuggestion {
@@ -54,11 +54,12 @@ export function FlowAssistantPanel({
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [aiStatus, setAiStatus] = useState<{ provider: string; configured: boolean; model: string } | null>(null);
+  const [aiStatus, setAiStatus] = useState<{ provider: string; configured: boolean; model: string; mode?: string } | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Check AI status on mount — force fresh fetch (no cache)
     fetch("/api/ai/status", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
@@ -67,6 +68,24 @@ export function FlowAssistantPanel({
       })
       .catch((e) => console.warn("[flow-assistant] AI status fetch failed:", e));
   }, [open]);
+
+  async function retryAI() {
+    setRetrying(true);
+    try {
+      const res = await fetch("/api/ai/test-gemini", { credentials: "include", cache: "no-store" });
+      const data = await res.json();
+      if (data.success) {
+        setQuotaExceeded(false);
+        toast.success("IA avanzada disponible nuevamente.");
+      } else {
+        toast.info("La IA avanzada sigue sin disponible. Continúo con el asistente local.");
+      }
+    } catch {
+      toast.error("No se pudo verificar la IA.");
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -104,6 +123,29 @@ export function FlowAssistantPanel({
       });
 
       const data = await res.json();
+
+      // Track quota status
+      if (data.warnings?.includes("AI_QUOTA_EXCEEDED")) {
+        setQuotaExceeded(true);
+      } else if (data.source && data.source !== "fallback") {
+        setQuotaExceeded(false);
+      }
+
+      // Log to history if quota exceeded
+      if (data.warnings?.includes("AI_QUOTA_EXCEEDED")) {
+        try {
+          const hist = JSON.parse(localStorage.getItem("payflow_flow_history") || "[]");
+          hist.unshift({
+            id: `hist_${Date.now()}`,
+            action: "ai_quota_exceeded_fallback_used",
+            flowName: "Asistente PayFlow",
+            flowId: "ai-assistant",
+            timestamp: new Date().toISOString(),
+            details: "Gemini 429 - fallback local activado",
+          });
+          localStorage.setItem("payflow_flow_history", JSON.stringify(hist.slice(0, 50)));
+        } catch {}
+      }
 
       const assistantMsg: ChatMessage = {
         role: "assistant",
@@ -151,12 +193,30 @@ export function FlowAssistantPanel({
               <div className="flex items-center gap-1.5">
                 {aiStatus ? (
                   <>
-                    <span className={`size-1.5 rounded-full ${aiStatus.configured ? "bg-emerald-500" : "bg-amber-500"}`} />
+                    <span className={`size-1.5 rounded-full ${aiStatus.configured && !quotaExceeded ? "bg-emerald-500" : quotaExceeded ? "bg-amber-500" : "bg-amber-500"}`} />
                     <span className="text-[10px] text-muted-foreground">
-                      {aiStatus.configured
-                        ? `IA: ${aiStatus.provider} · ${aiStatus.model}`
-                        : "IA: modo local (fallback)"}
+                      {aiStatus.configured && !quotaExceeded
+                        ? `IA: ${aiStatus.provider === "gemini" ? "Gemini conectado" : aiStatus.provider}`
+                        : quotaExceeded
+                        ? "IA: asistente local por cuota agotada"
+                        : "IA: modo local fallback"}
                     </span>
+                    {quotaExceeded && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 text-[9px] px-1.5 ml-1 text-purple-600"
+                        onClick={retryAI}
+                        disabled={retrying}
+                      >
+                        {retrying ? (
+                          <Loader2 className="size-2.5 mr-0.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-2.5 mr-0.5" />
+                        )}
+                        Reintentar
+                      </Button>
+                    )}
                   </>
                 ) : (
                   <span className="text-[10px] text-muted-foreground">Verificando IA…</span>
