@@ -196,7 +196,7 @@ export function FlowAssistantPanel({
                     <span className={`size-1.5 rounded-full ${aiStatus.configured && !quotaExceeded ? "bg-emerald-500" : quotaExceeded ? "bg-amber-500" : "bg-amber-500"}`} />
                     <span className="text-[10px] text-muted-foreground">
                       {aiStatus.configured && !quotaExceeded
-                        ? `IA: ${aiStatus.provider === "gemini" ? "Gemini conectado" : aiStatus.provider}`
+                        ? `IA: ${aiStatus.provider === "groq" ? "Groq conectado" : aiStatus.provider === "gemini" ? "Gemini conectado" : aiStatus.provider === "nim" ? "NVIDIA NIM conectado" : aiStatus.provider}`
                         : quotaExceeded
                         ? "IA: asistente local por cuota agotada"
                         : "IA: modo local fallback"}

@@ -304,7 +304,7 @@ export async function POST(req: Request) {
       }
 
     } else {
-      // ─── OpenAI-compatible call (OpenRouter/Z.ai) ─────────────────
+      // ─── OpenAI-compatible call (Groq/NIM/OpenRouter/Z.ai) ──────────
       const messages: Array<{ role: string; content: string }> = [
         { role: "system", content: SYSTEM_PROMPT },
       ];
@@ -337,17 +337,35 @@ export async function POST(req: Request) {
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
         console.warn(`[/api/ai/flow-assistant] ${cfg.provider} error:`, res.status, errText.slice(0, 300));
-        const fallback = localFallback(userMessage, `${cfg.provider}_error`);
+
+        // Build friendly message (no technical JSON shown to user)
+        let friendlyMsg: string;
+        let errorType: string;
+        if (res.status === 401 || res.status === 403) {
+          friendlyMsg = "La IA avanzada no está disponible. Activé el asistente local inteligente.";
+          errorType = "invalid_api_key";
+        } else if (res.status === 429) {
+          friendlyMsg = "La IA avanzada no está disponible temporalmente por límite de cuota. Activé el asistente local inteligente para ayudarte a crear el flujo.";
+          errorType = "quota_exceeded";
+        } else if (res.status === 404) {
+          friendlyMsg = "El modelo de IA configurado no está disponible. Activé el asistente local inteligente.";
+          errorType = "model_not_found";
+        } else {
+          friendlyMsg = "La IA avanzada no está disponible en este momento. Activé el asistente local inteligente.";
+          errorType = "api_error";
+        }
+
+        const fallback = localFallback(userMessage, errorType);
         return NextResponse.json({
           ...fallback,
-          reply: `[Error ${cfg.provider} ${res.status}] ${errText.slice(0, 200)}\n\n${fallback.reply}`,
-          warnings: ["AI_ERROR"],
+          reply: `${friendlyMsg}\n\n${fallback.reply}`,
+          warnings: [errorType === "quota_exceeded" ? "AI_QUOTA_EXCEEDED" : "AI_ERROR"],
         });
       }
 
       const data = await res.json();
       content = data?.choices?.[0]?.message?.content || "";
-      console.log(`[/api/ai/flow-assistant] ${cfg.provider} success:`, { contentLength: content.length });
+      console.log(`[/api/ai/flow-assistant] ${cfg.provider} success:`, { contentLength: content.length, preview: content.slice(0, 150) });
     }
 
     if (!content) {
