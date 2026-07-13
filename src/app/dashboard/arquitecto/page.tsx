@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, ExternalLink, Brain, RefreshCw, Play, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { ArchitectChat } from "@/components/dashboard/architect-chat";
+import { ArchitectSystemMap } from "@/components/dashboard/architect-system-map";
 
 interface ArchitectStatus {
   enabled: boolean;
@@ -268,6 +269,7 @@ export default function ArquitectoPage() {
         </Card>
       </div>
 
+      <ArchitectSystemMap />
       <ArchitectChat />
 
       {/* Events */}

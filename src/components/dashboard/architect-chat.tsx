@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Bot, CheckCircle2, Loader2, Send, User, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 
-type ApprovalStatus = "pending" | "approved" | "rejected" | null;
+type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | null;
 
 interface ChatMessage {
   id: string;
@@ -45,6 +45,15 @@ export function ArchitectChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const prompt = (event as CustomEvent<string>).detail;
+      if (prompt) setInput(prompt);
+    };
+    window.addEventListener("architect:prompt", handler);
+    return () => window.removeEventListener("architect:prompt", handler);
+  }, []);
 
   async function sendMessage(text?: string) {
     const content = (text ?? input).trim();
@@ -106,10 +115,11 @@ export function ArchitectChat() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No se pudo registrar la decisión");
+      const nextStatus = data.suggestion?.approval_status || decision;
       setMessages((current) => current.map((item) =>
-        item.id === messageId ? { ...item, approvalStatus: decision } : item
+        item.id === messageId ? { ...item, approvalStatus: nextStatus } : item
       ));
-      toast.success(decision === "approved" ? "Propuesta aprobada para implementación" : "Propuesta rechazada");
+      toast.success(decision === "approved" ? data.execution?.message || "Propuesta aprobada para implementación" : "Propuesta rechazada");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Error de red");
     } finally {
@@ -118,7 +128,7 @@ export function ArchitectChat() {
   }
 
   return (
-    <Card className="mb-8 overflow-hidden">
+    <Card id="architect-chat" className="mb-8 overflow-hidden">
       <CardHeader className="border-b bg-violet-50/60 dark:bg-violet-500/5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
