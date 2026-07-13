@@ -180,24 +180,57 @@ export function LandingPage({ onLogin }: LandingPageProps) {
           </div>
           <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
             <div data-price-card className="rounded-3xl border border-slate-200 bg-white p-8 flex flex-col hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300">
-              <div className="mb-8">
-                <Badge className="mb-2 bg-amber-50 text-amber-700 border-amber-200">Promoción trimestral</Badge>
+              <div className="mb-6">
+                <Badge className="mb-2 bg-amber-50 text-amber-700 border-amber-200">Plan mensual</Badge>
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Trimestral</h3>
-                <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$25</span><span className="text-sm text-slate-400">/trimestre</span></div>
-                <p className="text-xs text-slate-400 mt-1">Pago mensual</p>
-                <p className="text-sm text-slate-500 mt-3">Flujo de pagos por WhatsApp directamente</p>
+                <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$49.99</span><span className="text-sm text-slate-400">/mes</span></div>
+                <p className="text-sm text-slate-500 mt-3">Flujo de pagos por WhatsApp con IA</p>
               </div>
-              <div className="flex-1" />
+              <div className="flex-1 space-y-2.5 mb-6">
+                <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Incluye:</p>
+                {[
+                  "Constructor visual de flujos",
+                  "Agente IA para WhatsApp",
+                  "Integración PayPhone API Link",
+                  "Simulador de conversaciones",
+                  "Agenda de citas",
+                  "Catálogo de productos",
+                  "Historial de ejecuciones",
+                  "Soporte por WhatsApp",
+                ].map((benefit, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                    <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                    <span>{benefit}</span>
+                  </div>
+                ))}
+              </div>
               <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme al Plan Trimestral</button>
             </div>
             <div data-price-card className="rounded-3xl border-2 border-emerald-500 bg-white p-8 flex flex-col relative hover:shadow-xl hover:shadow-emerald-100 transition-all duration-300">
               <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0">Recomendado</Badge>
-              <div className="mb-8">
+              <div className="mb-6">
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Anual</h3>
-                <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$89</span><span className="text-sm text-slate-400">/año</span></div>
+                <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$249</span><span className="text-sm text-slate-400">/año</span></div>
                 <p className="text-sm text-slate-500 mt-3">Automatización completa anual para pagos por WhatsApp</p>
               </div>
-              <div className="flex-1" />
+              <div className="flex-1 space-y-2.5 mb-6">
+                <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Incluye:</p>
+                {[
+                  "Constructor visual de flujos",
+                  "Agente IA para WhatsApp",
+                  "Integración PayPhone API Link",
+                  "Simulador de conversaciones",
+                  "Agenda de citas",
+                  "Catálogo de productos",
+                  "Historial de ejecuciones",
+                  "Soporte por WhatsApp",
+                ].map((benefit, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                    <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                    <span>{benefit}</span>
+                  </div>
+                ))}
+              </div>
               <button onClick={() => setSubPlan("anual")} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/25 transition-colors">Suscribirme al Plan Anual</button>
             </div>
           </div>

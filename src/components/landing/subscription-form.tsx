@@ -12,8 +12,8 @@ import { Loader2, CheckCircle2, Shield, CreditCard } from "lucide-react";
 export type PlanType = "trimestral" | "anual" | "choose";
 
 const PLAN_INFO = {
-  trimestral: { label: "Plan Trimestral", price: 25, display: "Plan Trimestral — $25" },
-  anual: { label: "Plan Anual", price: 89, display: "Plan Anual — $89" },
+  trimestral: { label: "Plan Trimestral", price: 49.99, display: "Plan Trimestral — $49.99/mes" },
+  anual: { label: "Plan Anual", price: 249, display: "Plan Anual — $249/año" },
 };
 
 const BUSINESS_TYPES = [
