@@ -44,12 +44,15 @@ export default function PrivacyPage() {
 
         <h2>4. Uso de inteligencia artificial</h2>
         <p>PayFlow SMT utiliza agentes de inteligencia artificial para automatizar conversaciones de WhatsApp. Los mensajes que los clientes envían a través de WhatsApp pueden ser procesados por proveedores de IA para generar respuestas contextualizadas. La IA no inventa datos: utiliza exclusivamente la información cargada por el administrador del negocio (catálogo, FAQ, horarios, políticas). La IA no confirma pagos exitosos; esa confirmación solo proviene del webhook de PayPhone.</p>
+        <p>Los proveedores de IA utilizados pueden incluir: Groq, Google Gemini, OpenRouter, Z.ai y NVIDIA NIM, según la configuración del servidor. Las claves API de estos proveedores se almacenan exclusivamente en el servidor (Vercel) y nunca se exponen al navegador del usuario. Los mensajes enviados a los proveedores de IA se transmiten a través de conexiones cifradas (HTTPS).</p>
+        <p>El sistema incluye un "Arquitecto IA" interno que monitorea eventos del sistema y propone soluciones. Este módulo requiere aprobación humana obligatoria antes de ejecutar cualquier acción crítica. Ninguna acción automatizada se ejecuta sin autorización del administrador.</p>
 
         <h2>5. Proveedores externos</h2>
         <ul>
-          <li><strong>PayPhone:</strong> procesamiento de pagos. PayFlow SMT no almacena datos de tarjetas ni CVV.</li>
+          <li><strong>PayPhone:</strong> procesamiento de pagos vía API Link. PayFlow SMT no almacena datos de tarjetas ni CVV. Los pagos siempre inician como <em>payment_pending</em> y solo se confirman vía webhook oficial de PayPhone.</li>
           <li><strong>WhatsApp Business Cloud API (Meta):</strong> mensajería con clientes.</li>
-          <li><strong>Proveedores de IA:</strong> generación de respuestas conversacionales.</li>
+          <li><strong>Groq / Google Gemini / OpenRouter / Z.ai:</strong> proveedores de IA para generación de respuestas conversacionales. Las API keys se almacenan en el servidor, nunca en el frontend.</li>
+          <li><strong>ClickUp:</strong> gestión de tareas internas (opcional, solo administradores).</li>
           <li><strong>Supabase:</strong> almacenamiento de datos en producción (opcional).</li>
         </ul>
         <p>Cada proveedor actúa bajo sus propios términos y políticas de privacidad. PayFlow SMT comparte con ellos únicamente los datos necesarios para prestar el servicio.</p>

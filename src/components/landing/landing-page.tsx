@@ -241,9 +241,20 @@ export function LandingPage({ onLogin }: LandingPageProps) {
             <img src="/payflow-logo-dark.png" srcSet="/payflow-logo-dark.png 2x" alt="PayFlow SMT" className="h-12 w-auto object-contain" draggable={false} />
             <p className="text-xs text-white/50 text-center md:text-left">Automatización de pagos por WhatsApp con IA.</p>
           </div>
-          <div className="flex items-center gap-4 text-xs text-white/50">
-            <span className="flex items-center gap-1"><Mail className="size-3" /> contacto@payflow.smt</span>
-            <span className="flex items-center gap-1"><Phone className="size-3" /> +593</span>
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex items-center gap-4 text-xs text-white/50">
+              <span className="flex items-center gap-1"><Mail className="size-3" /> contacto@payflow.smt</span>
+              <span className="flex items-center gap-1"><Phone className="size-3" /> +593</span>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <a href="/privacy" className="text-white/50 hover:text-white transition-colors">Política de Privacidad</a>
+              <span className="text-white/20">·</span>
+              <a href="/terms" className="text-white/50 hover:text-white transition-colors">Términos y Condiciones</a>
+              <span className="text-white/20">·</span>
+              <a href="/cookies" className="text-white/50 hover:text-white transition-colors">Cookies</a>
+              <span className="text-white/20">·</span>
+              <a href="/data-request" className="text-white/50 hover:text-white transition-colors">Solicitud de Datos</a>
+            </div>
           </div>
         </div>
       </footer>
