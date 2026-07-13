@@ -182,7 +182,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
             <div data-price-card className="rounded-3xl border border-slate-200 bg-white p-8 flex flex-col hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300">
               <div className="mb-6">
                 <Badge className="mb-2 bg-amber-50 text-amber-700 border-amber-200">Plan mensual</Badge>
-                <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Trimestral</h3>
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">Plan Mensual</h3>
                 <div className="flex items-baseline gap-1"><span className="text-5xl font-bold text-slate-900">$49.99</span><span className="text-sm text-slate-400">/mes</span></div>
                 <p className="text-sm text-slate-500 mt-3">Flujo de pagos por WhatsApp con IA</p>
               </div>
@@ -204,7 +204,7 @@ export function LandingPage({ onLogin }: LandingPageProps) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme al Plan Trimestral</button>
+              <button onClick={() => setSubPlan("trimestral")} className="w-full py-2.5 rounded-xl text-sm font-semibold border border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-colors">Suscribirme al Plan Mensual</button>
             </div>
             <div data-price-card className="rounded-3xl border-2 border-emerald-500 bg-white p-8 flex flex-col relative hover:shadow-xl hover:shadow-emerald-100 transition-all duration-300">
               <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white border-0">Recomendado</Badge>

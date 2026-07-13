@@ -12,7 +12,7 @@ import { Loader2, CheckCircle2, Shield, CreditCard } from "lucide-react";
 export type PlanType = "trimestral" | "anual" | "choose";
 
 const PLAN_INFO = {
-  trimestral: { label: "Plan Trimestral", price: 49.99, display: "Plan Trimestral — $49.99/mes" },
+  trimestral: { label: "Plan Mensual", price: 49.99, display: "Plan Mensual — $49.99/mes" },
   anual: { label: "Plan Anual", price: 249, display: "Plan Anual — $249/año" },
 };
 
@@ -193,8 +193,8 @@ export function SubscriptionForm({ open, onOpenChange, plan }: { open: boolean; 
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="trimestral">Plan Trimestral — $25</SelectItem>
-                      <SelectItem value="anual">Plan Anual — $89</SelectItem>
+                      <SelectItem value="trimestral">Plan Mensual — $49.99/mes</SelectItem>
+                      <SelectItem value="anual">Plan Anual — $249/año</SelectItem>
                     </SelectContent>
                   </Select>
                 ) : (
