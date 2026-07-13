@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, ExternalLink, Brain, RefreshCw, Play, Link2 } from "lucide-react";
 import { toast } from "sonner";
+import { ArchitectChat } from "@/components/dashboard/architect-chat";
 
 interface ArchitectStatus {
   enabled: boolean;
@@ -266,6 +267,8 @@ export default function ArquitectoPage() {
           <CardContent><div className="text-2xl font-bold text-red-600">{status?.failedActions || 0}</div></CardContent>
         </Card>
       </div>
+
+      <ArchitectChat />
 
       {/* Events */}
       {events.length > 0 && (
