@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, ExternalLink, Brain, RefreshCw, Play } from "lucide-react";
+import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, ExternalLink, Brain, RefreshCw, Play, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface ArchitectStatus {
@@ -68,6 +68,7 @@ export default function ArquitectoPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [connectingClickUp, setConnectingClickUp] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,6 +116,32 @@ export default function ArquitectoPage() {
       }
     } catch { toast.error("Error de red"); }
     finally { setAnalyzing(false); }
+  }
+
+  async function handleConnectClickUp() {
+    setConnectingClickUp(true);
+    try {
+      const res = await fetch("/api/clickup/connect", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        toast.success(
+          data.already_connected
+            ? `ClickUp ya estaba conectado a ${data.workspace?.name || "tu Workspace"}`
+            : `ClickUp conectado a ${data.workspace?.name || "tu Workspace"}`
+        );
+      } else {
+        toast.error(data.error || "No se pudo conectar ClickUp");
+      }
+    } catch {
+      toast.error("Error de red al conectar ClickUp");
+    } finally {
+      setConnectingClickUp(false);
+    }
   }
 
   async function handleApprove(proposalId: string) {
@@ -204,10 +231,16 @@ export default function ArquitectoPage() {
             <p className="text-muted-foreground mt-0.5">Centro de control con aprobación humana obligatoria</p>
           </div>
         </div>
-        <Button onClick={handleAnalyze} disabled={analyzing}>
-          {analyzing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
-          Analizar eventos
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleConnectClickUp} disabled={connectingClickUp}>
+            {connectingClickUp ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Link2 className="size-4 mr-2" />}
+            Conectar ClickUp
+          </Button>
+          <Button onClick={handleAnalyze} disabled={analyzing}>
+            {analyzing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
+            Analizar eventos
+          </Button>
+        </div>
       </div>
 
       {/* Status cards */}
