@@ -21,10 +21,14 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function normalizeSupabaseUrl(value: string): string {
+  return value.replace(/\/+$/, "").replace(/\/rest\/v1$/i, "");
+}
+
 export function getSupabaseAdmin(): SupabaseClient {
   if (supabaseAdmin) return supabaseAdmin;
 
-  const url = requiredEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const url = normalizeSupabaseUrl(requiredEnv("NEXT_PUBLIC_SUPABASE_URL"));
   const secretKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
   supabaseAdmin = createClient(url, secretKey, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -129,4 +133,3 @@ export function verifyClickUpSignature(
 export function clickUpIdempotencyKey(rawBody: string): string {
   return createHash("sha256").update(rawBody).digest("hex");
 }
-
