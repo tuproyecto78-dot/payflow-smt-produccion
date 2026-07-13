@@ -38,6 +38,31 @@ function webhookUrl(req: Request, requestedEndpoint: unknown): string {
   return parsed.toString();
 }
 
+function connectionErrorMessage(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error && "message" in error
+        ? String(error.message)
+        : "";
+
+  if (message.startsWith("Falta la variable de entorno ")) return message;
+  if (message.includes("ClickUp devolvio HTTP 401")) {
+    return "El CLICKUP_API_TOKEN no es valido. Revisa el token configurado en Vercel.";
+  }
+  if (message.includes("ClickUp devolvio HTTP 403")) {
+    return "El token de ClickUp no tiene permiso para registrar webhooks en este Workspace.";
+  }
+  if (message.includes("ClickUp devolvio HTTP ")) {
+    const status = message.match(/HTTP (\d{3})/)?.[1] || "desconocido";
+    return `ClickUp rechazo la conexion (HTTP ${status}).`;
+  }
+  if (message) {
+    return `No se pudo guardar la conexion en Supabase: ${message.slice(0, 180)}`;
+  }
+  return "No se pudo completar la conexion con ClickUp.";
+}
+
 export async function POST(req: Request) {
   try {
     const admin = await requireAdmin();
@@ -162,7 +187,11 @@ export async function POST(req: Request) {
     );
   } catch (error) {
     console.error("[clickup/connect]", error);
-    return denyResponse(error);
+    const denied = denyResponse(error);
+    if (denied.status === 401 || denied.status === 403) return denied;
+    return NextResponse.json(
+      { error: connectionErrorMessage(error) },
+      { status: 500 }
+    );
   }
 }
-
