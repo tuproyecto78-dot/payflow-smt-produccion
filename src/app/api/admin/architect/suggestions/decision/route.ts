@@ -23,18 +23,52 @@ export async function POST(req: Request) {
       .from("architecture_suggestions")
       .update(update)
       .eq("id", suggestionId)
-      .select("id, approval_status")
+      .select("id, approval_status, proposed_actions")
       .single();
     if (error) throw error;
+
+    let execution = { status: "not_executed", message: "La propuesta quedó registrada para implementación." };
+    if (decision === "approved") {
+      const proposed = data.proposed_actions as { execution_action?: string } | unknown[] | null;
+      const action = proposed && !Array.isArray(proposed) ? proposed.execution_action : "none";
+
+      if (action === "retry_clickup_events") {
+        const { data: events, error: executeError } = await supabase
+          .from("clickup_events")
+          .update({ processing_status: "pending_analysis", processed_at: null, error_message: null })
+          .eq("processing_status", "failed")
+          .select("id");
+        if (executeError) throw executeError;
+        execution = { status: "executed", message: `${events?.length || 0} eventos fallidos fueron enviados nuevamente a análisis.` };
+      } else if (action === "queue_clickup_analysis") {
+        const { data: events, error: executeError } = await supabase
+          .from("clickup_events")
+          .update({ processing_status: "pending_analysis" })
+          .eq("processing_status", "detected")
+          .select("id");
+        if (executeError) throw executeError;
+        execution = { status: "executed", message: `${events?.length || 0} eventos detectados fueron enviados a análisis.` };
+      } else {
+        execution = { status: "approval_recorded", message: "Propuesta aprobada. Requiere una implementación de código o configuración externa." };
+      }
+
+      if (execution.status === "executed") {
+        await supabase
+          .from("architecture_suggestions")
+          .update({ approval_status: "executed" })
+          .eq("id", suggestionId);
+        data.approval_status = "executed";
+      }
+    }
 
     await supabase.from("audit_logs").insert({
       entity_type: "architecture_suggestion",
       entity_id: suggestionId,
       action: decision === "approved" ? "suggestion_approved" : "suggestion_rejected",
-      metadata: { actor_user_id: admin.userId, source: "architect_chat" },
+      metadata: { actor_user_id: admin.userId, source: "architect_chat", execution },
     });
 
-    return NextResponse.json({ ok: true, suggestion: data });
+    return NextResponse.json({ ok: true, suggestion: data, execution });
   } catch (error) {
     console.error("[architect/suggestions/decision]", error);
     return NextResponse.json({ error: "No se pudo registrar la decisión." }, { status: 500 });
