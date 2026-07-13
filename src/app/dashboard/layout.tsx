@@ -22,6 +22,7 @@ import {
   Settings,
   UserPlus,
   ScrollText,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { key: "solicitudes", label: "Solicitudes", href: "/dashboard/solicitudes", icon: Inbox, adminOnly: true },
   { key: "clientes", label: "Clientes", href: "/dashboard/clientes", icon: Users, adminOnly: true },
   { key: "historial", label: "Historial", href: "/dashboard/historial", icon: ScrollText, adminOnly: true },
+  { key: "arquitecto", label: "Arquitecto IA", href: "/dashboard/arquitecto", icon: Brain, adminOnly: true },
   { key: "payphone", label: "PayPhone", href: "/dashboard/payphone/pruebas", icon: CreditCard, adminOnly: true },
   { key: "agent", label: "Agente IA", href: "/dashboard", icon: Bot, adminOnly: false },
   { key: "catalog", label: "Catálogo", href: "/dashboard", icon: Package, adminOnly: false },
