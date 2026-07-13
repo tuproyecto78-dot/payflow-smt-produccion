@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-server";
 import { getAIConfig } from "@/lib/ai/config";
 import { getSupabaseAdmin } from "@/lib/clickup";
+import { collectArchitectContext, type ArchitectSystemContext } from "@/lib/architect-context";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type RiskLevel = "low" | "medium" | "high";
 type SuggestionType = "bug" | "mejora" | "decision" | "investigacion";
+type ExecutionAction = "retry_clickup_events" | "queue_clickup_analysis" | "none";
 
 interface HistoryMessage {
   role: "user" | "assistant";
@@ -21,6 +23,7 @@ interface ArchitectReply {
   actions: string[];
   riskLevel: RiskLevel;
   suggestionType: SuggestionType;
+  executionAction: ExecutionAction;
   requiresApproval: boolean;
   source: string;
 }
@@ -38,11 +41,12 @@ REGLAS:
 - No afirmes que una implementación fue ejecutada. La aprobación humana es obligatoria.
 - Prioriza seguridad, idempotencia, RLS, auditoría y cambios reversibles.
 - Da entre 1 y 6 acciones concretas.
+- executionAction solo puede ser retry_clickup_events cuando se pide reintentar eventos fallidos de ClickUp, queue_clickup_analysis cuando se pide procesar eventos detectados de ClickUp, o none para cualquier otra acción.
 
 Devuelve SOLO JSON válido, sin markdown ni backticks:
-{"reply":"respuesta conversacional","title":"título corto","diagnostic":"diagnóstico","actions":["acción 1"],"riskLevel":"low|medium|high","suggestionType":"bug|mejora|decision|investigacion","requiresApproval":true|false}`;
+{"reply":"respuesta conversacional","title":"título corto","diagnostic":"diagnóstico","actions":["acción 1"],"riskLevel":"low|medium|high","suggestionType":"bug|mejora|decision|investigacion","executionAction":"retry_clickup_events|queue_clickup_analysis|none","requiresApproval":true|false}`;
 
-function fallbackReply(message: string): ArchitectReply {
+function fallbackReply(message: string, context?: ArchitectSystemContext): ArchitectReply {
   const text = message.toLowerCase();
   const requiresApproval = /(implement|corrig|arregl|ejecut|aplic|modific|despleg)/i.test(text);
   let diagnostic = "Necesito revisar el objetivo, el módulo afectado y el resultado esperado antes de recomendar un cambio.";
@@ -53,6 +57,15 @@ function fallbackReply(message: string): ArchitectReply {
   ];
   let suggestionType: SuggestionType = requiresApproval ? "mejora" : "investigacion";
   let riskLevel: RiskLevel = requiresApproval ? "medium" : "low";
+  let executionAction: ExecutionAction = "none";
+
+  if (context?.alerts.length && /(arquitectura|sistema|mejor|alert|revis)/i.test(text)) {
+    const topAlerts = context.alerts.slice(0, 5);
+    diagnostic = `El mapa detectó ${context.alerts.length} alertas. Las prioritarias son: ${topAlerts.map((alert) => alert.title).join("; ")}.`;
+    actions = topAlerts.map((alert) => alert.suggestedPrompt);
+    riskLevel = topAlerts.some((alert) => alert.severity === "high") ? "high" : "medium";
+    suggestionType = "investigacion";
+  }
 
   if (text.includes("payphone") || text.includes("pago")) {
     diagnostic = "La revisión debe cubrir creación del pago, estado pendiente, webhook, idempotencia y auditoría antes de modificar el flujo.";
@@ -71,6 +84,8 @@ function fallbackReply(message: string): ArchitectReply {
       "Confirmar idempotencia y registro en clickup_events.",
       "Presentar cualquier acción para aprobación humana.",
     ];
+    if (/(reintent|recuper|fallid)/i.test(text)) executionAction = "retry_clickup_events";
+    else if (/(analiz|proces|pendiente|cola)/i.test(text)) executionAction = "queue_clickup_analysis";
   } else if (text.includes("supabase") || text.includes("base de datos")) {
     diagnostic = "El cambio debe revisar esquema, relaciones, índices, RLS y uso exclusivo de service role en backend.";
     actions = [
@@ -91,22 +106,24 @@ function fallbackReply(message: string): ArchitectReply {
     actions,
     riskLevel,
     suggestionType,
+    executionAction,
     requiresApproval,
     source: "local",
   };
 }
 
-function parseReply(content: string, source: string, originalMessage: string): ArchitectReply {
+function parseReply(content: string, source: string, originalMessage: string, context: ArchitectSystemContext): ArchitectReply {
   const clean = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const match = clean.match(/\{[\s\S]*\}/);
   if (!match) {
-    return { ...fallbackReply(originalMessage), reply: clean.slice(0, 2500) || fallbackReply(originalMessage).reply, source };
+    return { ...fallbackReply(originalMessage, context), reply: clean.slice(0, 2500) || fallbackReply(originalMessage, context).reply, source };
   }
 
   try {
     const parsed = JSON.parse(match[0]);
     const risks: RiskLevel[] = ["low", "medium", "high"];
     const types: SuggestionType[] = ["bug", "mejora", "decision", "investigacion"];
+    const executionActions: ExecutionAction[] = ["retry_clickup_events", "queue_clickup_analysis", "none"];
     return {
       reply: String(parsed.reply || "Preparé una recomendación para revisión.").slice(0, 2500),
       title: String(parsed.title || originalMessage || "Propuesta del Arquitecto IA").slice(0, 120),
@@ -116,17 +133,26 @@ function parseReply(content: string, source: string, originalMessage: string): A
         : [],
       riskLevel: risks.includes(parsed.riskLevel) ? parsed.riskLevel : "medium",
       suggestionType: types.includes(parsed.suggestionType) ? parsed.suggestionType : "investigacion",
+      executionAction: executionActions.includes(parsed.executionAction) ? parsed.executionAction : "none",
       requiresApproval: Boolean(parsed.requiresApproval),
       source,
     };
   } catch {
-    return { ...fallbackReply(originalMessage), reply: clean.slice(0, 2500), source };
+    return { ...fallbackReply(originalMessage, context), reply: clean.slice(0, 2500), source };
   }
 }
 
-async function callAI(message: string, history: HistoryMessage[]): Promise<ArchitectReply> {
+async function callAI(message: string, history: HistoryMessage[], context: ArchitectSystemContext): Promise<ArchitectReply> {
   const cfg = getAIConfig();
-  if (!cfg.hasApiKey || !cfg.apiKey || cfg.provider === "mock") return fallbackReply(message);
+  if (!cfg.hasApiKey || !cfg.apiKey || cfg.provider === "mock") return fallbackReply(message, context);
+
+  const liveContext = JSON.stringify({
+    generatedAt: context.generatedAt,
+    modules: context.modules,
+    alerts: context.alerts,
+    metrics: context.metrics,
+  });
+  const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto. Si todavía falta un dato imprescindible, haz una sola pregunta concreta.`;
 
   if (cfg.mode === "gemini") {
     const conversation = history
@@ -138,7 +164,7 @@ async function callAI(message: string, history: HistoryMessage[]): Promise<Archi
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\n${conversation}\nAdministrador: ${message}` }] }],
+        contents: [{ role: "user", parts: [{ text: `${groundedPrompt}\n\n${conversation}\nAdministrador: ${message}` }] }],
         generationConfig: { temperature: 0.25, maxOutputTokens: 1400 },
       }),
       cache: "no-store",
@@ -146,11 +172,11 @@ async function callAI(message: string, history: HistoryMessage[]): Promise<Archi
     if (!response.ok) throw new Error(`Proveedor IA HTTP ${response.status}`);
     const data = await response.json();
     const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    return parseReply(content, cfg.provider, message);
+    return parseReply(content, cfg.provider, message, context);
   }
 
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: groundedPrompt },
     ...history.slice(-8).map((item) => ({ role: item.role, content: item.content })),
     { role: "user", content: message },
   ];
@@ -170,7 +196,7 @@ async function callAI(message: string, history: HistoryMessage[]): Promise<Archi
   });
   if (!response.ok) throw new Error(`Proveedor IA HTTP ${response.status}`);
   const data = await response.json();
-  return parseReply(data?.choices?.[0]?.message?.content || "", cfg.provider, message);
+  return parseReply(data?.choices?.[0]?.message?.content || "", cfg.provider, message, context);
 }
 
 async function saveSuggestion(reply: ArchitectReply, actorUserId: string): Promise<string | null> {
@@ -184,7 +210,7 @@ async function saveSuggestion(reply: ArchitectReply, actorUserId: string): Promi
         title: reply.title,
         suggestion_type: reply.suggestionType,
         diagnostic: reply.diagnostic,
-        proposed_actions: reply.actions,
+        proposed_actions: { steps: reply.actions, execution_action: reply.executionAction },
         priority,
         approval_status: "pending",
       })
@@ -219,12 +245,13 @@ export async function POST(req: Request) {
           .map((item: HistoryMessage) => ({ role: item.role, content: String(item.content || "").slice(0, 2000) }))
       : [];
 
+    const context = await collectArchitectContext();
     let reply: ArchitectReply;
     try {
-      reply = await callAI(message, history);
+      reply = await callAI(message, history, context);
     } catch (error) {
       console.error("[architect/chat] provider", error);
-      reply = fallbackReply(message);
+      reply = fallbackReply(message, context);
     }
 
     const suggestionId = await saveSuggestion(reply, admin.userId);
