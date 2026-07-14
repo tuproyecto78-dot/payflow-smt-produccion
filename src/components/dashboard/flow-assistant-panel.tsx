@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,7 +21,9 @@ export interface AISuggestion {
 }
 
 interface FlowAssistantPanelProps {
+  available?: boolean;
   open: boolean;
+  onOpen: () => void;
   onClose: () => void;
   onApply: (suggestions: AISuggestion) => void;
   currentStep?: string;
@@ -39,8 +42,12 @@ const EXAMPLES = [
   "Tengo una tienda y quiero vender por WhatsApp.",
 ];
 
+const subscribeToClient = () => () => {};
+
 export function FlowAssistantPanel({
+  available = true,
   open,
+  onOpen,
   onClose,
   onApply,
   currentStep,
@@ -57,9 +64,12 @@ export function FlowAssistantPanel({
   const [aiStatus, setAiStatus] = useState<{ provider: string; configured: boolean; model: string; mode?: string } | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const mounted = useSyncExternalStore(subscribeToClient, () => true, () => false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!available || !open) return;
+
     fetch("/api/ai/status", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
@@ -67,7 +77,7 @@ export function FlowAssistantPanel({
         console.log("[flow-assistant] AI status:", d);
       })
       .catch((e) => console.warn("[flow-assistant] AI status fetch failed:", e));
-  }, [open]);
+  }, [available, open]);
 
   async function retryAI() {
     setRetrying(true);
@@ -173,15 +183,31 @@ export function FlowAssistantPanel({
     onClose();
   }
 
-  if (!open) return null;
+  if (!mounted || !available) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-md h-full bg-card border-l border-border flex flex-col shadow-xl">
+  if (!open) {
+    return createPortal(
+      <Button
+        type="button"
+        onClick={onOpen}
+        className="fixed bottom-5 right-5 z-[100] h-14 rounded-full bg-purple-600 px-4 text-white shadow-2xl shadow-purple-950/30 ring-4 ring-background/80 hover:bg-purple-700 sm:px-5"
+        aria-label="Abrir Asistente PayFlow"
+        title="Abrir Asistente PayFlow"
+      >
+        <Sparkles className="size-5 sm:mr-2" />
+        <span className="hidden sm:inline">Asistente PayFlow</span>
+      </Button>,
+      document.body
+    );
+  }
+
+  return createPortal(
+    <section
+      role="dialog"
+      aria-modal="false"
+      aria-label="Asistente PayFlow"
+      className="fixed inset-x-3 bottom-3 top-3 z-[110] flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:inset-x-auto sm:bottom-5 sm:right-5 sm:top-auto sm:h-[min(720px,calc(100vh-2.5rem))] sm:w-[430px]"
+    >
         {/* Header */}
         <div className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -342,7 +368,7 @@ export function FlowAssistantPanel({
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+    </section>,
+    document.body
   );
 }
