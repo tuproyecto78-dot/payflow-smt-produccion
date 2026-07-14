@@ -925,6 +925,7 @@ export function CreateFlowDialog({
     setManual({ ...EMPTY_MANUAL });
     setRecommendation(null);
     setRecommendationDismissed(false);
+    setAiAssistantOpen(false);
     setModules({
       uses_agenda: false,
       uses_catalog: false,
@@ -1395,16 +1396,6 @@ export function CreateFlowDialog({
               <DialogTitle className="flex items-center gap-2 text-base sm:text-lg mb-3">
                 <Sparkles className="size-5 text-purple-500" />
                 Crear flujo automático
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="ml-auto h-7 text-xs border-purple-300 text-purple-600 hover:bg-purple-50 dark:border-purple-500/40 dark:text-purple-300 dark:hover:bg-purple-500/10"
-                  onClick={() => setAiAssistantOpen(true)}
-                >
-                  <Bot className="size-3.5 mr-1" />
-                  Crear con IA
-                </Button>
               </DialogTitle>
             </DialogHeader>
             <StepIndicator step={step} completed={completedSteps} />
@@ -2473,17 +2464,21 @@ export function CreateFlowDialog({
 
       {/* AI Assistant Panel */}
       <FlowAssistantPanel
-        open={aiAssistantOpen}
+        available={open}
+        open={open && aiAssistantOpen}
+        onOpen={() => setAiAssistantOpen(true)}
         onClose={() => setAiAssistantOpen(false)}
         currentStep={String(step)}
         onApply={(suggestions: AISuggestion) => {
           // Apply suggestions to the form (user approved)
           if (suggestions.template) {
             setSelectedTemplate(suggestions.template as TemplateId);
-            completedSteps.push(1);
           }
           if (suggestions.businessType) {
-            setForm((f) => ({ ...f, business_type: suggestions.businessType! }));
+            setForm((f) => ({
+              ...f,
+              business_type: suggestions.businessType as BusinessTypeKey,
+            }));
           }
           if (suggestions.mainProductOrService) {
             setForm((f) => ({ ...f, product_or_service: suggestions.mainProductOrService! }));
