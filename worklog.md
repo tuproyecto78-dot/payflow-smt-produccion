@@ -1567,3 +1567,45 @@ Files modified: 2
 - src/components/landing/use-landing-animations.ts (float-card-3/4 + phone tilt)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: fix-google-oauth-url
+Agent: main agent (Z.ai Code)
+Task: Corregir el inicio de sesión con Google en PayFlow SMT. ERROR: al pulsar "Continuar con Google" redirigía a https://lkhvemqklwdknztadhzs.supabase.co/rest/v1/auth/v1/authorize (URL REST con /rest/v1) y Supabase respondía "No API key found in request". CAUSA: la URL de Supabase estaba contaminada con /rest/v1. SOLUCIÓN OBLIGATORIA: usar el cliente oficial de Supabase y sanitizar la URL base.
+
+Work Log:
+- Análisis del problema: el error /rest/v1/auth/v1/authorize ocurre cuando NEXT_PUBLIC_SUPABASE_URL contiene un sufijo como /rest/v1 o /auth/v1. El cliente oficial de Supabase (supabase.auth.signInWithOAuth) toma la URL base y le concatena /auth/v1/authorize; si la base ya tiene /rest/v1, el resultado es /rest/v1/auth/v1/authorize.
+- Reescribí src/app/api/auth/google/route.ts:
+  - Añadí función sanitizeSupabaseUrl() que elimina sufijos /rest/v1, /auth/v1, /rest, /auth, y trailing slashes de la URL.
+  - La URL base se sanitiza ANTES de crear el cliente Supabase.
+  - Se usa el cliente oficial: const { createClient } = await import("@supabase/supabase-js"); supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo, skipBrowserRedirect: true } }).
+  - Se retorna data.url (que será https://<project-ref>.supabase.co/auth/v1/authorize?provider=google&redirect_to=...).
+  - Mensaje de error claro en español si faltan variables: "Supabase no está configurado. Faltan NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY."
+  - NUNCA se construye manualmente /auth/v1/authorize.
+- Apliqué la misma sanitización en src/lib/supabase.ts (SUPABASE_URL export) — esto cubre el callback /auth/callback y cualquier ruta que use createServerClientHelper().
+- Apliqué la misma sanitización en src/lib/supabase-server.ts (service role client) — esto cubre todas las operaciones server-side con service role key.
+- Busqué en todo el código (rg) construcciones manuales de /auth/v1/authorize o /rest/v1 — no hay ninguna. Todos los resultados son comentarios de documentación.
+- NO se cambió: diseño, auth-view (ya hacía POST a /api/auth/google y redirigía a data.url), callback /auth/callback, ni ninguna otra funcionalidad.
+
+Verification:
+- Test unitario de sanitizeSupabaseUrl() con 8 casos: URL limpia, con /, con /rest/v1, con /auth/v1, con /rest/v1/, con /rest, con /auth, con espacios — TODOS retornan exactamente "https://lkhvemqklwdknztadhzs.supabase.co".
+- curl POST /api/auth/google sin env vars: retorna {"error":"Supabase no está configurado. Faltas NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY."} (comportamiento correcto en sandbox).
+- Agent Browser: /login carga, botón "Continuar con Google" presente, al hacer click muestra el mensaje de error claro (sin crash, sin redirección a URL rota). En Vercel con las env vars configuradas, hará la llamada OAuth correcta.
+- bun run lint: 0 errores, 0 warnings.
+- GET / 200, GET /login 200, sin errores de compilación en dev.log.
+
+Stage Summary:
+- El bug /rest/v1/auth/v1/authorize está corregido: la URL de Supabase se sanitiza en 3 archivos (api/auth/google/route.ts, lib/supabase.ts, lib/supabase-server.ts) eliminando cualquier sufijo /rest/v1, /auth/v1, /rest, /auth.
+- Se usa EXCLUSIVAMENTE el cliente oficial de Supabase (signInWithOAuth) — nunca se construye manualmente la URL OAuth.
+- La URL resultante será siempre https://lkhvemqklwdknztadhzs.supabase.co/auth/v1/authorize?provider=google&redirect_to=... cuando las variables de entorno estén configuradas correctamente en Vercel:
+  NEXT_PUBLIC_SUPABASE_URL=https://lkhvemqklwdknztadhzs.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=<clave pública>
+- No se usa SUPABASE_SERVICE_ROLE_KEY en el navegador (solo en server-side en supabase-server.ts con import "server-only").
+- Validación final: (1) pulsar "Continuar con Google", (2) la URL debe comenzar con https://lkhvemqklwdknztadhzs.supabase.co/auth/v1/authorize, (3) abre Google, (4) vuelve a /auth/callback. npm run build no se ejecutó (regla del proyecto: never use bun run build), pero bun run lint pasa con 0 errores.
+
+Files modified: 3
+- src/app/api/auth/google/route.ts (sanitización + cliente oficial)
+- src/lib/supabase.ts (sanitización de SUPABASE_URL)
+- src/lib/supabase-server.ts (sanitización de SUPABASE_URL)
+
+`bun run lint` → exit 0, no errors, no warnings.
