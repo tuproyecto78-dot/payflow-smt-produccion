@@ -27,10 +27,11 @@ export async function POST(req: Request) {
       .single();
     if (error) throw error;
 
-    let execution = { status: "not_executed", message: "La propuesta quedó registrada para implementación." };
+    let execution = { status: "not_executed", message: "El plan quedó registrado sin realizar cambios." };
     if (decision === "approved") {
-      const proposed = data.proposed_actions as { execution_action?: string } | unknown[] | null;
+      const proposed = data.proposed_actions as { execution_action?: string; change_scope?: string } | unknown[] | null;
       const action = proposed && !Array.isArray(proposed) ? proposed.execution_action : "none";
+      const changeScope = proposed && !Array.isArray(proposed) ? proposed.change_scope : "configuration";
 
       if (action === "retry_clickup_events") {
         const { data: events, error: executeError } = await supabase
@@ -49,7 +50,10 @@ export async function POST(req: Request) {
         if (executeError) throw executeError;
         execution = { status: "executed", message: `${events?.length || 0} eventos detectados fueron enviados a análisis.` };
       } else {
-        execution = { status: "approval_recorded", message: "Propuesta aprobada. Requiere una implementación de código o configuración externa." };
+        execution = {
+          status: "approval_recorded",
+          message: `Autorización registrada para el cambio de ${changeScope || "configuración"}. El plan quedó listo para implementación segura; todavía no se modificó código ni configuración.`,
+        };
       }
 
       if (execution.status === "executed") {
