@@ -1609,3 +1609,28 @@ Files modified: 3
 - src/lib/supabase-server.ts (sanitización de SUPABASE_URL)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: fix-google-oauth-push-to-vercel
+Agent: main agent (Z.ai Code)
+Task: El usuario reportó "el mismo error" con captura mostrando URL https://lkhvemqklwdknztadhzs.supabase.co/rest/v1/auth/v1/authorize en producción (Vercel). El fix del task anterior (sanitize URL) estaba correcto en el código pero NO se había pusheado a GitHub, por lo que Vercel seguía sirviendo el código viejo.
+
+Work Log:
+- Análisis VLM de la captura del usuario: confirmó que en producción (Vercel) la URL sigue siendo /rest/v1/auth/v1/authorize con error "No API key found in request". El dominio era tuproyecto78-dot-payflow-smt-produc.vercel.app (producción, no sandbox).
+- git status: "nothing added to commit but untracked files" — los cambios ya estaban commiteados localmente.
+- Verificación de archivos: confirmé que src/app/api/auth/google/route.ts, src/lib/supabase.ts, src/lib/supabase-server.ts SÍ contienen la función sanitizeSupabaseUrl().
+- git log origin/main..HEAD: reveló 5 commits locales NO pusheados (incluyendo 8497e57 con el fix del OAuth). Local HEAD = 8497e57, Remote origin/main = d690990 (anterior, sin fix).
+- Ejecuté git push origin main: exitoso, d690990..8497e57 main -> main.
+- Verificación post-push: git fetch + git rev-parse confirman Local HEAD = Remote HEAD = 8497e57 (sincronizado).
+- Vercel detectará el push y desplegará automáticamente en 1-2 minutos.
+
+Stage Summary:
+- El fix del OAuth (sanitize URL) ya estaba en el código local desde el task anterior, pero faltaba el push a GitHub.
+- Tras el push, Vercel desplegará el código corregido. La URL de Google OAuth en producción pasará de /rest/v1/auth/v1/authorize (rota) a /auth/v1/authorize (correcta).
+- El usuario debe esperar 1-2 minutos a que Vercel complete el deploy automático y luego probar "Continuar con Google" de nuevo.
+- IMPORTANTE: también verificar en el dashboard de Vercel que las variables de entorno sean:
+  NEXT_PUBLIC_SUPABASE_URL=https://lkhvemqklwdknztadhzs.supabase.co  (sin /rest/v1 ni /auth/v1)
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=<clave pública>
+
+Files pushed: 5 commits (incluyendo fix OAuth + rediseño landing + hero visual)
+`bun run lint` → exit 0 (verificado en task anterior).
