@@ -54,7 +54,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { FlowAssistantPanel, type AISuggestion } from "./flow-assistant-panel";
+import type { AISuggestion } from "./flow-assistant-panel";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -797,7 +797,6 @@ export function CreateFlowDialog({
   const [manual, setManual] = useState<Record<string, string>>({ ...EMPTY_MANUAL });
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [recommendationDismissed, setRecommendationDismissed] = useState(false);
-  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
 
   // Step 4: Modules
   const [modules, setModules] = useState({
@@ -925,7 +924,6 @@ export function CreateFlowDialog({
     setManual({ ...EMPTY_MANUAL });
     setRecommendation(null);
     setRecommendationDismissed(false);
-    setAiAssistantOpen(false);
     setModules({
       uses_agenda: false,
       uses_catalog: false,
@@ -945,6 +943,87 @@ export function CreateFlowDialog({
       return () => clearTimeout(t);
     }
   }, [open, reset]);
+
+  function applyAISuggestions(suggestions: AISuggestion) {
+    if (suggestions.template) {
+      setSelectedTemplate(suggestions.template as TemplateId);
+    }
+    if (suggestions.businessType) {
+      setForm((current) => ({
+        ...current,
+        business_type: suggestions.businessType as BusinessTypeKey,
+      }));
+    }
+    if (suggestions.mainProductOrService) {
+      setForm((current) => ({
+        ...current,
+        product_or_service: suggestions.mainProductOrService!,
+      }));
+    }
+    if (suggestions.welcomeMessage) {
+      setForm((current) => ({ ...current, welcome_message: suggestions.welcomeMessage! }));
+    }
+    if (suggestions.agentTone) {
+      setForm((current) => ({
+        ...current,
+        agent_tone: suggestions.agentTone as AgentTone,
+      }));
+    }
+    if (suggestions.scheduleDays) {
+      setForm((current) => ({
+        ...current,
+        schedule_days: suggestions.scheduleDays as ScheduleDays,
+      }));
+    }
+    if (suggestions.scheduleHours) {
+      setForm((current) => ({
+        ...current,
+        schedule_hours: suggestions.scheduleHours as ScheduleHours,
+      }));
+    }
+    if (suggestions.paymentProvider) {
+      const usesPayphone = suggestions.paymentProvider === "payphone_api_link";
+      setModules((current) => ({
+        ...current,
+        uses_payphone: usesPayphone,
+        payment_provider: usesPayphone ? "payphone" : "none",
+      }));
+    }
+    setStep(2);
+  }
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("payflow:assistant-context", {
+        detail: {
+          currentStep: open ? String(step) : "platform",
+          canApply: open,
+        },
+      })
+    );
+
+    return () => {
+      if (open) {
+        window.dispatchEvent(
+          new CustomEvent("payflow:assistant-context", {
+            detail: { currentStep: "platform", canApply: false },
+          })
+        );
+      }
+    };
+  }, [open, step]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleAssistantApply(event: Event) {
+      const suggestions = (event as CustomEvent<AISuggestion>).detail;
+      if (suggestions) applyAISuggestions(suggestions);
+    }
+
+    window.addEventListener("payflow:assistant-apply", handleAssistantApply);
+    return () => window.removeEventListener("payflow:assistant-apply", handleAssistantApply);
+  }, [open]);
 
   // ─── Template selection ─────────────────────────────────────────────
 
@@ -2462,51 +2541,6 @@ export function CreateFlowDialog({
         importing={importing}
       />
 
-      {/* AI Assistant Panel */}
-      <FlowAssistantPanel
-        available={open}
-        open={open && aiAssistantOpen}
-        onOpen={() => setAiAssistantOpen(true)}
-        onClose={() => setAiAssistantOpen(false)}
-        currentStep={String(step)}
-        onApply={(suggestions: AISuggestion) => {
-          // Apply suggestions to the form (user approved)
-          if (suggestions.template) {
-            setSelectedTemplate(suggestions.template as TemplateId);
-          }
-          if (suggestions.businessType) {
-            setForm((f) => ({
-              ...f,
-              business_type: suggestions.businessType as BusinessTypeKey,
-            }));
-          }
-          if (suggestions.mainProductOrService) {
-            setForm((f) => ({ ...f, product_or_service: suggestions.mainProductOrService! }));
-          }
-          if (suggestions.welcomeMessage) {
-            setForm((f) => ({ ...f, welcome_message: suggestions.welcomeMessage! }));
-          }
-          if (suggestions.agentTone) {
-            setForm((f) => ({ ...f, agent_tone: suggestions.agentTone as AgentTone }));
-          }
-          if (suggestions.scheduleDays) {
-            setForm((f) => ({ ...f, schedule_days: suggestions.scheduleDays as ScheduleDays }));
-          }
-          if (suggestions.scheduleHours) {
-            setForm((f) => ({ ...f, schedule_hours: suggestions.scheduleHours as ScheduleHours }));
-          }
-          if (suggestions.paymentProvider) {
-            const usesPayphone = suggestions.paymentProvider === "payphone_api_link";
-            setModules((m) => ({
-              ...m,
-              uses_payphone: usesPayphone,
-              payment_provider: usesPayphone ? "payphone" : "none",
-            }));
-          }
-          // Move to step 2 (Negocio) so the user can review the applied suggestions
-          setStep(2);
-        }}
-      />
     </>
   );
 }
