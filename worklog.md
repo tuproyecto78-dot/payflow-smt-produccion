@@ -1465,3 +1465,68 @@ Files modified: 5
 - `src/stores/auth-store.ts` (supporting change for the auth-view branch)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: landing-redesign-modern-saas
+Agent: main agent (Z.ai Code)
+Task: Rediseño visual moderno de la landing page de PayFlow SMT con estética SaaS nivel Latinoamérica, efectos de scroll de alto rendimiento, SEO y sin cambiar estructura/políticas/funcionalidad existente.
+
+Work Log:
+- Leí worklog.md previo: el proyecto ya tenía auth flow completo, demo flows auto-seed, Arquitecto IA, privacy/terms actualizadas, precios en $49.99/mes y $249/año. El usuario pidió SOLO rediseñar el despliegue visual sin tocar estructura.
+- Generé 3 imágenes modernas con z-ai image CLI:
+  - /public/hero-bg-modern.png (1344x768) — fondo abstracto 3D de red de automatización de pagos con nodos esmeralda y navy
+  - /public/platform-mockup-modern.png (1152x864) — mockup de dashboard SaaS con glassmorphism
+  - /public/og-image.png (1344x768) — banner para OpenGraph/social sharing
+  - /public/grid-texture.png (1344x768) — textura de grilla sutil
+- Reescribí src/components/landing/landing-page.tsx COMPLETAMENTE manteniendo la misma API (props: onLogin, states: activeSection/subPlan/mobileMenuOpen). Estructura nueva:
+  1. Barra de progreso de scroll fija (gradiente esmeralda con glow)
+  2. Blobs ambientales animados (float-slow / float-slower / pulse-soft)
+  3. Navbar glassmorphism con pills de navegación + logo con glow hover + botones con shimmer
+  4. Hero split layout (7/5): logo con glow, badge, título con gradiente esmeralda + subrayado SVG animado, descripción, 4 chips de capacidades, 2 CTAs con shimmer effect, trust mini-row, y a la derecha mockup flotante con 2 floating cards animados (pago confirmado + agente IA activo)
+  5. Scroll indicator animado (bounce) en la parte inferior del hero
+  6. Trust bar: 4 stats (2 años, 100% automatización, Seguro, LATAM) con iconos
+  7. Capacidades: bento grid de 6 tarjetas (Tecnología, Automatización de procesos de pagos, IA, Solución empresarial, Sistema de automatización, Integraciones) — cubre TODAS las capacidades que pidió el usuario
+  8. Plataforma split: lista de features con iconos circulares + imagen con glow
+  9. Cómo funciona: 3 pasos con línea conectora gradiente, números en badges, iconos grandes
+  10. Beneficios: 6 tarjetas con gradient icons emerald→teal, hover lift + rotate
+  11. Precios: Plan Mensual $49.99/mes + Plan Anual $249/año (Recomendado con star badge + glow), manteniendo los mismos 8 features y los mismos callbacks (setSubPlan("trimestral") y setSubPlan("anual"))
+  12. Nosotros: 2 tarjetas (2 años experiencia + Procesos seguros) con gradient icons
+  13. CTA banner: gradiente esmeralda con rocket icon y 2 botones
+  14. Footer en 3 columnas: brand con badge "En operación", links de plataforma, contacto+legal (privacy/terms/cookies/data-request intactos)
+- Reescribí src/components/landing/use-landing-animations.ts: animaciones GSAP para TODAS las nuevas secciones (hero parallax, mockup flotante con parallax scroll, floating cards con yoyo infinito, trust stats stagger, capacidad cards con scale+rotate, how-it-works con back.out bounce, benefits con stagger, prices con scale, nosotros blocks, CTA banner). Respeta prefers-reduced-motion.
+- Actualicé src/components/landing/use-scroll-color-transition.ts: añadí las nuevas secciones al mapeo de temas (trust/capacidades/how/cta → dark theme).
+- Añadí CSS moderno en src/app/globals.css: keyframes pf-float-slow, pf-float-slower, pf-pulse-soft; scrollbar premium con gradiente esmeralda; smooth scroll; ::selection esmeralda; respeta prefers-reduced-motion.
+- Reescribí src/app/layout.tsx con SEO completo: lang="es", title template, OpenGraph (locale es_LA, og:image 1344x768), Twitter Card (summary_large_image), robots con googleBot, icons, themeColor navy, y 2 scripts JSON-LD (SoftwareApplication con offers $49.99/$249 + Organization con areaServed LATAM).
+- NO se cambió: estructura del SaaS, políticas (privacy/terms/cookies), auth flow, dashboard, API routes, PayPhone integration, AI provider config, subscription form fields, precios, ni ninguna funcionalidad. Solo el diseño visual de la landing.
+
+Verification (Agent Browser end-to-end):
+- GET / 200, sin errores de runtime ni de compilación en dev.log
+- Snapshot interactivo confirma TODAS las secciones: Hero (h1 "Automatiza pagos por WhatsApp con IA"), 6 capacidades (Tecnología/Automatización de procesos de pagos/IA/Solución empresarial/Sistema de automatización/Integraciones), Plataforma, 3 pasos Cómo funciona, 6 Beneficios, Precios (Plan Mensual $49.99 + Plan Anual $249), Nosotros, CTA, Footer con 4 links legales
+- Click "Suscribirme" abre el SubscriptionForm correctamente con todos los campos PayPhone + consent checkboxes
+- Click "Precios" en nav → smooth scroll verifica section-precios.getBoundingClientRect().top = 0.28 (al inicio del viewport)
+- Mobile viewport 390x844: menú hamburguesa "Abrir menú" funciona, abre Plataforma/Precios/Nosotros/Iniciar sesión/Suscribirme
+- Footer posicionado correctamente: footerBottom=899.5 ≈ viewportH=900, docHeight=7192px (empujado naturalmente, sin huecos flotantes)
+- SEO verificado: 2 scripts JSON-LD, lang="es", title "PayFlow SMT — Automatización de Pagos por WhatsApp con IA", og:image apunta a /og-image.png, twitter:card=summary_large_image, description presente
+- bun run lint: 0 errores, 0 warnings
+
+Stage Summary:
+- La landing page de PayFlow SMT ahora tiene un despliegue visual moderno nivel SaaS Latinoamericano: hero split con mockup flotante, trust bar, bento grid de 6 capacidades (cubre Excelente servicio/Tecnología/Automatización de procesos de pagos/IA/Solución empresarial/Sistema de automatización), cómo funciona en 3 pasos, beneficios, precios mejorados, CTA banner, y footer en 3 columnas.
+- Efectos de scroll de alto rendimiento con GSAP (lazy-loaded, respeta prefers-reduced-motion): parallax, stagger, reveal 3D, floating cards infinitos, shimmer en botones, barra de progreso de scroll.
+- SEO completo: OpenGraph, Twitter Cards, 2 JSON-LD schemas (SoftwareApplication + Organization), lang=es, keywords LATAM, og-image generada con IA.
+- Colores de marca preservados: esmeralda #00D084 + navy #061426. Precios preservados: $49.99/mes y $249/año. Todas las políticas y links legales preservados.
+- Toda la estructura SaaS, auth flow, dashboard, APIs, PayPhone, IA providers SIN MODIFICAR — solo el diseño visual cambió como pidió el usuario.
+
+Files created: 4 (imágenes)
+- public/hero-bg-modern.png
+- public/platform-mockup-modern.png
+- public/og-image.png
+- public/grid-texture.png
+
+Files modified: 4
+- src/components/landing/landing-page.tsx (rediseño completo)
+- src/components/landing/use-landing-animations.ts (animaciones ampliadas)
+- src/components/landing/use-scroll-color-transition.ts (nuevas secciones en mapeo de temas)
+- src/app/globals.css (CSS moderno + scrollbar premium)
+- src/app/layout.tsx (SEO completo + JSON-LD)
+
+`bun run lint` → exit 0, no errors, no warnings.
