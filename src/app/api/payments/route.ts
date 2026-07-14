@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 
 export async function GET(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(req.url);
   const limit = Math.min(Number(searchParams.get("limit") || 50), 100);

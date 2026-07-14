@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
-import { isSupabaseConfigured, createServerClientHelper } from "@/lib/supabase";
+import { isSupabaseConfigured, createServiceRoleClient } from "@/lib/supabase";
+import { requireAdmin } from "@/lib/auth/require-session";
 
-const VALID_STATUSES = ["pending_review", "contacted", "active", "rejected"];
+// "activated" is intentionally excluded: activation must use the atomic
+// admin endpoint that also grants the tenant entitlement.
+const VALID_STATUSES = ["pending_review", "reviewed", "rejected"];
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,18 +13,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { status } = body;
   if (!VALID_STATUSES.includes(status)) return NextResponse.json({ error: "Estado inválido." }, { status: 400 });
 
-  // Use our JWT session (NOT getSupabaseUser which reads a cookie we don't set).
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 });
 
   if (isSupabaseConfigured) {
     try {
-      const supabase = await createServerClientHelper();
+      const supabase = createServiceRoleClient();
       const { error } = await supabase.from("subscription_requests").update({ subscription_status: status }).eq("id", id);
       if (error) throw error;
       return NextResponse.json({ ok: true });
     } catch (err) {
-      console.error("[subscriptions PATCH] Supabase failed, falling back to Prisma:", err);
+      console.error("[subscriptions PATCH] Supabase failed:", err);
+      return NextResponse.json({ error: "No se pudo actualizar la solicitud." }, { status: 500 });
     }
   }
 

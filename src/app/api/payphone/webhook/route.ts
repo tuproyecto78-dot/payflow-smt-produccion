@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { mapPayphoneWebhookStatus } from "@/lib/payphone-link";
 import { rateLimit, getClientIP, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
+import { getPayphoneConfig } from "@/lib/payphone/config";
+import {
+  verifyPayphoneTransaction,
+  type VerifiedPayphoneTransaction,
+} from "@/lib/payphone/verify-transaction";
+import { updateDurablePayphonePayment } from "@/lib/operational-telemetry";
+import { mapPayphoneWebhookStatus } from "@/lib/payphone-link";
+import { verifySharedSecret } from "@/lib/webhook-signature";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +45,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: RATE_LIMIT_ERROR }, { status: 429 });
   }
 
+  const requestUrl = new URL(req.url);
+  const receivedSecret = req.headers.get("x-payphone-webhook-secret") || requestUrl.searchParams.get("token");
+  const configuredSecret = process.env.PAYPHONE_WEBHOOK_SECRET || "";
+  const allowUnsignedDevelopment =
+    process.env.NODE_ENV !== "production" && process.env.ALLOW_UNSIGNED_PAYPHONE_WEBHOOKS === "true";
+  if (!verifySharedSecret(receivedSecret, configuredSecret) && !allowUnsignedDevelopment) {
+    return NextResponse.json({ error: "Webhook no autorizado." }, { status: 401 });
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
 
@@ -57,8 +73,13 @@ export async function POST(req: Request) {
     const authorizationCode = String(body.AuthorizationCode || body.authorizationCode || "").trim() || null;
     const reference = String(body.Reference || body.reference || "").trim() || null;
 
-    // Map PayPhone status to normalized status
-    const newStatus = mapPayphoneWebhookStatus(statusCode, transactionStatus || undefined);
+    const configuredStoreId = getPayphoneConfig().storeId;
+    if (!configuredStoreId || !storeId || storeId !== configuredStoreId) {
+      return NextResponse.json({ error: "StoreId no autorizado." }, { status: 401 });
+    }
+    if (!clientTransactionId) {
+      return NextResponse.json({ error: "ClientTransactionId es obligatorio." }, { status: 400 });
+    }
 
     // Check for duplicates by providerTransactionId
     let isDuplicate = false;
@@ -69,56 +90,15 @@ export async function POST(req: Request) {
       });
       if (existing) {
         isDuplicate = true;
-        // Record the duplicate event but don't re-process
-        await db.paymentWebhookEvent.create({
-          data: {
-            provider: "PayPhone",
-            clientTransactionId: clientTransactionId || null,
-            providerTransactionId,
-            storeId,
-            statusCode: !isNaN(statusCode as number) ? statusCode : null,
-            transactionStatus,
-            amount,
-            currency,
-            authorizationCode,
-            reference,
-            rawEvent: JSON.stringify(body),
-            processed: existing.processed,
-            duplicate: true,
-            processedAt: new Date(),
-          },
-        });
-
-        void logAudit({
-          action: "payment_webhook_received",
-          entityType: "payment",
-          ipAddress: ip,
-          metadata: {
-            provider: "PayPhone",
-            client_transaction_id: clientTransactionId || null,
-            provider_transaction_id: providerTransactionId,
-            duplicate: true,
-            status: newStatus,
-          },
-        });
-
-        return NextResponse.json({
-          ok: true,
-          duplicate: true,
-          message: "Evento duplicado. Ya fue procesado anteriormente.",
-          client_transaction_id: clientTransactionId || null,
-          provider_transaction_id: providerTransactionId,
-          status: newStatus,
-        });
       }
     }
 
     // Find the payment transaction by clientTransactionId
-    let tx: { id: string; status: string; clientTransactionId: string | null; reference: string | null } | null = null;
+    let tx: { id: string; status: string; clientTransactionId: string | null; reference: string | null; amount: number; storeId: string | null } | null = null;
     if (clientTransactionId) {
       tx = await db.paymentTransaction.findFirst({
         where: { clientTransactionId },
-        select: { id: true, status: true, clientTransactionId: true, reference: true },
+        select: { id: true, status: true, clientTransactionId: true, reference: true, amount: true, storeId: true },
       });
     }
 
@@ -126,21 +106,67 @@ export async function POST(req: Request) {
     if (!tx && clientTransactionId) {
       tx = await db.paymentTransaction.findFirst({
         where: { orderId: clientTransactionId },
-        select: { id: true, status: true, clientTransactionId: true, reference: true },
+        select: { id: true, status: true, clientTransactionId: true, reference: true, amount: true, storeId: true },
       });
     }
 
     const previousStatus = tx?.status || null;
 
+    if (!tx) {
+      return NextResponse.json({ error: "Transacción no encontrada." }, { status: 404 });
+    }
+    if (tx.storeId && tx.storeId !== storeId) {
+      return NextResponse.json({ error: "La tienda no coincide con la transacción." }, { status: 409 });
+    }
+    if (amount !== null && Math.abs(tx.amount - amount) > 0.001) {
+      return NextResponse.json({ error: "El monto no coincide con la transacción." }, { status: 409 });
+    }
+
+    let verified: VerifiedPayphoneTransaction = {
+      clientTransactionId,
+      transactionId: providerTransactionId || "",
+      status: mapPayphoneWebhookStatus(statusCode, transactionStatus || undefined),
+      amount: amount ?? tx.amount,
+      currency: currency || "USD",
+      authorizationCode: authorizationCode || undefined,
+    };
+    if (verified.status === "payment_success" && (!providerTransactionId || !authorizationCode)) {
+      return NextResponse.json({ error: "La aprobación no incluye identificadores verificables." }, { status: 400 });
+    }
+
+    // Optional defense in depth. Enable only after PayPhone confirms that the
+    // authenticated Sale query applies to the merchant's API Link contract.
+    if (process.env.PAYPHONE_WEBHOOK_VERIFY_WITH_API === "true") {
+      try {
+        verified = await verifyPayphoneTransaction(clientTransactionId);
+      } catch (verificationError) {
+        console.error(
+          "[payphone/webhook] provider verification failed",
+          verificationError instanceof Error ? verificationError.message : "unknown"
+        );
+        return NextResponse.json(
+          { error: "No se pudo verificar la transacción con PayPhone." },
+          { status: 503 }
+        );
+      }
+    }
+    if (Math.abs(tx.amount - verified.amount) > 0.001 || verified.currency !== "USD") {
+      return NextResponse.json({ error: "La verificación del monto o moneda no coincide." }, { status: 409 });
+    }
+    if (providerTransactionId && verified.transactionId && providerTransactionId !== verified.transactionId) {
+      return NextResponse.json({ error: "El identificador de PayPhone no coincide." }, { status: 409 });
+    }
+    const verifiedStatus = verified.status;
+
     // Determine if we should update the transaction
     let shouldUpdate = false;
-    if (tx && newStatus !== "error") {
+    if (verifiedStatus !== "error") {
       // Rule: No cambiar payment_success a failed
-      if (tx.status === "payment_success" && newStatus === "payment_failed") {
+      if (tx.status === "payment_success" && verifiedStatus !== "payment_success") {
         shouldUpdate = false;
       }
       // Rule: No cambiar si el estado es el mismo (idempotency)
-      else if (tx.status === newStatus) {
+      else if (tx.status === verifiedStatus) {
         shouldUpdate = false;
       } else {
         shouldUpdate = true;
@@ -152,10 +178,17 @@ export async function POST(req: Request) {
       await db.paymentTransaction.update({
         where: { id: tx.id },
         data: {
-          status: newStatus,
-          providerPaymentId: providerTransactionId || undefined,
-          paidAt: newStatus === "payment_success" ? new Date() : undefined,
+          status: verifiedStatus,
+          providerPaymentId: verified.transactionId || providerTransactionId || undefined,
+          paidAt: verifiedStatus === "payment_success" ? new Date() : undefined,
         },
+      });
+
+      await updateDurablePayphonePayment({
+        clientTransactionId,
+        providerPaymentId: verified.transactionId || providerTransactionId,
+        status: verifiedStatus,
+        verifiedPayload: verified,
       });
 
       void logAudit({
@@ -166,7 +199,7 @@ export async function POST(req: Request) {
         metadata: {
           provider: "PayPhone",
           previous_status: previousStatus,
-          new_status: newStatus,
+          new_status: verifiedStatus,
           client_transaction_id: clientTransactionId || null,
           provider_transaction_id: providerTransactionId,
           status_code: statusCode ?? null,
@@ -192,7 +225,7 @@ export async function POST(req: Request) {
         reference,
         rawEvent: JSON.stringify(body),
         processed: true,
-        duplicate: false,
+        duplicate: isDuplicate,
         processedAt: new Date(),
       },
     });
@@ -208,7 +241,7 @@ export async function POST(req: Request) {
         provider_transaction_id: providerTransactionId,
         status_code: statusCode ?? null,
         transaction_status: transactionStatus,
-        normalized_status: newStatus,
+        normalized_status: verifiedStatus,
         transaction_found: !!tx,
         status_updated: shouldUpdate,
         duplicate: isDuplicate,
@@ -222,10 +255,11 @@ export async function POST(req: Request) {
       provider_transaction_id: providerTransactionId,
       status_code: statusCode ?? null,
       transaction_status: transactionStatus,
-      normalized_status: newStatus,
+      normalized_status: verifiedStatus,
       transaction_found: !!tx,
       previous_status: previousStatus,
       status_updated: shouldUpdate,
+      duplicate: isDuplicate,
       webhook_event_id: webhookEvent.id,
       message: "Notificación recibida y procesada correctamente.",
     });

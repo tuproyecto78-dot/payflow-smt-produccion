@@ -12,6 +12,7 @@
  */
 
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { getPayphoneConfig, getPayphoneBaseUrl, validatePayphoneConfig } from "./config";
 
 // Re-export validatePayphoneConfig so callers can import it from this module.
@@ -64,8 +65,8 @@ export interface PayphoneLinkResult {
  */
 export function generateClientTransactionId(): string {
   const ts = Date.now().toString(36).slice(-6).padStart(6, "0");
-  const rand = Math.random().toString(36).slice(2, 7).padEnd(5, "0");
-  return `pf${ts}${rand}`.slice(0, 15);
+  const entropy = randomBytes(4).toString("hex").slice(0, 7);
+  return `pf${ts}${entropy}`.slice(0, 15);
 }
 
 /**
@@ -224,14 +225,14 @@ export async function createPayphoneApiLink(
     }
 
     // PayPhone returns the link in one of these fields depending on API version.
+    const hostLink = data as { hostUrl?: string; path?: string };
     const link = String(
       (data as { paymentLink?: string }).paymentLink ||
         (data as { link?: string }).link ||
         (data as { paymentUrl?: string }).paymentUrl ||
         (data as { url?: string }).url ||
         (data as { payment_link?: string }).payment_link ||
-        (data as { hostUrl?: string; path?: string }).hostUrl +
-          (data as { path?: string }).path ||
+        (hostLink.hostUrl ? `${hostLink.hostUrl}${hostLink.path || ""}` : "") ||
         ""
     );
 

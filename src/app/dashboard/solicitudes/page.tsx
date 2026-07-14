@@ -273,7 +273,8 @@ export default function SolicitudesPage() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const onRefresh = () => {
@@ -306,6 +307,9 @@ export default function SolicitudesPage() {
 
   const onActivate = useCallback(
     async (id: string) => {
+      if (!window.confirm("¿Confirmas que el pago de la suscripción y la identidad del cliente ya fueron verificados?")) {
+        return;
+      }
       setActivatingId(id);
       try {
         const res = await fetch(
@@ -314,6 +318,7 @@ export default function SolicitudesPage() {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paymentVerified: true }),
           }
         );
         const data = (await res.json().catch(() => ({}))) as {

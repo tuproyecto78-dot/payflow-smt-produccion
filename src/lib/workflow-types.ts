@@ -242,7 +242,12 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     icon: "Search",
     category: "payment",
     color: "#6366f1",
-    outputs: [{ id: "out", label: "Siguiente" }],
+    outputs: [
+      { id: "payment_success", label: "Éxito" },
+      { id: "payment_failed", label: "Fallido" },
+      { id: "payment_pending", label: "Pendiente" },
+      { id: "error", label: "Error" },
+    ],
   },
   wait_confirmation: {
     type: "wait_confirmation",

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
 import { demoProject } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
@@ -12,7 +12,7 @@ import { demoProject } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
  * empty state, even when the DB is unavailable.
  */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -74,7 +74,7 @@ export async function GET() {
  * Creates a new project. Gracefully handles missing DATABASE_URL.
  */
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

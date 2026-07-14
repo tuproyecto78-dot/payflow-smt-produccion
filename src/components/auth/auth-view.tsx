@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Loader2,
   ArrowLeft,
+  Chrome,
 } from "lucide-react";
 
 export function AuthView() {
@@ -40,9 +41,11 @@ export function AuthView() {
     if (!result.ok) {
       setError(result.error || "Algo salió mal");
     } else {
-      // Login/signup succeeded — redirect to next or dashboard
+      // The server decides whether the account may enter the dashboard or
+      // must finish verification/subscription first.
       const params = new URLSearchParams(window.location.search);
-      const next = params.get("next") || "/dashboard";
+      const requested = params.get("next");
+      const next = result.next || requested || "/dashboard";
       window.location.href = next;
     }
   }
@@ -138,6 +141,28 @@ export function AuthView() {
             </p>
           </div>
 
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="w-full mb-5"
+            onClick={() => {
+              const params = new URLSearchParams(window.location.search);
+              const next = params.get("next") || "/dashboard";
+              window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
+            }}
+          >
+            <Chrome className="size-4 mr-2" />
+            Continuar con Google
+          </Button>
+
+          <div className="relative mb-5">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">o usa tu correo</span>
+            </div>
+          </div>
+
           <form onSubmit={onSubmit} className="space-y-5">
             {mode === "signup" && (
               <div className="space-y-2">
@@ -178,7 +203,7 @@ export function AuthView() {
               />
               {mode === "signup" && (
                 <p className="text-xs text-muted-foreground">
-                  Mínimo 6 caracteres.
+                  Mínimo 10 caracteres.
                 </p>
               )}
             </div>

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import {
   isDemoWorkflowId,
   getDemoWorkflowById,
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 import { supabaseUpdateWorkflow } from "@/lib/supabase-server";
+import { validateWorkflow } from "@/lib/workflow-validator";
+import type { FlowEdge, FlowNode } from "@/lib/workflow-types";
 
 async function getOwnedWorkflow(workflowId: string, userId: string) {
   const workflow = await db.workflow.findUnique({
@@ -17,7 +19,7 @@ async function getOwnedWorkflow(workflowId: string, userId: string) {
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -65,7 +67,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -139,6 +141,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
         };
       });
       data.edgesJson = JSON.stringify(sanitizedEdges);
+    }
+
+    if (sanitizedNodes && sanitizedEdges) {
+      const validation = validateWorkflow(
+        sanitizedNodes as FlowNode[],
+        sanitizedEdges as FlowEdge[]
+      );
+      if (!validation.valid) {
+        return NextResponse.json(
+          { error: "El flujo contiene conexiones inválidas.", validation },
+          { status: 422 }
+        );
+      }
     }
 
     // ─── Try Prisma (SQLite/local dev) first ─────────────────────────
@@ -239,7 +254,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

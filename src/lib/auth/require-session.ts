@@ -17,16 +17,17 @@
  */
 
 import "server-only";
-import { getSession, type SessionPayload } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { ROLES } from "@/lib/roles";
-import { isSupabaseConfigured, createServerClientHelper } from "@/lib/supabase";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import { isInternalAccessRole, loadAccessProfile } from "@/lib/auth/access-profile";
 
 export interface AuthenticatedUser {
   userId: string;
   email: string;
   name: string | null;
   role: string;
-  status: "active" | "pending" | "suspended" | "unknown";
+  status: "active" | "pending" | "suspended" | "cancelled" | "unknown";
   clientId: string | null;
 }
 
@@ -42,29 +43,25 @@ export interface AuthenticatedUser {
 export async function requireSession(): Promise<AuthenticatedUser | null> {
   const session = await getSession();
   if (!session) return null;
+  if (session.emailVerified !== true && process.env.NODE_ENV === "production") return null;
 
   // If Supabase is configured, try to enrich with profile data.
   if (isSupabaseConfigured) {
     try {
-      const supabase = await createServerClientHelper();
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role, status, client_id")
-        .eq("user_id", session.userId)
-        .single();
-
+      const profile = await loadAccessProfile(session.userId, session.role);
       if (profile) {
         return {
           userId: session.userId,
           email: session.email,
           name: session.name ?? null,
-          role: (profile.role as string) || session.role,
-          status: ((profile.status as string) || "active") as AuthenticatedUser["status"],
-          clientId: (profile.client_id as string) || null,
+          role: profile.role || session.role,
+          status: profile.status,
+          clientId: profile.clientId,
         };
       }
-    } catch {
-      // Profiles table not available — fall through to JWT-only.
+    } catch (error) {
+      console.error("[auth] Unable to load access profile", error instanceof Error ? error.message : "unknown");
+      if (process.env.NODE_ENV === "production") return null;
     }
   }
 
@@ -74,8 +71,8 @@ export async function requireSession(): Promise<AuthenticatedUser | null> {
     email: session.email,
     name: session.name ?? null,
     role: session.role,
-    status: "active",
-    clientId: null,
+    status: session.status || (isInternalAccessRole(session.role) ? "active" : "pending"),
+    clientId: session.clientId || null,
   };
 }
 
@@ -99,7 +96,7 @@ export async function requireAdmin(): Promise<AuthenticatedUser | null> {
 export async function requireActiveSession(): Promise<AuthenticatedUser | null> {
   const user = await requireSession();
   if (!user) return null;
-  if (user.status !== "active" && user.status !== "unknown") return null;
+  if (!isInternalAccessRole(user.role) && user.status !== "active") return null;
   return user;
 }
 

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { createPayment, type PaymentProvider, type PaymentStatus } from "@/lib/payments";
 import { rateLimit, getClientIP, isValidAmount, isValidProvider, isValidCurrency, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
+import { recordDurablePayment } from "@/lib/operational-telemetry";
 
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const ip = getClientIP(req);
@@ -36,6 +37,22 @@ export async function POST(req: Request) {
         status: result.payment_status, paymentLink: result.payment_link,
         rawResponse: JSON.stringify(result.raw_response),
       },
+    });
+
+    await recordDurablePayment({
+      userId: session.userId,
+      clientId: session.clientId,
+      sourceKey: `payment:${tx.id}`,
+      workflowId: workflowId || null,
+      workflowRunId: workflowRunId || null,
+      provider: result.payment_provider,
+      providerPaymentId: result.provider_payment_id,
+      orderId: result.order_id,
+      amount: result.payment_amount,
+      currency: result.payment_currency,
+      status: result.payment_status,
+      paymentLink: result.payment_link,
+      rawResponse: result.raw_response,
     });
 
     void logAudit({ userId: session.userId, action: "payment_created", entityType: "payment", entityId: tx.id, ipAddress: ip, metadata: { provider: result.payment_provider, amount: result.payment_amount, status: result.payment_status } });

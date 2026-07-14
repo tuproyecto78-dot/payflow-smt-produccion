@@ -31,7 +31,7 @@ function findNextNode(
   handle?: string | null
 ): FlowNode | null {
   const matching = edges.filter(
-    (e) => e.source === currentId && (handle ? e.sourceHandle === handle : true)
+    (e) => e.source === currentId && (handle ? (e.sourceHandle || "out") === handle : true)
   );
   // Prefer edges matching the explicit handle; fall back to any edge from this source.
   const edge = matching[0];
@@ -379,7 +379,13 @@ export async function executeWorkflow(
             message: `Verificación del pedido ${orderId || "(sin ID)"}: estado actual = ${currentStatus}`,
             durationMs: Date.now() - startedAt,
           });
-          nextHandle = "out";
+          nextHandle =
+            currentStatus === "payment_success" ||
+            currentStatus === "payment_failed" ||
+            currentStatus === "payment_pending" ||
+            currentStatus === "error"
+              ? currentStatus
+              : "error";
           break;
         }
 
@@ -751,15 +757,16 @@ export async function executeWorkflow(
         nodeId: node.id,
         nodeType: node.type as NodeType,
         nodeLabel: label,
-        status: "info",
-        message: `No hay conexión saliente desde el conector "${nextHandle}". Fluj finalizado.`,
+        status: "error",
+        message: `No hay conexión saliente desde el conector "${nextHandle}". El flujo es inválido.`,
       });
       return {
-        status: "success",
+        status: "failed",
         entries: ctx.log,
         variables: ctx.variables,
         whatsappMessages: ctx.whatsappMessages,
         finalNode: node.id,
+        error: `Salida sin conectar: ${nextHandle}`,
       };
     }
   }

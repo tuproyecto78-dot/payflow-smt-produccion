@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
 import {
   isSupabaseConfigured,
-  createServerClientHelper,
+  createServiceRoleClient,
 } from "@/lib/supabase";
+import { requireAdmin } from "@/lib/auth/require-session";
 import {
   rateLimit,
   getClientIP,
@@ -17,6 +17,36 @@ import {
   RATE_LIMIT_ERROR,
 } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
+
+function normalizeSupabaseRequest(row: Record<string, unknown>) {
+  return {
+    id: String(row.id || ""),
+    selectedPlan: String(row.selected_plan || ""),
+    selectedPlanLabel: row.selected_plan_label ? String(row.selected_plan_label) : null,
+    selectedPlanPrice: row.selected_plan_price == null ? null : Number(row.selected_plan_price),
+    fullName: String(row.full_name || ""),
+    countryCode: String(row.country_code || ""),
+    phoneNumber: String(row.phone_number || ""),
+    email: String(row.email || ""),
+    documentId: String(row.document_id || ""),
+    businessName: String(row.business_name || ""),
+    businessType: row.business_type ? String(row.business_type) : null,
+    country: row.country ? String(row.country) : null,
+    city: row.city ? String(row.city) : null,
+    paymentProvider: String(row.payment_provider || "payphone"),
+    payphoneBusinessStatus: String(row.payphone_business_status || "not_configured"),
+    payphonePreregistrationStatus: row.payphone_preregistration_status
+      ? String(row.payphone_preregistration_status)
+      : "not_requested",
+    hasPayphoneBusiness: String(row.has_payphone_business || "no"),
+    startPaymentsConfig: Boolean(row.start_payments_config),
+    consentAccepted: Boolean(row.consent_accepted),
+    subscriptionStatus: String(row.subscription_status || "pending_review"),
+    activatedClientId: row.activated_client_id ? String(row.activated_client_id) : null,
+    createdAt: String(row.created_at || ""),
+    updatedAt: String(row.updated_at || row.created_at || ""),
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -106,9 +136,11 @@ export async function POST(req: Request) {
 
     // Supabase path (kept for backward compatibility if configured).
     if (isSupabaseConfigured) {
-      const supabase = await createServerClientHelper();
+      const supabase = createServiceRoleClient();
       const { data, error } = await supabase.from("subscription_requests").insert({
         selected_plan: row.selectedPlan,
+        selected_plan_label: row.selectedPlanLabel,
+        selected_plan_price: row.selectedPlanPrice,
         full_name: row.fullName,
         country_code: row.countryCode,
         phone_number: row.phoneNumber,
@@ -168,17 +200,16 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  // Use our JWT session (NOT getSupabaseUser which reads a cookie we don't set).
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 });
 
   // If Supabase is configured, query subscription_requests from Supabase.
   if (isSupabaseConfigured) {
     try {
-      const supabase = await createServerClientHelper();
+      const supabase = createServiceRoleClient();
       const { data, error } = await supabase.from("subscription_requests").select("*").order("created_at", { ascending: false });
       if (error) throw error;
-      return NextResponse.json({ requests: data || [] });
+      return NextResponse.json({ requests: (data || []).map((row) => normalizeSupabaseRequest(row)) });
     } catch (err) {
       console.error("[subscriptions GET] Supabase query failed, falling back to Prisma:", err);
       // Fall through to Prisma

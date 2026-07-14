@@ -18,8 +18,8 @@ interface AuthState {
   loading: boolean;
   initialized: boolean;
   fetchUser: () => Promise<void>;
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  signup: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string; next?: string }>;
+  signup: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string; next?: string; requiresEmailConfirmation?: boolean }>;
   logout: () => Promise<void>;
 }
 
@@ -75,7 +75,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const data = await res.json();
       set({ user: safeUser(data.user), initialized: true });
-      return { ok: true };
+      return { ok: true, next: typeof data.next === "string" ? data.next : undefined };
     } catch (err) {
       set({ loading: false });
       const msg = err instanceof Error ? err.message : "Error desconocido";
@@ -102,7 +102,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const data = await res.json();
       set({ user: safeUser(data.user), initialized: true });
-      return { ok: true };
+      return {
+        ok: true,
+        next: typeof data.next === "string" ? data.next : undefined,
+        requiresEmailConfirmation: data.requiresEmailConfirmation === true,
+      };
     } catch (err) {
       set({ loading: false });
       const msg = err instanceof Error ? err.message : "Error desconocido";

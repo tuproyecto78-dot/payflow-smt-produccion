@@ -116,6 +116,53 @@ function createPaymentNode(params: FlowTemplateParams, x: number, y: number): Fl
   };
 }
 
+function paymentSequence(
+  params: FlowTemplateParams,
+  sourceId: string,
+  x: number,
+  y: number,
+  successMessage = "✅ Pago confirmado. ¡Gracias!"
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const step = 280;
+  const pay = createPaymentNode(params, x, y)!;
+  const waLink = waNode("WhatsApp link", "✅ Tu enlace de pago: {{payment_url}}", params.whatsapp_number, x + step, y);
+  const wait: FlowNode = {
+    id: nid(),
+    type: "wait_confirmation",
+    position: { x: x + step * 2, y },
+    data: { label: "Esperar webhook", timeout: 900 },
+  };
+  const verify: FlowNode = {
+    id: nid(),
+    type: "verify_payment",
+    position: { x: x + step * 3, y },
+    data: { label: "Verificar pago", orderId: "{{payment_order_id}}", outputVariable: "payment_status" },
+  };
+  const success = waNode("WhatsApp confirmado", successMessage, params.whatsapp_number, x + step * 4, y - 180);
+  const failed = waNode("WhatsApp rechazado", "❌ Pago rechazado. Puedes intentar nuevamente.", params.whatsapp_number, x + step * 4, y - 60);
+  const pending = waNode("WhatsApp pendiente", "⏳ Tu pago sigue pendiente. Te avisaremos cuando sea confirmado.", params.whatsapp_number, x + step * 4, y + 60);
+  const error = waNode("WhatsApp error", "⚠️ No pudimos verificar el pago. Un asesor revisará el caso.", params.whatsapp_number, x + step * 4, y + 180);
+  const end = endNode(x + step * 5, y);
+
+  return {
+    nodes: [pay, waLink, wait, verify, success, failed, pending, error, end],
+    edges: [
+      edge(sourceId, pay.id),
+      edge(pay.id, waLink.id, "out"),
+      edge(waLink.id, wait.id),
+      edge(wait.id, verify.id),
+      edge(verify.id, success.id, "payment_success"),
+      edge(verify.id, failed.id, "payment_failed"),
+      edge(verify.id, pending.id, "payment_pending"),
+      edge(verify.id, error.id, "error"),
+      edge(success.id, end.id),
+      edge(failed.id, end.id),
+      edge(pending.id, end.id),
+      edge(error.id, end.id),
+    ],
+  };
+}
+
 // ─── Template: Solo IA (sin pagos) ──────────────────────────────────
 function generateSoloIA(params: FlowTemplateParams): GeneratedFlow {
   const x = 60, y = 320, step = 280;
@@ -134,8 +181,7 @@ function generateSoloIA(params: FlowTemplateParams): GeneratedFlow {
       edge(start.id, wa1.id),
       edge(wa1.id, ai.id),
       edge(ai.id, waReply.id),
-      edge(waReply.id, end.id),
-      edge(ai.id, waNotify.id),
+      edge(waReply.id, waNotify.id),
       edge(waNotify.id, end.id),
     ],
   };
@@ -150,25 +196,16 @@ function generateVenta(params: FlowTemplateParams): GeneratedFlow {
   const start = startNode(x, y);
   const wa1 = waNode("WhatsApp bienvenida", params.welcome_message, params.whatsapp_number, x + step, y);
   const ai = aiNode(params, x + step * 2, y);
-  const pay = createPaymentNode(params, x + step * 3, y);
-  const waLink = waNode("WhatsApp link", "✅ Tu enlace de pago: {{payment_link}}", params.whatsapp_number, x + step * 4, y);
-  const waSuccess = waNode("WhatsApp confirmado", "✅ Pago confirmado. ¡Gracias!", params.whatsapp_number, x + step * 5, y - 80);
-  const waFailed = waNode("WhatsApp fallido", "❌ Pago rechazado. Intenta nuevamente.", params.whatsapp_number, x + step * 5, y + 80);
-  const end = endNode(x + step * 6, y);
+  const payment = paymentSequence(params, ai.id, x + step * 3, y);
 
   return {
     name: "Venta por WhatsApp",
     description: `Venta con ${params.payment_provider} para ${params.business_name}`,
-    nodes: [start, wa1, ai, pay!, waLink, waSuccess, waFailed, end],
+    nodes: [start, wa1, ai, ...payment.nodes],
     edges: [
       edge(start.id, wa1.id),
       edge(wa1.id, ai.id),
-      edge(ai.id, pay!.id),
-      edge(pay!.id, waLink.id, "payment_pending"),
-      edge(waLink.id, waSuccess.id, "payment_success"),
-      edge(waLink.id, waFailed.id, "payment_failed"),
-      edge(waSuccess.id, end.id),
-      edge(waFailed.id, end.id),
+      ...payment.edges,
     ],
   };
 }
@@ -224,20 +261,15 @@ function generateAgendaCobro(params: FlowTemplateParams): GeneratedFlow {
   ];
 
   if (params.payment_required && params.payment_provider !== "none") {
-    const pay = createPaymentNode(params, x + step * 4, y);
-    const waLink = waNode("WhatsApp link", "✅ Tu enlace de pago: {{payment_link}}", params.whatsapp_number, x + step * 5, y - 80);
-    const waSuccess = waNode("WhatsApp confirmado", "✅ Pago confirmado. Cita garantizada.", params.whatsapp_number, x + step * 6, y - 80);
-    const waFailed = waNode("WhatsApp fallido", "❌ Pago rechazado.", params.whatsapp_number, x + step * 6, y + 80);
-    const end = endNode(x + step * 7, y);
-    nodes.push(pay!, waLink, waSuccess, waFailed, end);
-    edges.push(
-      edge(waCita.id, pay!.id),
-      edge(pay!.id, waLink.id, "payment_pending"),
-      edge(waLink.id, waSuccess.id, "payment_success"),
-      edge(waLink.id, waFailed.id, "payment_failed"),
-      edge(waSuccess.id, end.id),
-      edge(waFailed.id, end.id),
+    const payment = paymentSequence(
+      params,
+      waCita.id,
+      x + step * 4,
+      y,
+      "✅ Pago confirmado. Tu cita quedó garantizada."
     );
+    nodes.push(...payment.nodes);
+    edges.push(...payment.edges);
   } else {
     const end = endNode(x + step * 4, y);
     nodes.push(end);
@@ -268,20 +300,9 @@ function generateAgenteCompleto(params: FlowTemplateParams): GeneratedFlow {
   ];
 
   if (params.payment_required && params.payment_provider !== "none") {
-    const pay = createPaymentNode(params, x + step * 4, y - 100);
-    const waLink = waNode("WhatsApp link", "✅ Tu enlace de pago: {{payment_link}}", params.whatsapp_number, x + step * 5, y - 100);
-    const waPayOk = waNode("WhatsApp pago OK", "✅ Pago confirmado. ¡Gracias!", params.whatsapp_number, x + step * 6, y - 100);
-    const waPayFail = waNode("WhatsApp pago fail", "❌ Pago rechazado.", params.whatsapp_number, x + step * 6, y);
-    const end = endNode(x + step * 7, y);
-    nodes.push(pay!, waLink, waPayOk, waPayFail, end);
-    edges.push(
-      edge(waReply.id, pay!.id),
-      edge(pay!.id, waLink.id, "payment_pending"),
-      edge(waLink.id, waPayOk.id, "payment_success"),
-      edge(waLink.id, waPayFail.id, "payment_failed"),
-      edge(waPayOk.id, end.id),
-      edge(waPayFail.id, end.id),
-    );
+    const payment = paymentSequence(params, waReply.id, x + step * 4, y - 100);
+    nodes.push(...payment.nodes);
+    edges.push(...payment.edges);
   } else {
     const end = endNode(x + step * 4, y);
     nodes.push(end);

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { GENERIC_ERROR } from "@/lib/security";
 import { logAuditFromRequest } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
           currency: string;
           status: string;
           paymentLink: string | null;
-          mode: string;
+          providerMode: string | null;
           createdAt: Date;
           updatedAt: Date;
         }
@@ -52,7 +52,7 @@ export async function GET(req: Request) {
           currency: true,
           status: true,
           paymentLink: true,
-          mode: true,
+          providerMode: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -69,7 +69,7 @@ export async function GET(req: Request) {
           currency: true,
           status: true,
           paymentLink: true,
-          mode: true,
+          providerMode: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -88,13 +88,13 @@ export async function GET(req: Request) {
     // for traceability, even when the lookup was performed by provider_payment_id.
     void logAuditFromRequest(req, {
       userId: session.userId,
-      actorRole: session.role === "admin" ? "admin" : "user",
       action: "payment_status_checked",
       entityType: "payment",
       entityId: paymentId || providerPaymentId || tx.id,
-      paymentTransactionId: tx.id,
-      status: "success",
       metadata: {
+        actor_role: session.role,
+        payment_transaction_id: tx.id,
+        audit_status: "success",
         provider: tx.provider,
         current_status: tx.status,
         looked_up_by: paymentId ? "payment_id" : "provider_payment_id",
@@ -111,7 +111,7 @@ export async function GET(req: Request) {
       currency: tx.currency,
       status: tx.status,
       payment_link: tx.paymentLink,
-      mode: tx.mode,
+      mode: tx.providerMode,
       created_at: tx.createdAt,
       updated_at: tx.updatedAt,
     });

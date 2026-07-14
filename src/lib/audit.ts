@@ -2,6 +2,7 @@ import { db } from "./db";
 
 export interface AuditEntry {
   userId?: string | null;
+  clientId?: string | null;
   action: string;
   entityType?: string | null;
   entityId?: string | null;
@@ -15,6 +16,7 @@ export async function logAudit(entry: AuditEntry): Promise<void> {
     await db.auditLog.create({
       data: {
         userId: entry.userId || null,
+        clientId: entry.clientId || null,
         action: entry.action,
         entityType: entry.entityType || null,
         entityId: entry.entityId || null,
