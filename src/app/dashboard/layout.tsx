@@ -24,6 +24,12 @@ import {
   Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FlowAssistantPanel, type AISuggestion } from "@/components/dashboard/flow-assistant-panel";
+
+interface AssistantContext {
+  currentStep: string;
+  canApply: boolean;
+}
 
 const NAV_ITEMS = [
   { key: "dashboard", label: "Panel", href: "/dashboard", icon: LayoutDashboard, adminOnly: false },
@@ -46,6 +52,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, initialized, fetchUser, logout } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantContext, setAssistantContext] = useState<AssistantContext>({
+    currentStep: "platform",
+    canApply: false,
+  });
 
   // Fetch user once on mount
   useEffect(() => {
@@ -59,6 +70,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.location.href = `/login?next=${next}`;
     }
   }, [initialized, user, pathname]);
+
+  useEffect(() => {
+    function handleContext(event: Event) {
+      const detail = (event as CustomEvent<AssistantContext>).detail;
+      if (detail) setAssistantContext(detail);
+    }
+
+    window.addEventListener("payflow:assistant-context", handleContext);
+    return () => window.removeEventListener("payflow:assistant-context", handleContext);
+  }, []);
+
+  function applyAssistantSuggestions(suggestions: AISuggestion) {
+    window.dispatchEvent(
+      new CustomEvent("payflow:assistant-apply", { detail: suggestions })
+    );
+  }
 
   // Loading state
   if (!initialized || !user) {
@@ -138,6 +165,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
+
+      <FlowAssistantPanel
+        open={assistantOpen}
+        onOpen={() => setAssistantOpen(true)}
+        onClose={() => setAssistantOpen(false)}
+        currentStep={assistantContext.currentStep}
+        canApply={assistantContext.canApply}
+        onApply={applyAssistantSuggestions}
+      />
     </div>
   );
 }

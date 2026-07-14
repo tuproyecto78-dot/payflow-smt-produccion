@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, Send, Loader2, X, Sparkles, Check, RefreshCw } from "lucide-react";
+import { Bot, Send, Loader2, X, Check, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 export interface AISuggestion {
@@ -25,7 +25,8 @@ interface FlowAssistantPanelProps {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  onApply: (suggestions: AISuggestion) => void;
+  onApply?: (suggestions: AISuggestion) => void;
+  canApply?: boolean;
   currentStep?: string;
 }
 
@@ -50,13 +51,14 @@ export function FlowAssistantPanel({
   onOpen,
   onClose,
   onApply,
+  canApply = false,
   currentStep,
 }: FlowAssistantPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
-        "¡Hola! Soy el Asistente PayFlow. Te ayudaré a crear un flujo de WhatsApp paso a paso. Primero dime: ¿qué tipo de negocio tienes y qué quieres automatizar?",
+        "¡Hola! Soy el Asistente IA de PayFlow. Estoy disponible en todo el panel para ayudarte con flujos, WhatsApp, automatizaciones y pagos. ¿Qué necesitas hacer?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -178,6 +180,7 @@ export function FlowAssistantPanel({
   }
 
   function applySuggestions(suggestions: AISuggestion) {
+    if (!onApply) return;
     onApply(suggestions);
     toast.success("Sugerencias aplicadas al formulario.");
     onClose();
@@ -190,12 +193,18 @@ export function FlowAssistantPanel({
       <Button
         type="button"
         onClick={onOpen}
-        className="fixed bottom-5 right-5 z-[100] h-14 rounded-full bg-purple-600 px-4 text-white shadow-2xl shadow-purple-950/30 ring-4 ring-background/80 hover:bg-purple-700 sm:px-5"
+        className="fixed bottom-5 right-5 z-[100] h-auto min-h-16 min-w-[190px] rounded-2xl border border-white/20 bg-[#071a33] px-3 py-2.5 text-white shadow-2xl shadow-slate-950/35 ring-4 ring-white/80 hover:bg-[#0b2a52]"
         aria-label="Abrir Asistente PayFlow"
         title="Abrir Asistente PayFlow"
       >
-        <Sparkles className="size-5 sm:mr-2" />
-        <span className="hidden sm:inline">Asistente PayFlow</span>
+        <span className="relative flex size-11 shrink-0 items-center justify-center rounded-xl bg-white text-[#071a33] shadow-inner">
+          <Bot className="size-7" strokeWidth={2.2} />
+          <span className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-[#071a33] bg-emerald-400" />
+        </span>
+        <span className="flex flex-col items-start leading-tight">
+          <span className="text-sm font-bold">Asistente IA</span>
+          <span className="mt-0.5 text-[11px] font-medium text-blue-100">PayFlow · En línea</span>
+        </span>
       </Button>,
       document.body
     );
@@ -206,21 +215,22 @@ export function FlowAssistantPanel({
       role="dialog"
       aria-modal="false"
       aria-label="Asistente PayFlow"
-      className="fixed inset-x-3 bottom-3 top-3 z-[110] flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:inset-x-auto sm:bottom-5 sm:right-5 sm:top-auto sm:h-[min(720px,calc(100vh-2.5rem))] sm:w-[430px]"
+      className="fixed inset-x-3 bottom-3 top-3 z-[110] flex flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:top-auto sm:h-[min(720px,calc(100vh-2.5rem))] sm:w-[430px]"
     >
         {/* Header */}
-        <div className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#071a33] px-4 py-3 text-white">
           <div className="flex items-center gap-2">
-            <div className="size-8 rounded-lg bg-purple-100 dark:bg-purple-500/20 flex items-center justify-center">
-              <Bot className="size-5 text-purple-600 dark:text-purple-300" />
+            <div className="relative flex size-10 items-center justify-center rounded-xl bg-white text-[#071a33]">
+              <Bot className="size-6" strokeWidth={2.2} />
+              <span className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-[#071a33] bg-emerald-400" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold">Asistente PayFlow</h3>
+              <h3 className="text-sm font-bold">Asistente IA PayFlow</h3>
               <div className="flex items-center gap-1.5">
                 {aiStatus ? (
                   <>
                     <span className={`size-1.5 rounded-full ${aiStatus.configured && !quotaExceeded ? "bg-emerald-500" : quotaExceeded ? "bg-amber-500" : "bg-amber-500"}`} />
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[10px] text-blue-100/80">
                       {aiStatus.configured && !quotaExceeded
                         ? `IA: ${aiStatus.provider === "groq" ? "Groq conectado" : aiStatus.provider === "gemini" ? "Gemini conectado" : aiStatus.provider === "nim" ? "NVIDIA NIM conectado" : aiStatus.provider}`
                         : quotaExceeded
@@ -231,7 +241,7 @@ export function FlowAssistantPanel({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-5 text-[9px] px-1.5 ml-1 text-purple-600"
+                        className="ml-1 h-5 px-1.5 text-[9px] text-white hover:bg-white/10 hover:text-white"
                         onClick={retryAI}
                         disabled={retrying}
                       >
@@ -245,12 +255,12 @@ export function FlowAssistantPanel({
                     )}
                   </>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground">Verificando IA…</span>
+                  <span className="text-[10px] text-blue-100/80">Verificando IA…</span>
                 )}
               </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="size-8" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="size-8 text-white hover:bg-white/10 hover:text-white" onClick={onClose}>
             <X className="size-4" />
           </Button>
         </div>
@@ -265,8 +275,8 @@ export function FlowAssistantPanel({
               <div
                 className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                   msg.role === "user"
-                    ? "bg-purple-500 text-white"
-                    : "bg-muted text-foreground"
+                    ? "bg-[#0b2a52] text-white"
+                    : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-50"
                 }`}
               >
                 <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -303,14 +313,16 @@ export function FlowAssistantPanel({
                           Pago: <strong>{msg.suggestions.paymentProvider}</strong>
                         </div>
                       )}
-                      <Button
-                        size="sm"
-                        className="w-full h-7 text-xs mt-2 bg-emerald-500 hover:bg-emerald-600 text-white"
-                        onClick={() => applySuggestions(msg.suggestions!)}
-                      >
-                        <Check className="size-3 mr-1" />
-                        Aplicar sugerencias
-                      </Button>
+                      {canApply && onApply && (
+                        <Button
+                          size="sm"
+                          className="mt-2 h-7 w-full bg-[#0b2a52] text-xs text-white hover:bg-[#123d70]"
+                          onClick={() => applySuggestions(msg.suggestions!)}
+                        >
+                          <Check className="mr-1 size-3" />
+                          Aplicar sugerencias al flujo
+                        </Button>
+                      )}
                     </div>
                   )}
               </div>
@@ -362,7 +374,7 @@ export function FlowAssistantPanel({
               size="icon"
               onClick={() => sendMessage(input)}
               disabled={loading || !input.trim()}
-              className="bg-purple-500 hover:bg-purple-600 text-white shrink-0"
+              className="shrink-0 bg-[#071a33] text-white hover:bg-[#0b2a52]"
             >
               <Send className="size-4" />
             </Button>
