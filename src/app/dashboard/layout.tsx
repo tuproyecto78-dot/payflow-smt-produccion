@@ -11,8 +11,6 @@ import {
   History,
   Inbox,
   CreditCard,
-  Bot,
-  CalendarClock,
   Shield,
   Lock,
   LogOut,
@@ -42,9 +40,7 @@ const NAV_ITEMS = [
   { key: "historial", label: "Historial", href: "/dashboard/historial", icon: ScrollText, adminOnly: true },
   { key: "arquitecto", label: "Arquitecto IA", href: "/dashboard/arquitecto", icon: Brain, adminOnly: true },
   { key: "payphone", label: "PayPhone", href: "/dashboard/payphone/pruebas", icon: CreditCard, adminOnly: true },
-  { key: "agent", label: "Agente IA", href: "/dashboard", icon: Bot, adminOnly: false },
-  { key: "agenda", label: "Agenda", href: "/dashboard", icon: CalendarClock, adminOnly: false },
-  { key: "legal", label: "Legal", href: "/dashboard", icon: Shield, adminOnly: true },
+  { key: "legal", label: "Legal", href: "/dashboard/legal", icon: Shield, adminOnly: true },
   { key: "configuracion", label: "Configuración", href: "/dashboard/configuracion", icon: Settings, adminOnly: false },
 ];
 
