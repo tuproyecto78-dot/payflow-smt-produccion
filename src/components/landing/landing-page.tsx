@@ -28,6 +28,8 @@ import {
   Cpu,
   Layers,
   Plug,
+  Smartphone,
+  QrCode,
 } from "lucide-react";
 import { SubscriptionForm } from "./subscription-form";
 import { useLandingAnimations } from "./use-landing-animations";
@@ -375,50 +377,9 @@ export function LandingPage({ onLogin }: LandingPageProps) {
               </div>
             </div>
 
-            {/* Right floating mockup */}
+            {/* Right visual composition — phone + metric cards + QR */}
             <div data-hero-mockup className="lg:col-span-5 relative hidden lg:block">
-              <div className="relative">
-                <div className="absolute -inset-8 bg-gradient-to-br from-emerald-500/20 via-transparent to-teal-500/10 rounded-[2.5rem] blur-3xl animate-pf-pulse-soft" />
-                <div className="relative rounded-3xl overflow-hidden border border-white/10 shadow-2xl shadow-emerald-900/40 backdrop-blur-sm will-change-transform">
-                  <img
-                    src="/platform-mockup-modern.png"
-                    alt="Demo de PayFlow SMT: cobro por WhatsApp con IA"
-                    className="w-full h-auto object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#061426]/60 via-transparent to-transparent" />
-                </div>
-
-                {/* Floating badge cards */}
-                <div
-                  data-float-card-1
-                  className="absolute -top-4 -left-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 p-3 shadow-xl shadow-emerald-900/30 will-change-transform"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                      <CheckCircle2 className="size-4 text-emerald-400" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-white/60 leading-none">Pago confirmado</p>
-                      <p className="text-xs font-semibold text-white leading-tight mt-0.5">$49.99</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  data-float-card-2
-                  className="absolute -bottom-4 -right-4 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/15 p-3 shadow-xl shadow-emerald-900/30 will-change-transform"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                      <Bot className="size-4 text-emerald-400" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-white/60 leading-none">Agente IA</p>
-                      <p className="text-xs font-semibold text-white leading-tight mt-0.5">Activo</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <HeroVisual />
             </div>
           </div>
         </div>
@@ -962,6 +923,157 @@ export function LandingPage({ onLogin }: LandingPageProps) {
 }
 
 // ---------- Sub-components ----------
+
+function HeroVisual() {
+  return (
+    <div className="relative w-full max-w-md mx-auto">
+      {/* Ambient glow */}
+      <div className="absolute -inset-10 bg-gradient-to-br from-emerald-500/25 via-transparent to-teal-500/15 rounded-[3rem] blur-3xl animate-pf-pulse-soft pointer-events-none" />
+
+      {/* Phone mockup */}
+      <div data-hero-phone className="relative mx-auto w-[240px] will-change-transform">
+        <div className="relative rounded-[2.2rem] border-[3px] border-white/15 bg-[#0a1628] shadow-2xl shadow-emerald-900/50 overflow-hidden">
+          {/* Notch */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-5 bg-[#0a1628] rounded-b-2xl z-20 border-x border-b border-white/10" />
+          {/* Screen */}
+          <div className="relative aspect-[9/16] bg-gradient-to-b from-[#0d1f36] to-[#061426] px-3 pt-7 pb-3 flex flex-col">
+            {/* WhatsApp header */}
+            <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+              <div className="size-7 rounded-full bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
+                <MessageCircle className="size-3.5 text-emerald-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-semibold text-white leading-none">Tu Negocio</p>
+                <p className="text-[8px] text-emerald-400 leading-none mt-0.5">en línea</p>
+              </div>
+              <div className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            </div>
+
+            {/* Chat bubbles */}
+            <div className="flex-1 flex flex-col gap-1.5 py-2 overflow-hidden">
+              <div className="self-start max-w-[80%] rounded-lg rounded-tl-sm bg-white/8 px-2 py-1.5">
+                <p className="text-[8px] text-white/80 leading-tight">Hola, quiero pagar mi pedido</p>
+              </div>
+              <div className="self-end max-w-[80%] rounded-lg rounded-tr-sm bg-emerald-600/40 px-2 py-1.5">
+                <p className="text-[8px] text-white leading-tight">¡Claro! Generando tu link de pago…</p>
+              </div>
+
+              {/* Payment success card */}
+              <div className="self-end max-w-[88%] rounded-xl rounded-tr-sm bg-gradient-to-br from-emerald-500/25 to-emerald-600/10 border border-emerald-400/30 px-2.5 py-2 mt-1">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div className="size-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/40">
+                    <CheckCircle2 className="size-3 text-white" />
+                  </div>
+                  <p className="text-[9px] font-bold text-emerald-300">Pago exitoso</p>
+                </div>
+                <p className="text-[8px] text-white/60 leading-none">Pago a Tu Negocio</p>
+                <p className="text-base font-bold text-white leading-tight mt-0.5">$49.99 <span className="text-[9px] font-normal text-white/50">USD</span></p>
+                <div className="flex items-center gap-1 mt-1.5 pt-1.5 border-t border-white/10">
+                  <CreditCard className="size-2.5 text-white/40" />
+                  <p className="text-[7px] text-white/40 tracking-wider">•••• 1234</p>
+                  <span className="ml-auto text-[7px] text-emerald-400 font-medium">Confirmado</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Input bar */}
+            <div className="flex items-center gap-1.5 pt-1.5 border-t border-white/5">
+              <div className="flex-1 h-5 rounded-full bg-white/5 border border-white/10" />
+              <div className="size-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                <MessageCircle className="size-2.5 text-white" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating metric card 1 — Ventas de hoy */}
+      <div
+        data-float-card-1
+        className="absolute -top-2 -left-10 w-[150px] rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 p-3 shadow-2xl shadow-emerald-900/40 will-change-transform"
+      >
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[9px] text-white/60 font-medium uppercase tracking-wide">Ventas de hoy</p>
+          <TrendingUp className="size-3 text-emerald-400" />
+        </div>
+        <p className="text-lg font-bold text-white leading-none">$3,892<span className="text-xs text-white/50">.45</span></p>
+        {/* mini bar chart */}
+        <div className="flex items-end gap-0.5 h-4 mt-1.5">
+          {[40, 65, 50, 80, 55, 90, 70].map((h, i) => (
+            <div key={i} className="flex-1 rounded-sm bg-emerald-400/60" style={{ height: `${h}%` }} />
+          ))}
+        </div>
+        <p className="text-[8px] text-emerald-400 mt-1 font-medium">▲ 12% vs ayer</p>
+      </div>
+
+      {/* Floating metric card 2 — Transacciones */}
+      <div
+        data-float-card-2
+        className="absolute top-[38%] -right-8 w-[140px] rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 p-3 shadow-2xl shadow-emerald-900/40 will-change-transform"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <div className="size-7 rounded-lg bg-emerald-500/25 flex items-center justify-center">
+            <CheckCircle2 className="size-3.5 text-emerald-400" />
+          </div>
+          <p className="text-[9px] text-white/60 font-medium uppercase tracking-wide leading-none">Transacciones</p>
+        </div>
+        <p className="text-2xl font-bold text-white leading-none mt-1">128</p>
+        <p className="text-[8px] text-white/50 mt-1">Confirmadas hoy</p>
+      </div>
+
+      {/* Floating metric card 3 — Métodos de pago */}
+      <div
+        data-float-card-3
+        className="absolute -bottom-4 -left-6 w-[160px] rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 p-3 shadow-2xl shadow-emerald-900/40 will-change-transform"
+      >
+        <p className="text-[9px] text-white/60 font-medium uppercase tracking-wide mb-2">Métodos de pago</p>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <CreditCard className="size-2.5 text-emerald-400 shrink-0" />
+            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full bg-emerald-400 rounded-full" style={{ width: "60%" }} />
+            </div>
+            <span className="text-[8px] text-white/70 font-medium">60%</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Smartphone className="size-2.5 text-teal-400 shrink-0" />
+            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full bg-teal-400 rounded-full" style={{ width: "30%" }} />
+            </div>
+            <span className="text-[8px] text-white/70 font-medium">30%</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <QrCode className="size-2.5 text-cyan-400 shrink-0" />
+            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full bg-cyan-400 rounded-full" style={{ width: "10%" }} />
+            </div>
+            <span className="text-[8px] text-white/70 font-medium">10%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* QR code card */}
+      <div
+        data-float-card-4
+        className="absolute -bottom-2 -right-2 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 p-2.5 shadow-2xl shadow-emerald-900/40 will-change-transform"
+      >
+        <div className="size-16 rounded-lg bg-white p-1.5 flex items-center justify-center">
+          {/* CSS QR pattern */}
+          <div
+            className="size-full"
+            style={{
+              backgroundImage:
+                "linear-gradient(45deg, #061426 25%, transparent 25%), linear-gradient(-45deg, #061426 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #061426 75%), linear-gradient(-45deg, transparent 75%, #061426 75%)",
+              backgroundSize: "6px 6px",
+              backgroundPosition: "0 0, 0 3px, 3px -3px, -3px 0px",
+            }}
+          />
+        </div>
+        <p className="text-[7px] text-white/70 font-semibold text-center mt-1 tracking-wide">PAGA AQUÍ CON QR</p>
+      </div>
+    </div>
+  );
+}
 
 function NavPill({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
   return (

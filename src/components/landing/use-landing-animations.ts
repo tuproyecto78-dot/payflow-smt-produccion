@@ -71,6 +71,22 @@ export function useLandingAnimations(rootRef: React.RefObject<HTMLDivElement | n
           const float2 = q("[data-float-card-2]")[0] as HTMLElement | undefined;
           if (float2) gsap.to(float2, { y: 10, duration: 2.6, ease: "sine.inOut", yoyo: true, repeat: -1, delay: 1.4 });
 
+          const float3 = q("[data-float-card-3]")[0] as HTMLElement | undefined;
+          if (float3) gsap.to(float3, { y: -8, duration: 2.4, ease: "sine.inOut", yoyo: true, repeat: -1, delay: 1.6 });
+
+          const float4 = q("[data-float-card-4]")[0] as HTMLElement | undefined;
+          if (float4) gsap.to(float4, { y: 8, duration: 2.8, ease: "sine.inOut", yoyo: true, repeat: -1, delay: 1.8 });
+
+          // Phone subtle tilt on scroll
+          const heroPhone = q("[data-hero-phone]")[0] as HTMLElement | undefined;
+          if (heroPhone)
+            gsap.to(heroPhone, {
+              rotate: 1.5,
+              yPercent: -6,
+              ease: "none",
+              scrollTrigger: { trigger: heroPhone.closest("section"), start: "top top", end: "bottom top", scrub: 1.5 },
+            });
+
           // ---- TRUST STATS ----
           const statCards = q("[data-stat-card]") as HTMLElement[];
           statCards.forEach((card, i) =>

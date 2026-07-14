@@ -1530,3 +1530,40 @@ Files modified: 4
 - src/app/layout.tsx (SEO completo + JSON-LD)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: landing-hero-match-reference
+Agent: main agent (Z.ai Code)
+Task: El usuario reportó "no hay ningun cambio sigue igual" con una imagen de referencia. Análisis VLM: la imagen era un DISEÑO DE REFERENCIA deseado (teléfono con "Pago exitoso $49.99" + tarjetas flotantes "Ventas de hoy $3,892.45", "Transacciones 128", "Métodos de pago" + QR "PAGA AQUÍ CON QR"). El rediseño anterior usaba una imagen abstracta de IA, no este concepto. Hubo que reconstruir el hero visual con HTML/CSS puro.
+
+Work Log:
+- Verifiqué con Agent Browser + VLM que el rediseño anterior SÍ estaba en vivo (VLM confirmó: hero con mockup flotante, tarjetas de capacidades, barra de progreso verde, navbar glassmorphism). El problema era que el concepto visual no coincidía con la referencia del usuario.
+- Análisis VLM de la imagen de referencia del usuario: teléfono mostrando WhatsApp con "Pago exitoso $49.99 USD", tarjetas flotantes "Ventas de hoy $3,892.45" (bar chart), "Transacciones 128", "Métodos de pago" (60%/30%/10%), QR "PAGA AQUÍ CON QR".
+- Reemplacé el bloque del mockup del hero (imagen AI abstracta + 2 floating cards simples) por un componente HeroVisual() construido 100% en HTML/CSS:
+  - Phone mockup (240px) con notch, pantalla de WhatsApp: header "Tu Negocio" con avatar esmeralda + "en línea", 2 chat bubbles, tarjeta "Pago exitoso" con $49.99 USD + "•••• 1234" + "Confirmado", input bar inferior
+  - Floating card 1 (top-left): "Ventas de hoy $3,892.45" + mini bar chart de 7 barras + "▲ 12% vs ayer"
+  - Floating card 2 (right): "Transacciones 128" + "Confirmadas hoy"
+  - Floating card 3 (bottom-left): "Métodos de pago" con 3 barras de progreso (Tarjeta 60%, Mobile 30%, QR 10%)
+  - Floating card 4 (bottom-right): QR code (patrón CSS) + "PAGA AQUÍ CON QR"
+  - Ambient glow esmeralda con animate-pf-pulse-soft
+- Añadí imports Smartphone, QrCode de lucide-react (TrendingUp ya existía — corregí import duplicado que causó error de compilación).
+- Actualicé use-landing-animations.ts: añadí animaciones GSAP para float-card-3, float-card-4 (yoyo infinito) y tilt del teléfono con parallax en scroll.
+- Corregí error de compilación "the name TrendingUp is defined multiple times" eliminando el duplicado del import.
+
+Verification (Agent Browser + VLM end-to-end):
+- GET / 200 sin errores de compilación tras corregir el import duplicado
+- VLM confirma el nuevo hero visual en vivo: "teléfono móvil mostrando WhatsApp con 'Pago exitoso $49.99' (verde). Flotan tarjetas con 'Ventas de hoy $3,892.45', 'Transacciones 128' y 'Métodos de pago'. También hay un código QR con 'PAGA AQUÍ CON QR'. Diseño moderno verde/azul/gris."
+- VLM comparación referencia vs vivo: "Sí, se parecen en el concepto del hero (teléfono con pago exitoso + tarjetas de métricas + QR)"
+- bun run lint: 0 errores, 0 warnings
+
+Stage Summary:
+- El hero de la landing ahora coincide con el concepto visual de la referencia del usuario: teléfono con pantalla de WhatsApp mostrando "Pago exitoso $49.99" + 4 tarjetas flotantes glassmorphism (Ventas de hoy $3,892.45 con bar chart, Transacciones 128, Métodos de pago con barras de progreso, QR "PAGA AQUÍ CON QR") construidas en HTML/CSS puro (nítidas, animadas, sin artefactos de IA).
+- Las animaciones GSAP dan flotación infinita a las 4 tarjetas + tilt del teléfono con parallax en scroll.
+- El resto de la landing (navbar glassmorphism con pills, barra de progreso de scroll, trust bar, 6 capacidades, cómo funciona, beneficios, precios $49.99/$249, nosotros, CTA, footer) se mantiene igual.
+- Toda la estructura SaaS, auth, dashboard, APIs, PayPhone, IA providers SIN MODIFICAR.
+
+Files modified: 2
+- src/components/landing/landing-page.tsx (HeroVisual component + imports)
+- src/components/landing/use-landing-animations.ts (float-card-3/4 + phone tilt)
+
+`bun run lint` → exit 0, no errors, no warnings.
