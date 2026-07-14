@@ -1420,3 +1420,48 @@ Stage Summary:
 - A new visual editor route /dashboard/flujos/[id] opens the existing ReactFlow-based editor with the demo flow loaded.
 - The dashboard structure (sidebar, stat cards, project section) is preserved — only the project cards now show their workflows with open/simulator/execute buttons.
 - Both demo flows ("Cobro por WhatsApp con IA" + "Flujo demo WhatsApp + IA + PayPhone") auto-seed on every admin page load, so they appear even on fresh Vercel deployments.
+
+---
+Task ID: auth-flow-full
+Agent: full-stack-developer
+Task: Implement the full PayFlow SMT authentication flow (Google OAuth, email verification, account-status page, applicant gating).
+
+Work Log:
+- Created `src/app/api/auth/google/route.ts` — POST endpoint that initiates Google OAuth via Supabase. Uses `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (server-side only). Calls `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: "${origin}/auth/callback?next=${next}", skipBrowserRedirect: true } })` and returns `{ url }`. `next` defaults to `/cuenta/estado`. No Client ID / Client Secret in code.
+- Created `src/app/auth/callback/route.ts` — GET route that handles the Supabase OAuth callback. Exchanges `code` for a session, fetches the user, upserts a `profiles` row (role=applicant, status=pending if new) using `maybeSingle()` to detect existing profiles. Mints a PayFlow JWT session token via `createSessionToken` and sets the session cookie. Redirects to `next` only if the user already has `status=active`, otherwise redirects to `/cuenta/estado`. Error redirects go to `/login?error=...`.
+- Created `src/app/verificar-correo/page.tsx` — simple client page telling the user to check their email. Uses shadcn/ui Card with `MailCheck` icon, "Revisa tu bandeja de entrada y también la carpeta de spam." copy, and a "Volver a iniciar sesión" button linking to `/login`. Dark theme compatible (uses emerald/amber tokens with `dark:` variants).
+- Created `src/app/cuenta/estado/page.tsx` — client page that fetches `/api/auth/me` and `/api/subscriptions` in parallel, matches the subscription request to the user's email, and shows: email, plan solicitado, precio, negocio, and a status badge (`pending_review` / `activated` / `active` / `rejected` / `pending`). Conditional messages: amber "Tu solicitud está en revisión. Te contactaremos pronto." (pending), emerald "¡Tu cuenta está activa!" with "Ir al dashboard" button (active/activated), red "Tu solicitud fue rechazada. Contacta a soporte." (rejected). "Cerrar sesión" button calls `/api/auth/logout` then redirects to `/login`. Reintentar button on fetch error.
+- Updated `src/components/auth/auth-view.tsx` — added "Continuar con Google" button below the form with a `Separator` + "o continúa con" divider above it. The Google button POSTs to `/api/auth/google?next=...` and follows the returned `url` (top-level navigation). URL params parsed once via `readUrlParams()` helper (lazy initial state, no setState-in-effect lint): `?mode=signup` defaults the form to signup; `?subscription=completed` shows an emerald Alert banner "¡Solicitud enviada! Regístrate o inicia sesión para continuar.". Password hint changed from "Mínimo 6 caracteres." to "Mínimo 10 caracteres." with a matching client-side guard. After signup success, redirects to `/verificar-correo` (no session token). After login success, redirects to `next` param (default `/dashboard`), or to `/cuenta/estado` if backend returns `subscriptionStatus: "pending"`. Added a small inline multi-color Google SVG icon.
+- Updated `src/app/api/auth/signup/route.ts` — password minimum raised from 6 to 10 chars (with Spanish error). After Supabase signup, NO session token is created — user must verify email first. Returns `{ ok: true, needsVerification: true }` for both Supabase and Prisma paths. All error messages in Spanish (already-registered, password-requirements, invalid-email mappings for Supabase errors).
+- Updated `src/app/api/auth/login/route.ts` — both Supabase and Prisma paths now read the user's `profile.status` and return `{ user: {...}, subscriptionStatus: "pending" }` when the status is NOT `active`. When the status IS `active`, returns the normal response (no `subscriptionStatus` field). Switched Supabase profile query from `.single()` to `.maybeSingle()` to avoid throwing when the profile row is absent. Env-admin mode is unchanged (always active). `clientStatus` is now populated in the user object so the Zustand store reflects the true status.
+- Updated `src/app/dashboard/layout.tsx` — added an applicant guard in the existing auth-check effect: after `initialized && user`, if `user.role === "applicant"`, redirect to `/cuenta/estado` (no dashboard access until approved). Existing admin/redirect-to-login logic preserved.
+- Updated `src/components/landing/subscription-form.tsx` — on successful POST to `/api/subscriptions`, shows the existing success card briefly (800ms) and then redirects the browser to `/login?mode=signup&subscription=completed`. The auth-view picks up both query params to default to signup mode and show the success banner.
+- Updated `src/stores/auth-store.ts` (minimal supporting change) — `login()` and `signup()` now propagate `subscriptionStatus` and `needsVerification` from the API response to the calling component, so auth-view can branch on the redirect target. Type signatures updated accordingly.
+- Verified `bun run lint` passes with exit code 0. Smoke-tested routes against the running dev server: `/verificar-correo` 200, `/cuenta/estado` 200, `/login?mode=signup&subscription=completed` 200, `/auth/callback` 307 (redirect to `/login?error=...`), `POST /api/auth/google` 500 with body `{"error":"Supabase no está configurado."}` — this is the expected behavior when Supabase env vars aren't set in the local sandbox (no secrets in code; route will work in production with `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` configured).
+
+Stage Summary:
+The full PayFlow SMT auth flow is now wired end-to-end:
+1. Visitor submits the subscription form on the landing page → redirected to `/login?mode=signup&subscription=completed`.
+2. Auth-view defaults to signup mode and shows the success banner.
+3. On signup, the user gets a Supabase confirmation email and is redirected to `/verificar-correo`. NO session token is set yet.
+4. After verifying the email (or clicking "Continuar con Google"), the OAuth callback at `/auth/callback` upserts the profile (role=applicant, status=pending), mints the PayFlow JWT session cookie, and redirects to `/cuenta/estado` (or to `next` if the user is already active).
+5. `/cuenta/estado` shows the email, requested plan, price, business name, and a status badge. Pending → "en revisión"; activated/active → "Ir al dashboard"; rejected → "contacta a soporte". Logout button works.
+6. Login route returns `subscriptionStatus: "pending"` for non-active profiles, and auth-view redirects those users to `/cuenta/estado` instead of `/dashboard`.
+7. Dashboard layout blocks applicants (`role === "applicant"`) from the dashboard, redirecting them to `/cuenta/estado`. Existing admin redirect logic preserved.
+8. No Client ID / Client Secret / PayPhone Token / StoreID or any secrets appear in code. All error messages are in Spanish. No existing visual design, colors, fonts, or layout of components was changed.
+
+Files created: 4
+- `src/app/api/auth/google/route.ts`
+- `src/app/auth/callback/route.ts`
+- `src/app/verificar-correo/page.tsx`
+- `src/app/cuenta/estado/page.tsx`
+
+Files modified: 5
+- `src/components/auth/auth-view.tsx`
+- `src/app/api/auth/signup/route.ts`
+- `src/app/api/auth/login/route.ts`
+- `src/app/dashboard/layout.tsx`
+- `src/components/landing/subscription-form.tsx`
+- `src/stores/auth-store.ts` (supporting change for the auth-view branch)
+
+`bun run lint` → exit 0, no errors, no warnings.

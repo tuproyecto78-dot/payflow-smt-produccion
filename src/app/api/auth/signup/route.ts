@@ -1,25 +1,27 @@
 import { NextResponse } from "next/server";
-import { createSessionToken, setSessionCookie } from "@/lib/session";
 import { ROLES } from "@/lib/roles";
 
 /**
  * POST /api/auth/signup
  *
  * Dual-mode: Supabase Auth (production) or Prisma/SQLite (development).
+ *
+ * After signup, NO session token is created — the user must verify their
+ * email first. Returns `{ ok: true, needsVerification: true }`.
  */
 export async function POST(req: Request) {
   try {
     const { email, password, name } = await req.json();
     if (!email || !password) {
       return NextResponse.json(
-        { error: "Email and password are required." },
+        { error: "El correo y la contraseña son obligatorios." },
         { status: 400 }
       );
     }
     const normalizedEmail = String(email).toLowerCase().trim();
-    if (password.length < 6) {
+    if (password.length < 10) {
       return NextResponse.json(
-        { error: "Password must be at least 6 characters." },
+        { error: "La contraseña debe tener al menos 10 caracteres." },
         { status: 400 }
       );
     }
@@ -31,7 +33,9 @@ export async function POST(req: Request) {
     if (supabaseUrl && supabaseAnonKey) {
       try {
         const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
 
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
@@ -42,44 +46,39 @@ export async function POST(req: Request) {
         });
 
         if (error) {
-          return NextResponse.json(
-            { error: "No se pudo crear la cuenta." },
-            { status: 400 }
-          );
+          // Map common Supabase errors to Spanish.
+          let msg = "No se pudo crear la cuenta.";
+          if (error.message.toLowerCase().includes("already registered")) {
+            msg = "Ya existe una cuenta con este correo.";
+          } else if (error.message.toLowerCase().includes("password")) {
+            msg = "La contraseña no cumple los requisitos de seguridad.";
+          } else if (error.message.toLowerCase().includes("email")) {
+            msg = "El correo electrónico no es válido.";
+          }
+          return NextResponse.json({ error: msg }, { status: 400 });
         }
 
         const userId = data.user?.id || "supabase-user";
         const userEmail = data.user?.email || normalizedEmail;
 
-        // Create profile in Supabase
+        // Create profile in Supabase (role=applicant, status=pending)
         try {
-          await supabase.from("profiles").upsert({
-            user_id: userId,
-            email: userEmail,
-            full_name: name?.trim() || null,
-            role: ROLES.APPLICANT,
-            status: "pending",
-          });
+          await supabase.from("profiles").upsert(
+            {
+              user_id: userId,
+              email: userEmail,
+              full_name: name?.trim() || null,
+              role: ROLES.APPLICANT,
+              status: "pending",
+            },
+            { onConflict: "user_id" }
+          );
         } catch {
           // Profile table might not exist — continue
         }
 
-        const token = await createSessionToken({
-          userId,
-          email: userEmail,
-          name: name?.trim() || null,
-          role: ROLES.APPLICANT,
-        });
-        await setSessionCookie(token);
-
-        return NextResponse.json({
-          user: {
-            id: userId,
-            email: userEmail,
-            name: name?.trim() || null,
-            role: ROLES.APPLICANT,
-          },
-        });
+        // Do NOT create a session token — user must verify email first.
+        return NextResponse.json({ ok: true, needsVerification: true });
       } catch {
         // Supabase failed — fall through to Prisma
       }
@@ -90,10 +89,12 @@ export async function POST(req: Request) {
       const { db } = await import("@/lib/db");
       const bcrypt = await import("bcryptjs");
 
-      const existing = await db.user.findUnique({ where: { email: normalizedEmail } });
+      const existing = await db.user.findUnique({
+        where: { email: normalizedEmail },
+      });
       if (existing) {
         return NextResponse.json(
-          { error: "An account with this email already exists." },
+          { error: "Ya existe una cuenta con este correo." },
           { status: 409 }
         );
       }
@@ -141,28 +142,17 @@ export async function POST(req: Request) {
         },
       });
 
-      const token = await createSessionToken({
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        role: ROLES.APPLICANT,
-      });
-      await setSessionCookie(token);
-
-      return NextResponse.json({
-        user: { id: user.id, email: user.email, name: user.name, role: ROLES.APPLICANT },
-      });
-    } catch (prismaErr) {
-      console.error("[signup] Prisma not available");
+      // Do NOT create a session token — user must verify email first.
+      return NextResponse.json({ ok: true, needsVerification: true });
+    } catch {
       return NextResponse.json(
         { error: "No se pudo crear la cuenta." },
         { status: 500 }
       );
     }
-  } catch (err) {
-    console.error("[signup] error");
+  } catch {
     return NextResponse.json(
-      { error: "Failed to create account." },
+      { error: "Error al crear la cuenta." },
       { status: 500 }
     );
   }

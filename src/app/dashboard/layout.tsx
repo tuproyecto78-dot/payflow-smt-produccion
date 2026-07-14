@@ -64,6 +64,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (initialized && !user) {
       const next = encodeURIComponent(pathname || "/dashboard");
       window.location.href = `/login?next=${next}`;
+      return;
+    }
+
+    // Authenticated but role is "applicant" → not yet approved.
+    // Send them to the account-status page instead of the dashboard.
+    if (initialized && user && user.role === "applicant") {
+      window.location.href = "/cuenta/estado";
     }
   }, [initialized, user, pathname]);
 

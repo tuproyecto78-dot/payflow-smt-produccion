@@ -18,8 +18,20 @@ interface AuthState {
   loading: boolean;
   initialized: boolean;
   fetchUser: () => Promise<void>;
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  signup: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (
+    email: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string; subscriptionStatus?: string }>;
+  signup: (
+    email: string,
+    password: string,
+    name: string
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    needsVerification?: boolean;
+    subscriptionStatus?: string;
+  }>;
   logout: () => Promise<void>;
 }
 
@@ -74,8 +86,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       const data = await res.json();
+      // Backend may return `subscriptionStatus: "pending"` when the user's
+      // profile is not yet active. Surface it so the UI can redirect to
+      // /cuenta/estado instead of /dashboard.
       set({ user: safeUser(data.user), initialized: true });
-      return { ok: true };
+      return {
+        ok: true,
+        subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : undefined,
+      };
     } catch (err) {
       set({ loading: false });
       const msg = err instanceof Error ? err.message : "Error desconocido";
@@ -101,6 +119,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       const data = await res.json();
+      // Signup may return `needsVerification: true` instead of a user object,
+      // because the user must verify their email before getting a session.
+      if (data.needsVerification) {
+        return { ok: true, needsVerification: true };
+      }
       set({ user: safeUser(data.user), initialized: true });
       return { ok: true };
     } catch (err) {

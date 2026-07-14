@@ -57,17 +57,21 @@ export async function POST(req: Request) {
             data.user.user_metadata?.name ||
             null;
 
-          // Determine role
+          // Determine role + status
           let role = isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT;
+          let profileStatus = isAdminEmail ? "active" : "pending";
+          let clientId: string | null = null;
           try {
             const { data: profileData } = await supabase
               .from("profiles")
               .select("role, status, client_id")
               .eq("user_id", userId)
-              .single();
+              .maybeSingle();
 
             if (profileData) {
               role = profileData.role || (isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT);
+              profileStatus = (profileData.status as string) || profileStatus;
+              clientId = (profileData.client_id as string) || null;
             } else {
               // Create profile if missing
               await supabase.from("profiles").upsert({
@@ -90,19 +94,23 @@ export async function POST(req: Request) {
           });
           await setSessionCookie(token);
 
+          const isActive = profileStatus === "active";
           return NextResponse.json({
             user: {
               id: userId,
               email: userEmail,
               name: userName,
               role,
-              clientId: null,
-              clientStatus: null,
+              clientId,
+              clientStatus: profileStatus,
               modules: [],
               memberRole: null,
               memberPermissions: null,
-              active: true,
+              active: isActive,
             },
+            // Surface subscription status so the frontend can redirect to
+            // /cuenta/estado when the user is not yet active.
+            subscriptionStatus: isActive ? undefined : "pending",
           });
         }
         // Supabase auth failed (wrong password or user not found)
@@ -165,6 +173,19 @@ export async function POST(req: Request) {
         const valid = await bcrypt.compare(passwordStr, user.passwordHash);
         if (valid) {
           const role = user.role || ROLES.APPLICANT;
+
+          // Look up the profile to determine status.
+          let profileStatus = "active";
+          try {
+            const profile = await db.profile.findUnique({
+              where: { userId: user.id },
+            });
+            if (profile?.status) profileStatus = profile.status;
+          } catch {
+            // Profile table might not exist — default to active
+          }
+          const isActive = profileStatus === "active";
+
           const token = await createSessionToken({
             userId: user.id,
             email: user.email,
@@ -180,12 +201,15 @@ export async function POST(req: Request) {
               name: user.name,
               role,
               clientId: null,
-              clientStatus: null,
+              clientStatus: profileStatus,
               modules: [],
               memberRole: null,
               memberPermissions: null,
-              active: true,
+              active: isActive,
             },
+            // Surface subscription status so the frontend can redirect to
+            // /cuenta/estado when the user is not yet active.
+            subscriptionStatus: isActive ? undefined : "pending",
           });
         }
       }
