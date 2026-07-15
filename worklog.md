@@ -1689,3 +1689,68 @@ Files created: 1
 - src/app/privacy/privacy-client.tsx (client component con todo el diseño)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: terms-redesign-shared-legal-layout
+Agent: main agent (Z.ai Code)
+Task: Rediseñar /terms (src/app/terms/page.tsx) con el MISMO sistema visual de /privacy para que ambas formen un "Centro de confianza" coherente. Crear componente compartido LegalLayout para evitar duplicar estilos. Sin clases "prose"/"max-w-none", sin nombres de proveedores, con correcciones legales (no prometer 99.5% disponibilidad, no almacenar tarjetas, negocio responsable de su información, prohibir fraude/spam, automatización como herramienta de apoyo).
+
+Work Log:
+- Leí src/app/terms/page.tsx actual: usaba "prose dark:prose-invert max-w-none" y mencionaba PayPhone, WhatsApp, Meta, webhooks, API keys, tokens, backend, disponibilidad del 99.5%.
+- Leí src/app/privacy/privacy-client.tsx para extraer su estética y componentes.
+- Creé src/components/legal/legal-layout.tsx (componente compartido, ~340 líneas) con:
+  - LegalLayout: encabezado fijo translúcido, hero verde oscuro con glow+grid, índice lateral fijo con scroll spy (IntersectionObserver), mini-CTA lateral configurable, footer oscuro
+  - Sub-componentes exportables: SectionCard, HighlightRow, CheckList, InfoCard, Callout (info/success/warning), CardGrid, IconCard, FeatureCtaCard
+  - Tipo LegalSection exportable
+  - Props configurables: heroBadge, heroTitle, heroDescription, sections, sidebarCta, footerLinks
+- Refactoricé src/app/privacy/privacy-client.tsx para usar LegalLayout (de ~686 a ~290 líneas). Contenido idéntico aprobado, solo cambió la estructura para usar los componentes compartidos. Mantiene las 11 secciones, la tarjeta destacada "Tú tienes el control" con botón /data-request.
+- Creé src/app/terms/terms-client.tsx con las 13 secciones requeridas:
+  1. Naturaleza del servicio (SaaS, no laboral/societaria)
+  2. Creación y uso de la cuenta (personal, intransferible)
+  3. Uso permitido (6 checks + callout warning: prohíbe fraude, spam, actividades ilegales, acceso no autorizado)
+  4. Responsabilidades del negocio (6 checks: info/precios/productos/servicios, atención de reclamos, consentimiento)
+  5. Comunicaciones y automatización (callout success: "sistemas automatizados son herramientas de apoyo")
+  6. Pagos y suscripciones (4 icon cards + callout: no almacena tarjetas/CVV)
+  7. Disponibilidad del servicio (callout warning: NO promete 99.5% salvo SLA formal, procura disponibilidad, mantenimientos/interrupciones externas)
+  8. Seguridad de la cuenta (5 checks para el cliente)
+  9. Propiedad intelectual (licencia de uso limitada, no exclusiva, revocable)
+  10. Suspensión o cancelación (5 causas + callout sobre recuperación de datos)
+  11. Limitación de responsabilidad (5 checks + callout: limitado a últimos 3 meses de suscripción)
+  12. Protección de datos (link a /privacy, negocio como responsable, PayFlow como encargado)
+  13. Cambios y contacto
+  - Tarjeta destacada "¿Tienes preguntas sobre los términos o necesitas asistencia?" con botón "Contactar con soporte" → /data-request
+  - Footer con enlaces a /privacy, /data-request, /
+- Reescribí src/app/terms/page.tsx como server component con metadatos SEO (title, description, keywords, openGraph, robots, canonical) que renderiza <TermsClient />
+- Corregí 2 errores de iconos inexistentes en lucide-react:
+  - "CheckShield" → "ShieldCheck"
+  - "LifeBuoy" no usado → eliminado
+  - "Purpose" ya había sido cambiado a "Target" en privacy (sin regresión)
+
+Verification (Agent Browser + VLM):
+- GET /terms 200, GET /privacy 200 — ambas compilan sin errores
+- VLM comparación /terms vs /privacy: "SÍ. Ambas páginas comparten la misma identidad visual: encabezado translúcido con 'PayFlow SMT Centro de confianza', hero verde oscuro, índice lateral, tarjetas blancas y footer oscuro. La única diferencia es el texto del título y el contenido."
+- Desktop 1440x900 /terms: encabezado + h1 "Reglas claras para trabajar juntos" + índice lateral con 13 secciones + mini CTA "Solicitar ayuda" + todas las secciones h2 ✓
+- Mobile 390x844 /terms: índice lateral oculto, contenido en una columna ✓
+- Footer /terms: enlaces a "Política de Privacidad", "Solicitud de datos", "Inicio" ✓
+- Tarjeta CTA: "¿Tienes preguntas sobre los términos o necesitas asistencia?" + botón "Contactar con soporte" → /data-request ✓
+- Búsqueda de nombres prohibidos (payphone|whatsapp|meta|groq|gemini|openrouter|z.ai|nvidia|nim|clickup|supabase|vercel|webhook|api key|service role|env var|frontend|backend|next_public|/rest/v1|/auth/v1): solo falsos positivos ("Metadata" de Next, "mantenimientos", "programados", "anonimizamos"). Sin nombres reales de proveedores.
+- Sin clases "prose" ni "max-w-none" en ninguna página legal.
+- bun run lint: 0 errores, 0 warnings
+- Commit 5cb80d8 pusheado a GitHub (83a566a..5cb80d8) — Vercel desplegará automáticamente
+
+Stage Summary:
+- /terms rediseñada con la MISMA identidad visual que /privacy: encabezado translúcido "PayFlow SMT – Centro de confianza", hero verde oscuro ("Condiciones de uso" / "Reglas claras para trabajar juntos" / "Actualizada en julio de 2026" / "Versión 1.1"), índice lateral fijo con scroll spy, 13 secciones en tarjetas blancas con iconos, mini CTA lateral "Solicitar ayuda", tarjeta destacada final, footer oscuro con /privacy y /data-request.
+- Componente compartido LegalLayout evita duplicar estilos: privacy y terms usan el mismo layout pero con props distintas (heroBadge, heroTitle, sections, sidebarCta, footerLinks).
+- Correcciones legales aplicadas: NO promete 99.5% disponibilidad (solo "procura" + SLA formal), no almacena tarjetas/CVV, negocio responsable de info/precios/productos, prohíbe fraude/spam/ilegales/acceso no autorizado, automatización como "herramienta de apoyo", link a /privacy.
+- Sin nombres de proveedores ni datos técnicos internos. Solo categorías generales (servicios de comunicación, proveedores de pago autorizados, servicios tecnológicos, sistemas automatizados, proveedores de infraestructura).
+- Rutas /terms y /privacy mantenidas. Metadatos SEO mantenidos. Dashboard y landing NO modificados. globals.css NO modificado. Sin nuevas dependencias.
+
+Files created: 3
+- src/components/legal/legal-layout.tsx (componente compartido)
+- src/app/terms/terms-client.tsx (13 secciones)
+- (refactor) src/app/privacy/privacy-client.tsx reescrito para usar LegalLayout
+
+Files modified: 1
+- src/app/terms/page.tsx (server component con metadata SEO)
+
+`bun run lint` → exit 0, no errors, no warnings.
