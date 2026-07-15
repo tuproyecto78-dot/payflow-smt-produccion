@@ -4,16 +4,25 @@ import { randomUUID } from "node:crypto";
 import {
   ensureConversation,
   recordOutboundMessage,
-  resolveWhatsAppPhoneNumberId,
+  resolveWhatsAppConnection,
   validateConversationOwnership,
 } from "@/lib/whatsapp/repository";
+import {
+  getWhatsAppApiVersion,
+  sendWhatsAppCloudAction,
+  type WhatsAppOutboundAction,
+  WhatsAppCloudError,
+  whatsappActionPreview,
+} from "@/lib/whatsapp/cloud-api";
+import { listWhatsAppFlows } from "@/lib/whatsapp/management-api";
 
 export async function sendWhatsAppMessage(input: {
   clientId: string;
   phoneNumber: string;
-  messageText: string;
+  messageText?: string;
   conversationId?: string | null;
   contactId?: string | null;
+  action?: WhatsAppOutboundAction;
   template?: {
     name: string;
     languageCode: string;
@@ -36,52 +45,59 @@ export async function sendWhatsAppMessage(input: {
 
   const provider = process.env.WHATSAPP_PROVIDER || "mock";
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId =
-    (await resolveWhatsAppPhoneNumberId(input.clientId).catch(() => null)) ||
-    process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const apiVersion = process.env.WHATSAPP_API_VERSION || "v20.0";
+  const connection = await resolveWhatsAppConnection(input.clientId).catch(() => null);
+  const action: WhatsAppOutboundAction = input.action || (input.template
+    ? {
+        type: "template",
+        name: input.template.name,
+        languageCode: input.template.languageCode,
+        bodyParameters: input.template.bodyParameters,
+      }
+    : { type: "text", text: input.messageText || "" });
+  const messagePreview = (input.messageText || whatsappActionPreview(action)).slice(0, 4000);
   let providerMessageId = `failed_${randomUUID()}`;
   let status: "sent" | "failed" = "failed";
   let providerError: string | null = null;
 
-  if (provider === "meta" && accessToken && phoneNumberId) {
+  if (provider === "meta" && accessToken && connection?.phoneNumberId) {
     try {
-      const response = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: input.phoneNumber.replace(/\D/g, ""),
-          ...(input.template
-            ? {
-                type: "template",
-                template: {
-                  name: input.template.name,
-                  language: { code: input.template.languageCode },
-                  components: [{
-                    type: "body",
-                    parameters: input.template.bodyParameters.map((text) => ({ type: "text", text })),
-                  }],
-                },
-              }
-            : { type: "text", text: { body: input.messageText } }),
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data?.messages?.[0]?.id) {
-        providerMessageId = String(data.messages[0].id);
-        status = "sent";
-      } else {
-        providerError = `Meta HTTP ${response.status}`;
+      if (action.type === "flow") {
+        if (!connection.businessAccountId) {
+          throw new WhatsAppCloudError("El negocio no tiene WABA ID para validar el Flow.", 409);
+        }
+        const flows = await listWhatsAppFlows({
+          accessToken,
+          phoneNumberId: connection.phoneNumberId,
+          businessAccountId: connection.businessAccountId,
+          apiVersion: getWhatsAppApiVersion(),
+        });
+        if (!flows.some((flow) => String(flow.id || "") === action.flowId)) {
+          throw new WhatsAppCloudError("El Flow no pertenece al negocio emisor.", 403);
+        }
       }
+      const result = await sendWhatsAppCloudAction(
+        {
+          accessToken,
+          phoneNumberId: connection.phoneNumberId,
+          apiVersion: getWhatsAppApiVersion(),
+        },
+        input.phoneNumber,
+        action
+      );
+      providerMessageId = result.providerMessageId;
+      status = "sent";
     } catch (error) {
-      providerError = error instanceof Error ? error.message : "Meta request failed";
+      providerError = error instanceof WhatsAppCloudError
+        ? `${error.message}${error.providerCode ? ` Código ${error.providerCode}.` : ""}`
+        : "No se pudo enviar el mensaje por WhatsApp.";
     }
   } else if (process.env.NODE_ENV !== "production" && process.env.WHATSAPP_ALLOW_MOCK === "true") {
     providerMessageId = `mock_${randomUUID()}`;
     status = "sent";
   } else {
-    providerError = "WhatsApp Business no está configurado.";
+    providerError = !connection
+      ? "Este negocio no tiene una conexión activa de WhatsApp."
+      : "WhatsApp Business no está configurado.";
   }
 
   const id = await recordOutboundMessage({
@@ -89,7 +105,8 @@ export async function sendWhatsAppMessage(input: {
     conversationId: conversation.conversationId,
     contactId: conversation.contactId,
     providerMessageId,
-    messageText: input.messageText,
+    messageText: messagePreview,
+    messageType: action.type === "media" ? action.mediaType : action.type,
     status,
   });
   return { id, providerMessageId, status, providerError };

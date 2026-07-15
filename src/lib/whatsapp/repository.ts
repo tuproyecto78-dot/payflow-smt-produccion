@@ -41,17 +41,44 @@ export async function resolveWhatsAppClientId(phoneNumberId?: string | null): Pr
 }
 
 export async function resolveWhatsAppPhoneNumberId(clientId: string): Promise<string | null> {
+  const connection = await resolveWhatsAppConnection(clientId);
+  return connection?.phoneNumberId || null;
+}
+
+export interface WhatsAppConnectionRef {
+  phoneNumberId: string;
+  businessAccountId: string | null;
+}
+
+export async function resolveWhatsAppConnection(clientId: string): Promise<WhatsAppConnectionRef | null> {
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("whatsapp_connections")
-    .select("phone_number_id")
+    .select("phone_number_id, business_account_id")
     .eq("client_id", clientId)
     .eq("status", "active")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data?.phone_number_id ? String(data.phone_number_id) : null;
+  if (data?.phone_number_id) {
+    return {
+      phoneNumberId: String(data.phone_number_id),
+      businessAccountId: data.business_account_id ? String(data.business_account_id) : null,
+    };
+  }
+
+  // The environment fallback is intentionally bound to one explicit tenant.
+  // Never reuse the global phone number for an arbitrary client ID.
+  const fallbackClientId = process.env.WHATSAPP_CLIENT_ID?.trim();
+  const fallbackPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+  if (fallbackClientId === clientId && fallbackPhoneNumberId) {
+    return {
+      phoneNumberId: fallbackPhoneNumberId,
+      businessAccountId: process.env.WHATSAPP_WABA_ID?.trim() || null,
+    };
+  }
+  return null;
 }
 
 export async function ensureConversation(input: {
@@ -224,6 +251,7 @@ export async function recordOutboundMessage(input: {
   contactId: string;
   providerMessageId: string;
   messageText: string;
+  messageType?: string;
   status: "sent" | "failed";
 }) {
   const supabase = createServiceRoleClient();
@@ -238,7 +266,7 @@ export async function recordOutboundMessage(input: {
         provider: "meta",
         provider_message_id: input.providerMessageId,
         direction: "outbound",
-        message_type: "text",
+        message_type: input.messageType || "text",
         status: input.status,
         content_preview: input.messageText.slice(0, 160),
         sent_at: input.status === "sent" ? now : null,
