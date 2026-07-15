@@ -11,8 +11,11 @@ $$;
 -- Align the original profile schema with the application authorization model.
 alter table public.profiles add column if not exists user_id uuid;
 alter table public.profiles add column if not exists full_name text;
+alter table public.profiles add column if not exists role text not null default 'applicant';
 alter table public.profiles add column if not exists status text not null default 'pending';
 alter table public.profiles add column if not exists client_id text;
+alter table public.profiles add column if not exists created_at timestamptz not null default now();
+alter table public.profiles add column if not exists updated_at timestamptz not null default now();
 
 -- Some early PayFlow deployments created profiles.id as text while newer
 -- Supabase schemas use uuid. Resolve the auth UUID by verified email instead
@@ -25,9 +28,15 @@ where p.user_id is null
   and auth_user.email is not null
   and lower(p.email) = lower(auth_user.email);
 
-update public.profiles
-set full_name = coalesce(full_name, name)
-where full_name is null;
+update public.profiles p
+set full_name = coalesce(
+  nullif(auth_user.raw_user_meta_data->>'full_name', ''),
+  nullif(auth_user.raw_user_meta_data->>'name', ''),
+  split_part(p.email, '@', 1)
+)
+from auth.users auth_user
+where p.full_name is null
+  and p.user_id = auth_user.id;
 
 create unique index if not exists idx_profiles_user_id on public.profiles(user_id);
 create index if not exists idx_profiles_client_id on public.profiles(client_id);
@@ -47,12 +56,11 @@ begin
       and atttypid = 'uuid'::regtype
       and not attisdropped
   ) then
-    insert into public.profiles (id, user_id, email, name, full_name, role, status)
+    insert into public.profiles (id, user_id, email, full_name, role, status)
     values (
       new.id,
       new.id,
       new.email,
-      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
       coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
       'applicant',
       'pending'
@@ -62,12 +70,11 @@ begin
         email = excluded.email,
         updated_at = now();
   else
-    insert into public.profiles (id, user_id, email, name, full_name, role, status)
+    insert into public.profiles (id, user_id, email, full_name, role, status)
     values (
       new.id::text,
       new.id,
       new.email,
-      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
       coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
       'applicant',
       'pending'

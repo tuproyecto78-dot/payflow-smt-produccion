@@ -89,7 +89,6 @@ export async function ensureAccessProfile(input: {
       id: input.userId,
       user_id: input.userId,
       email: input.email,
-      name: fullName,
       full_name: fullName,
       role,
       status: isInternalAccessRole(role) ? "active" : "pending",
