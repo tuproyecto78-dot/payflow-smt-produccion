@@ -301,6 +301,12 @@ alter table public.subscription_requests add column if not exists activated_clie
 alter table public.subscription_requests add column if not exists selected_plan_label text;
 alter table public.subscription_requests add column if not exists selected_plan_price numeric;
 
+-- The initial payment table was user-scoped and did not include a durable
+-- tenant key. Keep existing rows and add the tenant column used by analytics.
+alter table public.payment_transactions add column if not exists client_id text;
+create index if not exists idx_payment_transactions_client_created
+  on public.payment_transactions(client_id, created_at desc);
+
 -- Atomic activation: locks the request, creates the tenant, grants access and
 -- records the entitlement/audit trail together. Callable only by service_role.
 drop function if exists public.activate_subscription_request(uuid, uuid);
@@ -504,6 +510,7 @@ alter table public.whatsapp_connections enable row level security;
 
 drop policy if exists "profiles_select_own" on public.profiles;
 drop policy if exists "profiles_update_own" on public.profiles;
+drop policy if exists "profiles_select_own_or_admin" on public.profiles;
 create policy "profiles_select_own_or_admin" on public.profiles
   for select to authenticated
   using ((select auth.uid()) = user_id or (select public.is_payflow_admin()));
@@ -511,6 +518,8 @@ create policy "profiles_select_own_or_admin" on public.profiles
 drop policy if exists "subreq_insert_public" on public.subscription_requests;
 drop policy if exists "subreq_select_auth" on public.subscription_requests;
 drop policy if exists "subreq_update_auth" on public.subscription_requests;
+drop policy if exists "subreq_admin_select" on public.subscription_requests;
+drop policy if exists "subreq_admin_update" on public.subscription_requests;
 create policy "subreq_admin_select" on public.subscription_requests
   for select to authenticated using ((select public.is_payflow_admin()));
 create policy "subreq_admin_update" on public.subscription_requests
@@ -520,33 +529,43 @@ create policy "subreq_admin_update" on public.subscription_requests
 
 drop policy if exists "audit_insert_service" on public.audit_logs;
 
+drop policy if exists "subscriptions_select_own_or_admin" on public.subscriptions;
 create policy "subscriptions_select_own_or_admin" on public.subscriptions
   for select to authenticated
   using ((select auth.uid()) = user_id or (select public.is_payflow_admin()));
+drop policy if exists "client_accounts_owner_or_admin" on public.client_accounts;
 create policy "client_accounts_owner_or_admin" on public.client_accounts
   for select to authenticated
   using ((select auth.uid()) = owner_user_id or (select public.is_payflow_admin()));
 
+drop policy if exists "contacts_tenant_select" on public.contacts;
 create policy "contacts_tenant_select" on public.contacts
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "conversations_tenant_select" on public.conversations;
 create policy "conversations_tenant_select" on public.conversations
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "messages_tenant_select" on public.messages;
 create policy "messages_tenant_select" on public.messages
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "message_events_tenant_select" on public.message_status_events;
 create policy "message_events_tenant_select" on public.message_status_events
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "workflow_run_events_tenant_select" on public.workflow_run_events;
 create policy "workflow_run_events_tenant_select" on public.workflow_run_events
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "node_runs_tenant_select" on public.workflow_node_runs;
 create policy "node_runs_tenant_select" on public.workflow_node_runs
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
+drop policy if exists "webhook_events_admin_select" on public.integration_webhook_events;
 create policy "webhook_events_admin_select" on public.integration_webhook_events
   for select to authenticated using ((select public.is_payflow_admin()));
+drop policy if exists "whatsapp_connections_tenant_select" on public.whatsapp_connections;
 create policy "whatsapp_connections_tenant_select" on public.whatsapp_connections
   for select to authenticated
   using (client_id = (select public.current_client_id()) or (select public.is_payflow_admin()));
