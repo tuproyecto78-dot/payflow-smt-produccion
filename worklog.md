@@ -1634,3 +1634,58 @@ Stage Summary:
 
 Files pushed: 5 commits (incluyendo fix OAuth + rediseño landing + hero visual)
 `bun run lint` → exit 0 (verificado en task anterior).
+
+---
+Task ID: privacy-redesign-saas
+Agent: main agent (Z.ai Code)
+Task: Rediseñar completamente la página /privacy (src/app/privacy/page.tsx) porque aparecía como texto simple sin jerarquía visual usando clases "prose" y "max-w-none". Nuevo diseño: moderno, corporativo, nivel SaaS profesional con colores de PayFlow SMT (esmeralda, verde oscuro, blanco, grises). Sin nombres de proveedores ni datos técnicos internos.
+
+Work Log:
+- Leí la página actual: confirmé que usaba `prose dark:prose-invert max-w-none` (rompía el diseño) y mencionaba PayPhone, WhatsApp, Meta, Groq, Gemini, OpenRouter, Z.ai, NVIDIA, ClickUp, Supabase, Vercel, webhooks, API keys, variables de entorno, Arquitecto IA, RBAC, etc.
+- Creé src/app/privacy/privacy-client.tsx (client component, ~530 líneas) con:
+  - Encabezado fijo translúcido (bg-white/85 backdrop-blur-xl al hacer scroll) con logo ShieldCheck + "PayFlow SMT / Centro de confianza" + botón "Volver al inicio"
+  - Hero verde oscuro (gradient from #052e1c via #064e3b to #03312a) con glow blobs + grid pattern, badge "Privacidad y confianza", h1 "Tus datos, explicados con claridad", descripción, "Actualizada en julio de 2026" y "Versión 1.1"
+  - Índice lateral fijo en escritorio (sticky top-24, hidden lg:block) con 11 enlaces + scroll spy (IntersectionObserver) que resalta la sección activa + mini CTA verde "Gestionar mis datos"
+  - 11 secciones en tarjetas blancas (rounded-2xl, border, shadow) cada una con: icono en contenedor esmeralda, número "01"-"11", título h2, párrafos, listas con check verdes (HighlightRow), callouts info/success, data pills, base legal cards, category cards, right cards
+  - Tarjeta destacada "Tú tienes el control" (gradient emerald-600) con botón "Solicitar gestión de datos" → /data-request
+  - Footer oscuro (bg-slate-900) con enlaces a /data-request, /terms, /
+  - Sub-componentes: SectionCard, HighlightRow, DataPill, Callout, BaseLegalCard, CategoryCard, RightCard, CreditCardIcon (SVG local para evitar conflicto de tipado)
+- Reescribí src/app/privacy/page.tsx como server component que exporta metadata SEO (title, description, keywords, openGraph, robots, canonical) + dynamic="force-dynamic" y renderiza <PrivacyClient />
+- Las 11 secciones cumplen el contenido requerido:
+  1. Responsable (PayFlow SMT, canal de atención)
+  2. Datos recopilados (identificación, contacto, negocio, uso, mensajes, consentimiento) + callout "no almacenamos tarjetas/CVV"
+  3. Finalidad (6 checks: cuenta, atención, citas, soporte, legal, mejora)
+  4. Base legal (4 cards: contrato, consentimiento, legal, interés legítimo)
+  5. Automatización (sistemas automatizados + callout "no toman decisiones con efectos legales sin revisión humana")
+  6. Compartir (4 category cards genéricas: alojamiento, comunicación, procesamiento de pagos, seguridad/soporte + callout "no vendemos datos")
+  7. Conservación (4 checks + eliminación/anonimización)
+  8. Derechos (6 right cards: acceso, rectificación, eliminación, limitación, portabilidad, oposición + callout con link /data-request)
+  9. Seguridad (5 checks + callout sobre incidentes)
+  10. Datos de terceros (4 checks: negocio como responsable, PayFlow como encargado)
+  11. Cambios (actualizaciones + aceptación por uso continuado)
+- Corregí error de compilación: icono "Purpose" no existe en lucide-react → reemplazado por "Target" (3 ocurrencias).
+- NO se usaron clases "prose" ni "max-w-none". NO se agregaron dependencias. NO se modificó globals.css, landing, dashboard, términos, ni ninguna otra ruta.
+- Verificación de nombres prohibidos: rg -in "payphone|whatsapp|meta|groq|gemini|openrouter|z.ai|nvidia|clickup|supabase|vercel|webhook|api key|service role|env var|frontend|backend|next_public|/rest/v1|/auth/v1" — solo falsos positivos ("anonimizamos" contiene "nim"). Sin nombres reales de proveedores.
+
+Verification (Agent Browser + VLM):
+- GET /privacy 200 sin errores de compilación
+- Title SEO: "Política de Privacidad — PayFlow SMT | PayFlow SMT" ✓
+- Snapshot confirma estructura: encabezado "PayFlow SMT Centro de confianza" + "Volver al inicio", h1 "Tus datos, explicados con claridad", índice lateral con 11 enlaces, 11 secciones h2, tarjeta "Tú tienes el control", botón "Solicitar gestión de datos" → /data-request, footer con /data-request y /terms
+- Desktop 1440x900: índice lateral visible a la izquierda, secciones en tarjetas blancas ✓
+- Mobile 390x844: índice lateral oculto (hidden lg:block), contenido en una columna ✓
+- VLM confirma: "hero verde oscuro con título 'Tus datos, explicados con claridad', encabezado fijo translúcido con 'PayFlow SMT Centro de confianza' y 'Volver al inicio', índice lateral a la izquierda, secciones en tarjetas blancas con iconos, diseño moderno y profesional"
+- bun run lint: 0 errores, 0 warnings
+- Commit 70b92b1 pusheado a GitHub (8497e57..70b92b1) — Vercel desplegará automáticamente
+
+Stage Summary:
+- La página /privacy rediseñada cumple todos los requisitos: encabezado fijo translúcido, identidad "PayFlow SMT – Centro de confianza", botón "Volver al inicio", hero verde oscuro con "Privacidad y confianza" + "Tus datos, explicados con claridad" + "Actualizada en julio de 2026" + "Versión 1.1", índice lateral fijo con scroll spy, 11 secciones en tarjetas blancas con iconos lucide-react, listas con check verdes, tarjeta destacada "Tú tienes el control" con botón /data-request, footer con /data-request y /terms, responsive completo.
+- Sin clases "prose" ni "max-w-none". Sin nombres de proveedores. Sin datos técnicos internos. Contenido claro y entendible. Solo categorías generales (servicios de alojamiento, comunicación, procesamiento de pagos, seguridad/soporte, sistemas automatizados).
+- Metadatos SEO mantenidos y ampliados (title, description, keywords, openGraph, robots, canonical).
+
+Files modified: 1
+- src/app/privacy/page.tsx (server component con metadata SEO)
+
+Files created: 1
+- src/app/privacy/privacy-client.tsx (client component con todo el diseño)
+
+`bun run lint` → exit 0, no errors, no warnings.
