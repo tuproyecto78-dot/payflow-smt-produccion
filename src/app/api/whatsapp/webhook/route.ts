@@ -3,6 +3,29 @@ import { after, NextResponse } from "next/server";
 import { processInboundMessage } from "@/lib/whatsapp/process-inbound";
 import { recordMessageStatus, resolveWhatsAppClientId } from "@/lib/whatsapp/repository";
 
+function inboundPreview(message: any): string {
+  const type = String(message?.type || "text");
+  if (type === "text") return String(message?.text?.body || "");
+  if (type === "button") return String(message?.button?.text || message?.button?.payload || "");
+  if (type === "interactive") {
+    const reply = message?.interactive?.button_reply || message?.interactive?.list_reply;
+    return String(reply?.title || reply?.id || "");
+  }
+  if (type === "image" || type === "video") return String(message?.[type]?.caption || `[${type}]`);
+  if (type === "document") return String(message?.document?.caption || message?.document?.filename || "[document]");
+  if (type === "location") {
+    const location = message?.location;
+    return String(location?.name || location?.address || `${location?.latitude || ""},${location?.longitude || ""}`);
+  }
+  if (type === "contacts") {
+    const names = (message?.contacts || []).map((contact: any) => contact?.name?.formatted_name).filter(Boolean);
+    return names.length ? `[contactos] ${names.join(", ")}` : "[contactos]";
+  }
+  if (type === "reaction") return `[reacción] ${String(message?.reaction?.emoji || "retirada")}`;
+  if (["audio", "sticker"].includes(type)) return `[${type}]`;
+  return `[${type}]`;
+}
+
 function validMetaSignature(rawBody: string, signature: string | null): boolean {
   const appSecret = process.env.WHATSAPP_APP_SECRET;
   if (!appSecret || !signature?.startsWith("sha256=")) return false;
@@ -56,7 +79,7 @@ export async function POST(req: Request) {
           const contacts = value?.contacts || [];
           for (const message of value?.messages || []) {
             const phone = String(message?.from || "");
-            const text = String(message?.text?.body || message?.button?.text || "").slice(0, 1000);
+            const text = inboundPreview(message).slice(0, 1000);
             if (!message?.id || !phone || !text) continue;
             const contact = contacts.find((item: any) => String(item?.wa_id || "") === phone) || contacts[0];
             await processInboundMessage({

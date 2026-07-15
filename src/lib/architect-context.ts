@@ -36,6 +36,7 @@ export interface ArchitectSystemContext {
     pendingClickUpEvents: number;
     failedClickUpEvents: number;
     pendingSuggestions: number;
+    whatsappConnections: number;
   };
 }
 
@@ -59,10 +60,6 @@ function settledValue(result: PromiseSettledResult<number>): number {
 export async function collectArchitectContext(): Promise<ArchitectSystemContext> {
   const ai = getSafeAIStatus();
   const payphone = getPayPhoneConfig();
-  const whatsappConfigured = Boolean(
-    process.env.WHATSAPP_ACCESS_TOKEN?.trim() && process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
-  );
-
   const supabase = getSupabaseAdmin();
   const [connectionResult, counts] = await Promise.all([
     supabase
@@ -80,6 +77,7 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
       countRows("clickup_events", { column: "processing_status", values: ["detected", "pending_analysis"] }),
       countRows("clickup_events", { column: "processing_status", value: "failed" }),
       countRows("architecture_suggestions", { column: "approval_status", value: "pending" }),
+      countRows("whatsapp_connections", { column: "status", value: "active" }),
     ]),
   ]);
 
@@ -91,7 +89,13 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
     pendingClickUpEvents: settledValue(counts[4]),
     failedClickUpEvents: settledValue(counts[5]),
     pendingSuggestions: settledValue(counts[6]),
+    whatsappConnections: settledValue(counts[7]),
   };
+
+  const whatsappConfigured = Boolean(
+    process.env.WHATSAPP_ACCESS_TOKEN?.trim() &&
+    (process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || metrics.whatsappConnections > 0)
+  );
 
   const databaseErrors = counts.filter((item) => item.status === "rejected").length;
   const clickupConnected = Boolean(connectionResult.data && !connectionResult.error);
@@ -132,7 +136,9 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
       id: "whatsapp-config",
       module: "whatsapp",
       title: "WhatsApp no está completamente configurado",
-      detail: "No se detectan todas las variables necesarias para WhatsApp Business Cloud API.",
+      detail: metrics.whatsappConnections > 0
+        ? "Hay conexiones por negocio, pero falta el token o la versión de WhatsApp Business Cloud API."
+        : "No se detecta una conexión activa por negocio ni un número emisor de respaldo.",
       severity: "medium",
       suggestedPrompt: "Revisa la configuración de WhatsApp Business y dime qué variables o pruebas faltan.",
     });
@@ -203,7 +209,13 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
     { id: "supabase", label: "Supabase", status: databaseErrors === 0 ? "healthy" : "error", detail: databaseErrors === 0 ? "Datos conectados" : `${databaseErrors} consultas fallidas`, metric: `${metrics.pendingSuggestions} propuestas` },
     { id: "clickup", label: "ClickUp", status: clickupConnected ? (metrics.failedClickUpEvents ? "error" : "healthy") : "error", detail: clickupConnected ? "Webhook activo" : "Sin conexión activa", metric: `${metrics.pendingClickUpEvents} pendientes` },
     { id: "payphone", label: "PayPhone", status: payphone.configured ? (metrics.failedPayments ? "error" : "healthy") : "warning", detail: payphone.configured ? payphone.env : "Configuración incompleta", metric: `${metrics.pendingPayments} pendientes` },
-    { id: "whatsapp", label: "WhatsApp", status: whatsappConfigured ? "healthy" : "warning", detail: whatsappConfigured ? "API configurada" : "Variables incompletas" },
+    {
+      id: "whatsapp",
+      label: "WhatsApp",
+      status: whatsappConfigured ? "healthy" : "warning",
+      detail: whatsappConfigured ? "API oficial configurada" : "Configuración incompleta",
+      metric: `${metrics.whatsappConnections} conexiones activas`,
+    },
     { id: "workflows", label: "Flujos", status: metrics.failedRuns ? "error" : "healthy", detail: `${metrics.workflows} flujos registrados`, metric: `${metrics.failedRuns} fallidos` },
     { id: "vercel", label: "Vercel", status: process.env.VERCEL ? "healthy" : "warning", detail: process.env.VERCEL_ENV || "Entorno local" },
     { id: "ai", label: "Proveedor IA", status: ai.configured ? "healthy" : "warning", detail: ai.configured ? ai.provider : "Fallback local", metric: ai.model },
