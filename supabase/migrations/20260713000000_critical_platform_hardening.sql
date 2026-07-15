@@ -14,10 +14,20 @@ alter table public.profiles add column if not exists full_name text;
 alter table public.profiles add column if not exists status text not null default 'pending';
 alter table public.profiles add column if not exists client_id text;
 
+-- Some early PayFlow deployments created profiles.id as text while newer
+-- Supabase schemas use uuid. Resolve the auth UUID by verified email instead
+-- of casting a legacy identifier that may contain a CUID.
+update public.profiles p
+set user_id = auth_user.id
+from auth.users auth_user
+where p.user_id is null
+  and p.email is not null
+  and auth_user.email is not null
+  and lower(p.email) = lower(auth_user.email);
+
 update public.profiles
-set user_id = coalesce(user_id, id),
-    full_name = coalesce(full_name, name)
-where user_id is null or full_name is null;
+set full_name = coalesce(full_name, name)
+where full_name is null;
 
 create unique index if not exists idx_profiles_user_id on public.profiles(user_id);
 create index if not exists idx_profiles_client_id on public.profiles(client_id);
@@ -29,20 +39,44 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, user_id, email, name, full_name, role, status)
-  values (
-    new.id,
-    new.id,
-    new.email,
-    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
-    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
-    'applicant',
-    'pending'
-  )
-  on conflict (id) do update
-  set user_id = excluded.user_id,
-      email = excluded.email,
-      updated_at = now();
+  if exists (
+    select 1
+    from pg_attribute
+    where attrelid = 'public.profiles'::regclass
+      and attname = 'id'
+      and atttypid = 'uuid'::regtype
+      and not attisdropped
+  ) then
+    insert into public.profiles (id, user_id, email, name, full_name, role, status)
+    values (
+      new.id,
+      new.id,
+      new.email,
+      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
+      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
+      'applicant',
+      'pending'
+    )
+    on conflict (id) do update
+    set user_id = excluded.user_id,
+        email = excluded.email,
+        updated_at = now();
+  else
+    insert into public.profiles (id, user_id, email, name, full_name, role, status)
+    values (
+      new.id::text,
+      new.id,
+      new.email,
+      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
+      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
+      'applicant',
+      'pending'
+    )
+    on conflict (id) do update
+    set user_id = excluded.user_id,
+        email = excluded.email,
+        updated_at = now();
+  end if;
   return new;
 end;
 $$;
@@ -81,7 +115,9 @@ create trigger touch_subscriptions before update on public.subscriptions
 create table if not exists public.client_accounts (
   id uuid primary key default uuid_generate_v4(),
   owner_user_id uuid not null references auth.users(id) on delete restrict,
-  subscription_request_id uuid unique references public.subscription_requests(id) on delete set null,
+  -- Kept as text because legacy requests may use CUIDs while Supabase-native
+  -- requests use UUIDs. The activation function always compares id::text.
+  subscription_request_id text unique,
   business_name text not null,
   business_type text,
   owner_email text not null,
@@ -260,8 +296,9 @@ alter table public.subscription_requests add column if not exists selected_plan_
 
 -- Atomic activation: locks the request, creates the tenant, grants access and
 -- records the entitlement/audit trail together. Callable only by service_role.
+drop function if exists public.activate_subscription_request(uuid, uuid);
 create or replace function public.activate_subscription_request(
-  p_request_id uuid,
+  p_request_id text,
   p_actor_user_id uuid default null
 )
 returns table(client_id uuid, already_active boolean)
@@ -278,7 +315,7 @@ declare
 begin
   select * into request_row
   from public.subscription_requests
-  where id = p_request_id
+  where id::text = p_request_id
   for update;
 
   if not found then
@@ -291,13 +328,13 @@ begin
   order by created_at asc
   limit 1;
 
-  if not found or coalesce(profile_row.user_id, profile_row.id) is null then
+  if not found or profile_row.user_id is null then
     raise exception 'VERIFIED_ACCOUNT_NOT_FOUND';
   end if;
 
   select email_confirmed_at into email_verified_at
   from auth.users
-  where id = coalesce(profile_row.user_id, profile_row.id);
+  where id = profile_row.user_id;
   if email_verified_at is null then
     raise exception 'VERIFIED_ACCOUNT_NOT_FOUND';
   end if;
@@ -322,8 +359,8 @@ begin
       payment_provider,
       status
     ) values (
-      coalesce(profile_row.user_id, profile_row.id),
-      request_row.id,
+      profile_row.user_id,
+      request_row.id::text,
       coalesce(nullif(request_row.business_name, ''), request_row.full_name),
       request_row.business_type,
       lower(request_row.email),
@@ -347,8 +384,7 @@ begin
   end if;
 
   update public.profiles
-  set user_id = coalesce(user_id, id),
-      role = 'client_owner',
+  set role = 'client_owner',
       status = 'active',
       client_id = resolved_client_id::text,
       updated_at = now()
@@ -364,7 +400,7 @@ begin
     activation_source,
     activated_at
   ) values (
-    coalesce(profile_row.user_id, profile_row.id),
+    profile_row.user_id,
     resolved_client_id::text,
     request_row.id::text,
     request_row.selected_plan,
@@ -400,8 +436,8 @@ begin
   return query select resolved_client_id, was_active;
 end;
 $$;
-revoke all on function public.activate_subscription_request(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.activate_subscription_request(uuid, uuid) to service_role;
+revoke all on function public.activate_subscription_request(text, uuid) from public, anon, authenticated;
+grant execute on function public.activate_subscription_request(text, uuid) to service_role;
 
 -- Generic idempotency ledger for external providers.
 create table if not exists public.integration_webhook_events (
@@ -430,7 +466,7 @@ set search_path = public
 as $$
   select exists (
     select 1 from public.profiles
-    where (id = auth.uid() or user_id = auth.uid())
+    where user_id = auth.uid()
       and role in ('admin','super_admin')
   );
 $$;
@@ -443,7 +479,7 @@ security definer
 set search_path = public
 as $$
   select client_id from public.profiles
-  where (id = auth.uid() or user_id = auth.uid())
+  where user_id = auth.uid()
   limit 1;
 $$;
 
@@ -463,7 +499,7 @@ drop policy if exists "profiles_select_own" on public.profiles;
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_select_own_or_admin" on public.profiles
   for select to authenticated
-  using ((select auth.uid()) = id or (select auth.uid()) = user_id or (select public.is_payflow_admin()));
+  using ((select auth.uid()) = user_id or (select public.is_payflow_admin()));
 
 drop policy if exists "subreq_insert_public" on public.subscription_requests;
 drop policy if exists "subreq_select_auth" on public.subscription_requests;
