@@ -9,6 +9,9 @@ export type NodeType =
   | "end"
   // Canales
   | "whatsapp"
+  // Comercio
+  | "catalog_search"
+  | "update_order"
   // Pagos (módulo especializado)
   | "create_payment"
   | "verify_payment"
@@ -143,6 +146,7 @@ export interface ExecutionResult {
 export type NodeCategory =
   | "flow" // Flujo
   | "channel" // Canales
+  | "commerce" // Catálogo y pedidos
   | "payment" // Pagos
   | "intelligence" // Inteligencia
   | "integration"; // Integraciones
@@ -217,6 +221,33 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     category: "channel",
     color: "#22c55e",
     outputs: [{ id: "out", label: "Siguiente" }],
+  },
+
+  // ── Comercio ───────────────────────────────────────
+  catalog_search: {
+    type: "catalog_search",
+    label: "Buscar en catálogo",
+    description: "Consultar un producto activo del negocio",
+    icon: "PackageSearch",
+    category: "commerce",
+    color: "#f97316",
+    outputs: [
+      { id: "found", label: "Encontrado" },
+      { id: "not_found", label: "No encontrado" },
+      { id: "error", label: "Error" },
+    ],
+  },
+  update_order: {
+    type: "update_order",
+    label: "Actualizar pedido",
+    description: "Cambiar el estado operativo de un pedido",
+    icon: "PackageCheck",
+    category: "commerce",
+    color: "#f97316",
+    outputs: [
+      { id: "out", label: "Actualizado" },
+      { id: "error", label: "Error" },
+    ],
   },
 
   // ── Pagos (módulo especializado) ──────────────────
@@ -328,6 +359,7 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
 // Orden de la paleta agrupado por categoría.
 export const PALETTE_CATEGORY_ORDER: NodeCategory[] = [
   "channel",
+  "commerce",
   "payment",
   "intelligence",
   "integration",
@@ -337,6 +369,9 @@ export const PALETTE_CATEGORY_ORDER: NodeCategory[] = [
 export const NODE_PALETTE_ORDER: NodeType[] = [
   // Canales
   "whatsapp",
+  // Comercio
+  "catalog_search",
+  "update_order",
   // Pagos
   "create_payment",
   "verify_payment",

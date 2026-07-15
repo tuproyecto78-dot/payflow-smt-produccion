@@ -40,6 +40,20 @@ export async function resolveWhatsAppClientId(phoneNumberId?: string | null): Pr
   return process.env.WHATSAPP_CLIENT_ID?.trim() || null;
 }
 
+export async function resolveWhatsAppPhoneNumberId(clientId: string): Promise<string | null> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("whatsapp_connections")
+    .select("phone_number_id")
+    .eq("client_id", clientId)
+    .eq("status", "active")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.phone_number_id ? String(data.phone_number_id) : null;
+}
+
 export async function ensureConversation(input: {
   clientId: string;
   externalContactId: string;

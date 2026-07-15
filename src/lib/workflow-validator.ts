@@ -90,6 +90,18 @@ export function validateWorkflow(nodes: FlowNode[], edges: FlowEdge[]) {
           nodeId: node.id,
         });
       }
+    } else if (node.type === "catalog_search") {
+      for (const handle of ["found", "not_found", "error"]) {
+        if (!handles.has(handle)) {
+          issues.push({ code: "MISSING_CATALOG_BRANCH", severity: "error", message: `Buscar en catálogo no conecta “${handle}”.`, nodeId: node.id });
+        }
+      }
+    } else if (node.type === "update_order") {
+      for (const handle of ["out", "error"]) {
+        if (!handles.has(handle)) {
+          issues.push({ code: "MISSING_ORDER_BRANCH", severity: "error", message: `Actualizar pedido no conecta “${handle}”.`, nodeId: node.id });
+        }
+      }
     } else if (!handles.has("out")) {
       issues.push({ code: "MISSING_OUT", severity: "error", message: `El nodo "${String(node.data?.label || node.id)}" no conecta su salida principal.`, nodeId: node.id });
     }

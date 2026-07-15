@@ -98,6 +98,7 @@ export async function POST(req: Request) {
   try {
     // Execute the workflow in Mock mode.
     const result = await executeWorkflow(nodes, edges, {
+      clientId: session.clientId,
       forcePaymentOutcome: body.forcePaymentOutcome,
       questionResponses: body.questionResponses,
     });

@@ -65,6 +65,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const telemetryStartedAt = new Date();
   const result = await executeWorkflow(nodes, edges, {
+    clientId: session.clientId,
     forcePaymentOutcome: body.forcePaymentOutcome,
     questionResponses: body.questionResponses,
   });

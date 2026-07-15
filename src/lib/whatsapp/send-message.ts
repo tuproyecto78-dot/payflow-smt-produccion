@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
   ensureConversation,
   recordOutboundMessage,
+  resolveWhatsAppPhoneNumberId,
   validateConversationOwnership,
 } from "@/lib/whatsapp/repository";
 
@@ -13,6 +14,11 @@ export async function sendWhatsAppMessage(input: {
   messageText: string;
   conversationId?: string | null;
   contactId?: string | null;
+  template?: {
+    name: string;
+    languageCode: string;
+    bodyParameters: string[];
+  } | null;
 }) {
   if (input.conversationId && input.contactId) {
     await validateConversationOwnership({
@@ -30,7 +36,9 @@ export async function sendWhatsAppMessage(input: {
 
   const provider = process.env.WHATSAPP_PROVIDER || "mock";
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const phoneNumberId =
+    (await resolveWhatsAppPhoneNumberId(input.clientId).catch(() => null)) ||
+    process.env.WHATSAPP_PHONE_NUMBER_ID;
   const apiVersion = process.env.WHATSAPP_API_VERSION || "v20.0";
   let providerMessageId = `failed_${randomUUID()}`;
   let status: "sent" | "failed" = "failed";
@@ -44,8 +52,19 @@ export async function sendWhatsAppMessage(input: {
         body: JSON.stringify({
           messaging_product: "whatsapp",
           to: input.phoneNumber.replace(/\D/g, ""),
-          type: "text",
-          text: { body: input.messageText },
+          ...(input.template
+            ? {
+                type: "template",
+                template: {
+                  name: input.template.name,
+                  language: { code: input.template.languageCode },
+                  components: [{
+                    type: "body",
+                    parameters: input.template.bodyParameters.map((text) => ({ type: "text", text })),
+                  }],
+                },
+              }
+            : { type: "text", text: { body: input.messageText } }),
         }),
       });
       const data = await response.json().catch(() => ({}));

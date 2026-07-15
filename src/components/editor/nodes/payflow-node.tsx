@@ -17,6 +17,8 @@ import {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +40,8 @@ const ICONS: Record<string, LucideIcon> = {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
 };
 
 export interface PayFlowNodeData {
@@ -62,6 +66,10 @@ function getNodeSummary(type: NodeType, data: PayFlowNodeData): string {
       const out = data.outputVariable ? ` · → {{${data.outputVariable}}}` : "";
       return phone + out;
     }
+    case "catalog_search":
+      return data.query ? `Buscar “${String(data.query).slice(0, 24)}”` : "Sin búsqueda";
+    case "update_order":
+      return `${data.orderId || "Sin pedido"} → ${data.orderStatus || "confirmed"}`;
     case "payment":
     case "create_payment": {
       const amt = data.amount ?? 0;
