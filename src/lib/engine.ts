@@ -10,8 +10,11 @@ import type {
   WhatsAppSimMessage,
 } from "@/lib/workflow-types";
 import { compareValues, resolveTemplate } from "@/lib/workflow-types";
+import { createServiceRoleClient } from "@/lib/supabase";
 
 interface EngineOptions {
+  // Tenant scope for catalog/order actions. Never take this from node data.
+  clientId?: string | null;
   // Override the payment outcome for deterministic testing.
   forcePaymentOutcome?: PaymentOutcome;
   // Override the question response (mock user input).
@@ -292,6 +295,91 @@ export async function executeWorkflow(
               durationMs: Date.now() - startedAt,
             });
           }
+          nextHandle = "out";
+          break;
+        }
+
+        case "catalog_search": {
+          const outputVariable = String(data.outputVariable || "catalog_product");
+          const query = resolveTemplate(String(data.query || ""), ctx.variables).trim();
+          if (!options.clientId) {
+            ctx.variables[outputVariable] = null;
+            errorMsg = "El flujo no tiene un negocio asociado para consultar el catálogo.";
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "error", message: errorMsg, durationMs: Date.now() - startedAt });
+            nextHandle = "error";
+            break;
+          }
+          if (query.length < 2) {
+            ctx.variables[outputVariable] = null;
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "info", message: "La búsqueda del catálogo necesita al menos 2 caracteres.", durationMs: Date.now() - startedAt });
+            nextHandle = "not_found";
+            break;
+          }
+          const safeQuery = query.replace(/[%_,()]/g, " ").trim();
+          const supabase = createServiceRoleClient();
+          const { data: product, error } = await supabase
+            .from("catalog_products")
+            .select("id, name, description, sku, price, currency, stock, track_inventory, image_url")
+            .eq("client_id", options.clientId)
+            .eq("active", true)
+            .or(`name.ilike.%${safeQuery}%,sku.ilike.%${safeQuery}%`)
+            .limit(1)
+            .maybeSingle();
+          if (error) {
+            ctx.variables[outputVariable] = null;
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "error", message: "No se pudo consultar el catálogo.", durationMs: Date.now() - startedAt });
+            nextHandle = "error";
+            break;
+          }
+          if (!product) {
+            ctx.variables[outputVariable] = null;
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "info", message: `No se encontró un producto activo para “${query}”.`, durationMs: Date.now() - startedAt });
+            nextHandle = "not_found";
+            break;
+          }
+          const catalogProduct = {
+            id: String(product.id),
+            name: String(product.name),
+            description: String(product.description || ""),
+            sku: String(product.sku || ""),
+            price: Number(product.price || 0),
+            currency: String(product.currency || "USD"),
+            available: product.track_inventory === false || Number(product.stock || 0) > 0,
+            image_url: String(product.image_url || ""),
+          };
+          ctx.variables[outputVariable] = catalogProduct;
+          ctx.variables[`${outputVariable}_name`] = catalogProduct.name;
+          ctx.variables[`${outputVariable}_price`] = catalogProduct.price;
+          ctx.variables[`${outputVariable}_available`] = catalogProduct.available;
+          log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "success", message: `Producto encontrado: ${catalogProduct.name} · ${catalogProduct.price.toFixed(2)} ${catalogProduct.currency}.`, durationMs: Date.now() - startedAt });
+          nextHandle = "found";
+          break;
+        }
+
+        case "update_order": {
+          const orderId = resolveTemplate(String(data.orderId || ""), ctx.variables).trim();
+          const orderStatus = String(data.orderStatus || "confirmed");
+          if (!options.clientId || !orderId) {
+            errorMsg = !options.clientId ? "El flujo no tiene un negocio asociado." : "Falta el ID del pedido.";
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "error", message: errorMsg, durationMs: Date.now() - startedAt });
+            nextHandle = "error";
+            break;
+          }
+          const supabase = createServiceRoleClient();
+          const { error } = await supabase.rpc("update_catalog_order_status", {
+            p_client_id: options.clientId,
+            p_order_id: orderId,
+            p_status: orderStatus,
+            p_payment_status: null,
+          });
+          if (error) {
+            log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "error", message: `No se pudo actualizar el pedido: ${error.message}`, durationMs: Date.now() - startedAt });
+            nextHandle = "error";
+            break;
+          }
+          ctx.variables["order_id"] = orderId;
+          ctx.variables["order_status"] = orderStatus;
+          log(ctx, { nodeId: node.id, nodeType: node.type, nodeLabel: label, status: "success", message: `Pedido ${orderId} actualizado a ${orderStatus}.`, durationMs: Date.now() - startedAt });
           nextHandle = "out";
           break;
         }

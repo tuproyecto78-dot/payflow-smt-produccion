@@ -22,6 +22,8 @@ import {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -41,10 +43,13 @@ const ICONS: Record<string, LucideIcon> = {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
 };
 
 const CATEGORY_LABELS: Record<NodeCategory, string> = {
   channel: "Canales",
+  commerce: "Catálogo y pedidos",
   payment: "Pagos",
   intelligence: "Inteligencia",
   integration: "Integraciones",
@@ -53,6 +58,7 @@ const CATEGORY_LABELS: Record<NodeCategory, string> = {
 
 const CATEGORY_ACCENT: Record<NodeCategory, string> = {
   channel: "border-l-emerald-400",
+  commerce: "border-l-orange-400",
   payment: "border-l-indigo-400",
   intelligence: "border-l-pink-400",
   integration: "border-l-teal-400",
