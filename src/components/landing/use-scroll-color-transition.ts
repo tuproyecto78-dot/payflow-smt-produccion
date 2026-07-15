@@ -55,7 +55,7 @@ export function useScrollColorTransition(rootRef: React.RefObject<HTMLDivElement
               },
             });
           };
-          const sections: Record<string, ThemeName> = { hero: "dark", plataforma: "light", beneficios: "grey", precios: "light", nosotros: "dark", footer: "dark" };
+          const sections: Record<string, ThemeName> = { hero: "dark", trust: "dark", capacidades: "dark", plataforma: "light", how: "dark", beneficios: "grey", precios: "light", nosotros: "dark", cta: "dark", footer: "dark" };
           Object.entries(sections).forEach(([section, theme]) => {
             const el = root.querySelector(`[data-section='${section}']`);
             if (el) ScrollTrigger.create({ trigger: el, start: section === "hero" ? "top 80%" : "top 70%", end: "bottom 20%", onEnter: () => transitionTo(theme), onEnterBack: () => transitionTo(theme) });

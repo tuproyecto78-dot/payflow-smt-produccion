@@ -4,7 +4,8 @@ import {
   isSupabaseConfigured,
   createServiceRoleClient,
 } from "@/lib/supabase";
-import { requireAdmin } from "@/lib/auth/require-session";
+import { requireSession } from "@/lib/auth/require-session";
+import { isInternalAccessRole } from "@/lib/auth/access-profile";
 import {
   rateLimit,
   getClientIP,
@@ -200,14 +201,20 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  const admin = await requireAdmin();
-  if (!admin) return NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 });
+  const session = await requireSession();
+  if (!session) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+  const canListAll = isInternalAccessRole(session.role);
 
   // If Supabase is configured, query subscription_requests from Supabase.
   if (isSupabaseConfigured) {
     try {
       const supabase = createServiceRoleClient();
-      const { data, error } = await supabase.from("subscription_requests").select("*").order("created_at", { ascending: false });
+      let query = supabase
+        .from("subscription_requests")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!canListAll) query = query.eq("email", session.email.toLowerCase());
+      const { data, error } = await query;
       if (error) throw error;
       return NextResponse.json({ requests: (data || []).map((row) => normalizeSupabaseRequest(row)) });
     } catch (err) {
@@ -218,7 +225,11 @@ export async function GET() {
 
   // Prisma fallback (local dev / ephemeral Vercel DB).
   try {
-    const requests = await db.subscriptionRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    const requests = await db.subscriptionRequest.findMany({
+      where: canListAll ? undefined : { email: session.email.toLowerCase() },
+      orderBy: { createdAt: "desc" },
+      take: canListAll ? 200 : 20,
+    });
     return NextResponse.json({
       requests: requests.map((r) => ({
         id: r.id,

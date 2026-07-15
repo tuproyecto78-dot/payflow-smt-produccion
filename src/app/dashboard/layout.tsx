@@ -68,7 +68,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (initialized && !user) {
       const next = encodeURIComponent(pathname || "/dashboard");
       window.location.href = `/login?next=${next}`;
-    } else if (initialized && user && user.active === false) {
+      return;
+    }
+    if (
+      initialized &&
+      user &&
+      (user.active === false || user.role === "applicant")
+    ) {
       window.location.href = "/cuenta/estado";
     }
   }, [initialized, user, pathname]);
@@ -90,7 +96,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   // Loading state
-  if (!initialized || !user || user.active === false) {
+  if (!initialized || !user || user.active === false || user.role === "applicant") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
         <div className="size-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">

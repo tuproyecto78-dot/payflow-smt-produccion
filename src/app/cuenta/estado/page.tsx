@@ -1,65 +1,359 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { CheckCircle2, CreditCard, Loader2, LogOut, ShieldCheck } from "lucide-react";
+import {
+  Loader2,
+  LogOut,
+  ArrowRight,
+  Mail,
+  Building2,
+  CreditCard,
+  Tag,
+  Clock,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
-type AccountUser = { email: string; active: boolean; clientStatus?: string | null };
+interface MeUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  clientStatus?: string | null;
+  active?: boolean;
+}
 
-export default function AccountStatusPage() {
+interface SubscriptionRequest {
+  id: string;
+  selectedPlan?: string;
+  selectedPlanLabel?: string;
+  selectedPlanPrice?: number | string;
+  businessName?: string | null;
+  email?: string | null;
+  subscriptionStatus?: string | null;
+  createdAt?: string;
+}
+
+type ProfileStatus =
+  | "pending_review"
+  | "activated"
+  | "active"
+  | "rejected"
+  | "pending"
+  | "unknown";
+
+const STATUS_META: Record<
+  ProfileStatus,
+  { label: string; tone: "amber" | "emerald" | "red" | "muted"; icon: typeof Clock }
+> = {
+  pending_review: {
+    label: "En revisión",
+    tone: "amber",
+    icon: Clock,
+  },
+  pending: {
+    label: "Pendiente",
+    tone: "amber",
+    icon: Clock,
+  },
+  activated: {
+    label: "Activada",
+    tone: "emerald",
+    icon: CheckCircle2,
+  },
+  active: {
+    label: "Activa",
+    tone: "emerald",
+    icon: CheckCircle2,
+  },
+  rejected: {
+    label: "Rechazada",
+    tone: "red",
+    icon: XCircle,
+  },
+  unknown: {
+    label: "Sin estado",
+    tone: "muted",
+    icon: Clock,
+  },
+};
+
+function resolveStatus(
+  user: MeUser | null,
+  sub?: SubscriptionRequest | null
+): ProfileStatus {
+  if (user?.active) return "active";
+  if (user?.clientStatus === "active") return "active";
+  if (sub?.subscriptionStatus === "activated") return "activated";
+  if (sub?.subscriptionStatus === "rejected") return "rejected";
+  if (sub?.subscriptionStatus === "pending_review") return "pending_review";
+  if (sub?.subscriptionStatus === "active") return "active";
+  if (user?.clientStatus === "pending_review" || user?.clientStatus === "pending")
+    return "pending";
+  return "pending";
+}
+
+function StatusBadge({ status }: { status: ProfileStatus }) {
+  const meta = STATUS_META[status];
+  const Icon = meta.icon;
+  const toneClass = {
+    amber:
+      "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    emerald:
+      "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    red: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    muted: "bg-muted text-muted-foreground border-border",
+  }[meta.tone];
+  return (
+    <Badge variant="outline" className={cn("gap-1.5 px-2.5 py-1", toneClass)}>
+      <Icon className="size-3.5" />
+      {meta.label}
+    </Badge>
+  );
+}
+
+export default function CuentaEstadoPage() {
   const router = useRouter();
-  const [user, setUser] = useState<AccountUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<MeUser | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionRequest | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [meRes, subRes] = await Promise.all([
+        fetch("/api/auth/me", { credentials: "include" }),
+        fetch("/api/subscriptions", { credentials: "include" }),
+      ]);
+
+      let meUser: MeUser | null = null;
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        meUser = meData.user || null;
+        setUser(meUser);
+      }
+
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        const requests: SubscriptionRequest[] = Array.isArray(subData.requests)
+          ? subData.requests
+          : [];
+        const email = meUser?.email?.toLowerCase().trim();
+        const matching =
+          email && requests.length > 0
+            ? requests.find(
+                (r) => (r.email || "").toLowerCase().trim() === email
+              )
+            : null;
+        setSubscription(matching || requests[0] || null);
+      }
+    } catch {
+      setError("No pudimos cargar tu información. Intenta nuevamente.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data.user) return router.replace("/login");
-        if (data.user.active) return router.replace("/dashboard");
-        setUser(data.user);
-      })
-      .finally(() => setLoading(false));
-  }, [router]);
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
 
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    window.location.href = "/login";
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // ignore
+    } finally {
+      setLoggingOut(false);
+      window.location.href = "/login";
+    }
   }
 
-  if (loading || !user) {
-    return <main className="min-h-screen flex items-center justify-center"><Loader2 className="size-7 animate-spin text-emerald-600" /></main>;
-  }
+  const status = resolveStatus(user, subscription);
+  const isApproved = status === "active" || status === "activated";
+  const isRejected = status === "rejected";
 
   return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <section className="w-full max-w-2xl rounded-2xl border bg-white p-8 shadow-sm">
-        <div className="flex items-start gap-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-blue-950 text-white"><ShieldCheck className="size-6" /></div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-950">Tu cuenta está protegida</h1>
-            <p className="mt-1 text-sm text-slate-600">{user.email}</p>
-          </div>
+    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-lg space-y-6">
+        <div className="text-center space-y-1.5">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Estado de tu cuenta
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Revisa el estado de tu solicitud y los detalles de tu plan.
+          </p>
         </div>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border p-5">
-            <CheckCircle2 className="size-5 text-emerald-600" />
-            <h2 className="mt-3 font-semibold">Identidad verificada</h2>
-            <p className="mt-1 text-sm text-slate-600">El correo ya fue validado correctamente.</p>
-          </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-            <CreditCard className="size-5 text-amber-700" />
-            <h2 className="mt-3 font-semibold">Suscripción pendiente</h2>
-            <p className="mt-1 text-sm text-slate-600">El dashboard se habilitará cuando el pago sea confirmado.</p>
-          </div>
-        </div>
-        <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-          <Button asChild className="sm:flex-1"><Link href="/#suscripcion">Seleccionar o revisar plan</Link></Button>
-          <Button variant="outline" onClick={logout}><LogOut className="mr-2 size-4" />Cerrar sesión</Button>
-        </div>
-      </section>
-    </main>
+
+        {loading ? (
+          <Card>
+            <CardContent className="py-10 flex flex-col items-center gap-3">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Cargando…</p>
+            </CardContent>
+          </Card>
+        ) : error ? (
+          <Card>
+            <CardContent className="py-8 text-center space-y-3">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button variant="outline" onClick={() => void loadData()}>
+                Reintentar
+              </Button>
+            </CardContent>
+          </Card>
+        ) : !user ? (
+          <Card>
+            <CardContent className="py-8 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">
+                No has iniciado sesión.
+              </p>
+              <Button onClick={() => router.push("/login")}>
+                Ir a iniciar sesión
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">Tu solicitud</CardTitle>
+                  <CardDescription>
+                    Información de tu cuenta y plan contratado.
+                  </CardDescription>
+                </div>
+                <StatusBadge status={status} />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <DetailRow
+                  icon={Mail}
+                  label="Correo"
+                  value={user.email || "—"}
+                />
+                <DetailRow
+                  icon={Tag}
+                  label="Plan solicitado"
+                  value={
+                    subscription?.selectedPlanLabel ||
+                    (subscription?.selectedPlan
+                      ? String(subscription.selectedPlan)
+                      : "—")
+                  }
+                />
+                <DetailRow
+                  icon={CreditCard}
+                  label="Precio"
+                  value={
+                    subscription?.selectedPlanPrice != null
+                      ? `$${subscription.selectedPlanPrice}`
+                      : "—"
+                  }
+                />
+                <DetailRow
+                  icon={Building2}
+                  label="Negocio"
+                  value={subscription?.businessName || "—"}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="py-5 space-y-4">
+                {status === "pending_review" || status === "pending" ? (
+                  <div className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
+                    <Clock className="size-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      Tu solicitud está en revisión. Te contactaremos pronto.
+                    </p>
+                  </div>
+                ) : isApproved ? (
+                  <div className="flex items-start gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-4">
+                    <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+                    <p className="text-sm text-emerald-800 dark:text-emerald-200">
+                      ¡Tu cuenta está activa! Ya puedes acceder a tu panel.
+                    </p>
+                  </div>
+                ) : isRejected ? (
+                  <div className="flex items-start gap-3 rounded-md border border-red-500/30 bg-red-500/10 p-4">
+                    <XCircle className="size-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                    <p className="text-sm text-red-800 dark:text-red-200">
+                      Tu solicitud fue rechazada. Contacta a soporte.
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {isApproved && (
+                    <Button
+                      className="flex-1"
+                      onClick={() => router.push("/dashboard")}
+                    >
+                      Ir al dashboard
+                      <ArrowRight className="size-4 ml-2" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className={cn(!isApproved && "w-full")}
+                  >
+                    {loggingOut ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <LogOut className="size-4 mr-2" />
+                    )}
+                    Cerrar sesión
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Mail;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Icon className="size-4" />
+        {label}
+      </div>
+      <div className="text-sm font-medium text-right truncate max-w-[60%]">
+        {value}
+      </div>
+    </div>
   );
 }

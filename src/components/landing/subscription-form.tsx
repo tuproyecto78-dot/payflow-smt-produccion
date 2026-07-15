@@ -141,7 +141,11 @@ export function SubscriptionForm({ open, onOpenChange, plan }: { open: boolean; 
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Error al enviar la solicitud."); return; }
+      // Redirect to the signup flow with a success banner.
       setSuccess(true);
+      setTimeout(() => {
+        window.location.href = "/login?mode=signup&subscription=completed";
+      }, 800);
     } catch {
       setError("Error de red.");
     } finally {

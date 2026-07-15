@@ -3,6 +3,7 @@ import { createSessionToken, setSessionCookie } from "@/lib/session";
 import { ROLES } from "@/lib/roles";
 import { ensureAccessProfile } from "@/lib/auth/access-profile";
 import { getClientIP, isValidEmail, rateLimit, RATE_LIMIT_ERROR } from "@/lib/security";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase";
 
 export async function POST(req: Request) {
   const ip = getClientIP(req);
@@ -23,12 +24,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "La contraseña debe tener al menos 10 caracteres." }, { status: 400 });
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (supabaseUrl && supabaseAnonKey) {
+    if (isSupabaseConfigured) {
       const { createClient } = await import("@supabase/supabase-js");
-      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: { persistSession: false, autoRefreshToken: false },
       });
       const origin = new URL(req.url).origin;

@@ -13,13 +13,20 @@ export interface AuthUser {
   active?: boolean;
 }
 
+interface AuthResult {
+  ok: boolean;
+  error?: string;
+  next?: string;
+  requiresEmailConfirmation?: boolean;
+}
+
 interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   initialized: boolean;
   fetchUser: () => Promise<void>;
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string; next?: string }>;
-  signup: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string; next?: string; requiresEmailConfirmation?: boolean }>;
+  login: (email: string, password: string) => Promise<AuthResult>;
+  signup: (email: string, password: string, name: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
 }
 

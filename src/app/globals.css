@@ -237,3 +237,73 @@
 .pf-bubble {
   animation: pf-bubble-in 0.25s ease-out;
 }
+
+/* ---- Landing modern animations ---- */
+@keyframes pf-float-slow {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(20px, -30px); }
+}
+@keyframes pf-float-slower {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-25px, 25px); }
+}
+.pf-float-slow {
+  animation: pf-float-slow 14s ease-in-out infinite;
+}
+.pf-float-slower {
+  animation: pf-float-slower 20s ease-in-out infinite;
+}
+
+@keyframes pf-pulse-soft {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
+.pf-pulse-soft {
+  animation: pf-pulse-soft 4s ease-in-out infinite;
+}
+
+/* Premium scrollbar for landing page */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 208, 132, 0.4) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0, 208, 132, 0.5), rgba(0, 176, 112, 0.4));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(0, 208, 132, 0.7), rgba(0, 176, 112, 0.6));
+  background-clip: content-box;
+}
+
+/* Smooth scroll for landing navigation */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .pf-float-slow,
+  .pf-float-slower,
+  .pf-pulse-soft {
+    animation: none !important;
+  }
+}
+
+/* Selection color */
+::selection {
+  background: rgba(0, 208, 132, 0.3);
+  color: #fff;
+}

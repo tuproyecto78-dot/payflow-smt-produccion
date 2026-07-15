@@ -14,6 +14,7 @@ const ACTIVE_API_PREFIXES = [
   "/api/appointments",
   "/api/audit-logs",
   "/api/availability",
+  "/api/catalog",
   "/api/clickup/connect",
   "/api/commercial-agent",
   "/api/executions",
@@ -58,21 +59,37 @@ function withSecurityHeaders(response: NextResponse) {
   return response;
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isDashboard = pathname.startsWith("/dashboard");
+  const isOwnSubscriptionApi =
+    pathname === "/api/subscriptions" && request.method === "GET";
   const isSubscriptionAdminApi =
     pathname.startsWith("/api/subscriptions") &&
-    !(pathname === "/api/subscriptions" && request.method === "POST");
+    !(
+      pathname === "/api/subscriptions" &&
+      (request.method === "GET" || request.method === "POST")
+    );
   const isProtectedApi =
-    (isSubscriptionAdminApi || ACTIVE_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) &&
+    (
+      isOwnSubscriptionApi ||
+      isSubscriptionAdminApi ||
+      ACTIVE_API_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+      )
+    ) &&
     !PUBLIC_WEBHOOKS.has(pathname);
 
   if (isDashboard || isProtectedApi) {
     const claims = await readClaims(request);
     if (!claims || claims.emailVerified !== true) {
       if (isProtectedApi) {
-        return withSecurityHeaders(NextResponse.json({ error: "No autenticado.", code: "UNAUTHORIZED" }, { status: 401 }));
+        return withSecurityHeaders(
+          NextResponse.json(
+            { error: "No autenticado.", code: "UNAUTHORIZED" },
+            { status: 401 }
+          )
+        );
       }
       const login = new URL("/login", request.url);
       login.searchParams.set("next", pathname);
@@ -81,24 +98,49 @@ export async function proxy(request: NextRequest) {
 
     const role = String(claims.role || "applicant");
     const active = INTERNAL_ROLES.has(role) || claims.status === "active";
-    if (!active) {
+    if (!active && !isOwnSubscriptionApi) {
       if (isProtectedApi) {
-        return withSecurityHeaders(NextResponse.json(
-          { error: "La suscripción no está activa.", code: "SUBSCRIPTION_REQUIRED" },
-          { status: 403 }
-        ));
+        return withSecurityHeaders(
+          NextResponse.json(
+            {
+              error: "La suscripción no está activa.",
+              code: "SUBSCRIPTION_REQUIRED",
+            },
+            { status: 403 }
+          )
+        );
       }
-      return withSecurityHeaders(NextResponse.redirect(new URL("/cuenta/estado", request.url)));
+      return withSecurityHeaders(
+        NextResponse.redirect(new URL("/cuenta/estado", request.url))
+      );
     }
 
-    if ((pathname.startsWith("/api/admin") || isSubscriptionAdminApi) && !ADMIN_ROLES.has(role)) {
-      return withSecurityHeaders(NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 }));
+    if (
+      (pathname.startsWith("/api/admin") || isSubscriptionAdminApi) &&
+      !ADMIN_ROLES.has(role)
+    ) {
+      return withSecurityHeaders(
+        NextResponse.json(
+          { error: "Se requiere rol de administrador." },
+          { status: 403 }
+        )
+      );
     }
   }
 
-  const response = NextResponse.next({ request: { headers: request.headers } });
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/api/") || pathname === "/" || pathname === "/login") {
-    response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  const response = NextResponse.next({
+    request: { headers: request.headers },
+  });
+  if (
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/api/") ||
+    pathname === "/" ||
+    pathname === "/login"
+  ) {
+    response.headers.set(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0"
+    );
     response.headers.set("Pragma", "no-cache");
     response.headers.set("Expires", "0");
   }
@@ -106,5 +148,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

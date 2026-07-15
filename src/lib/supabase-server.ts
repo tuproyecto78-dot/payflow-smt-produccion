@@ -10,7 +10,21 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+/**
+ * Sanitize the Supabase URL so it is ALWAYS a bare project URL.
+ * Prevents the "/rest/v1/auth/v1/authorize" bug.
+ */
+function sanitizeSupabaseUrl(raw: string): string {
+  let url = (raw || "").trim();
+  url = url.replace(/\/+$/, "");
+  url = url.replace(/\/rest\/v\d+$/i, "");
+  url = url.replace(/\/auth\/v\d+$/i, "");
+  url = url.replace(/\/rest$/i, "");
+  url = url.replace(/\/auth$/i, "");
+  return url;
+}
+
+const SUPABASE_URL = sanitizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || "");
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
