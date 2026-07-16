@@ -26,6 +26,13 @@ un negocio pueda escribir pedidos o llamadas en otro.
 | Stripe/PayPhone | creación y confirmación oficial del cobro |
 | WhatsApp Cloud API | enlace de pago y confirmación del pedido o reserva |
 
+## Validación previa
+
+Las ramas funcionales se validan primero mediante un despliegue **Preview**
+de Vercel. La migración y las variables de producción se aplican únicamente
+después de comprobar el build, el aislamiento multiempresa y una llamada de
+prueba completa. Crear el Preview no modifica el dominio de producción.
+
 ## Puesta en producción
 
 1. Aplicar, en este orden, las migraciones de hardening, catálogo, WhatsApp y
