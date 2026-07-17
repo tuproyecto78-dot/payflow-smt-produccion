@@ -6,6 +6,7 @@ import { CallSession } from "./call-session.js";
 import { loadConfig } from "./config.js";
 import { PayFlowClient } from "./payflow.js";
 import { createRoutingToken, verifyRoutingToken } from "./security.js";
+import { handleTelnyxWebhook, telnyxActiveSessions } from "./telnyx.js";
 
 const config = loadConfig();
 const payflow = new PayFlowClient(config);
@@ -41,6 +42,7 @@ function requestPublicUrl(request: IncomingMessage, websocket = false) {
 
 function validateTwilio(request: IncomingMessage, params: Record<string, string>, websocket = false) {
   if (!config.TWILIO_VALIDATE_SIGNATURES) return true;
+  if (!config.TWILIO_AUTH_TOKEN) return false;
   const signature = String(request.headers["x-twilio-signature"] || "");
   return Boolean(signature) && twilio.validateRequest(
     config.TWILIO_AUTH_TOKEN,
@@ -75,7 +77,7 @@ async function voiceWebhook(request: IncomingMessage, response: ServerResponse) 
   const callerPhone = String(params.From || params.Caller || "").trim();
   const providerPhoneId = String(params.PhoneNumberSid || "").trim();
   try {
-    const context = await payflow.getContext({ providerPhoneId, businessPhone });
+    const context = await payflow.getContext({ providerPhoneId, businessPhone }, "twilio");
     const now = Date.now();
     const token = createRoutingToken({
       providerPhoneId,
@@ -122,10 +124,23 @@ const server = createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url || "/", "http://runtime.local").pathname;
     if (request.method === "GET" && pathname === "/health") {
-      return send(response, 200, "application/json; charset=utf-8", JSON.stringify({ ok: true, service: "payflow-voice-runtime" }));
+      return send(response, 200, "application/json; charset=utf-8", JSON.stringify({
+        ok: true,
+        service: "payflow-voice-runtime",
+        providers: {
+          twilio: Boolean(config.TWILIO_AUTH_TOKEN),
+          telnyx: Boolean(config.TELNYX_API_KEY),
+        },
+        telnyxActiveSessions: telnyxActiveSessions(),
+      }));
     }
     if (request.method === "POST" && pathname === "/twilio/voice") return await voiceWebhook(request, response);
     if (request.method === "POST" && pathname === "/twilio/connect-action") return await connectAction(request, response);
+    if (request.method === "POST" && pathname === "/telnyx/voice") {
+      const rawBody = await bodyText(request);
+      const result = await handleTelnyxWebhook({ rawBody, headers: request.headers, config, payflow });
+      return send(response, result.status, "application/json; charset=utf-8", JSON.stringify(result.body));
+    }
     return send(response, 404, "application/json; charset=utf-8", JSON.stringify({ error: "Ruta no encontrada" }));
   } catch (error) {
     console.error("[http]", error);
@@ -145,7 +160,7 @@ server.on("upgrade", (request, socket, head) => {
         businessPhone: claims.businessPhone,
         callerPhone: claims.callerPhone,
       };
-      const context = await payflow.getContext(route);
+      const context = await payflow.getContext(route, "twilio");
       webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
         const session = new CallSession(webSocket, config, payflow, context, route);
         webSocket.on("message", (message) => session.onMessage(message));
