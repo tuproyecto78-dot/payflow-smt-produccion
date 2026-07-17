@@ -9,9 +9,9 @@ reservas, iniciar un cobro con PayPhone o Stripe y confirmar por WhatsApp.
 
 PayFlow en Vercel es el **plano de control**: configuración, permisos,
 catálogo, pedidos, reservas, pagos, auditoría y panel. El audio en tiempo real
-debe ejecutarse en un servicio persistente separado (Pipecat con
-Twilio/Fonoster/SIP). Una función serverless no debe mantener la sesión de
-audio/WebSocket de una llamada completa.
+se ejecuta en `services/voice-runtime`, un servicio persistente para Railway
+basado en Twilio ConversationRelay. Una función serverless no debe mantener la
+sesión de audio/WebSocket de una llamada completa.
 
 El runtime no decide el `client_id`. PayFlow resuelve el negocio usando el ID
 del número del proveedor o el número de destino. Esto evita que un evento de
@@ -21,7 +21,7 @@ un negocio pueda escribir pedidos o llamadas en otro.
 |---|---|
 | Vercel / PayFlow | panel, autenticación, API, catálogo, pedidos y auditoría |
 | Supabase | aislamiento por `client_id`, llamadas, reservas y eventos durables |
-| Runtime Pipecat | audio, interrupciones, STT/LLM/TTS y llamadas a herramientas |
+| Runtime Railway | WebSocket persistente, conversación, LLM y herramientas seguras |
 | Twilio/Fonoster/SIP | recepción o desvío del número conocido del negocio |
 | Stripe/PayPhone | creación y confirmación oficial del cobro |
 | WhatsApp Cloud API | enlace de pago y confirmación del pedido o reserva |
@@ -46,6 +46,11 @@ prueba completa. Crear el Preview no modifica el dominio de producción.
    PayFlow. El número no necesita tener instalada la app de WhatsApp.
 6. Probar una llamada, un pedido, una reserva, una transferencia humana y un
    pago de prueba antes de habilitar llamadas públicas.
+
+Para evitar mezclar negocios, la primera versión asigna una ruta/número Twilio
+exclusivo a cada negocio. El negocio conserva su número conocido y lo desvía a
+esa ruta. Si se requiere compartir una sola ruta, el operador/SIP debe conservar
+de forma verificable el número originalmente marcado.
 
 ## Contrato con el runtime
 
