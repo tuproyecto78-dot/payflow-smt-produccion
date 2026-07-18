@@ -12,12 +12,18 @@ type TelnyxEvent = {
   };
 };
 
-type ConversationMessage = { role: "system" | "user" | "assistant"; content: string };
-
 type TelnyxSession = {
   route: RoutingIdentity;
   context: VoiceContext;
-  messages: ConversationMessage[];
+  providerCallId: string;
+  conversationId: string;
+};
+
+type TelnyxActionResponse = {
+  data?: {
+    result?: string;
+    conversation_id?: string;
+  };
 };
 
 const sessions = new Map<string, TelnyxSession>();
@@ -49,7 +55,12 @@ export function verifyTelnyxWebhook(rawBody: string, headers: IncomingHttpHeader
   }
 }
 
-async function telnyxAction(config: RuntimeConfig, callControlId: string, action: string, body: Record<string, unknown> = {}) {
+async function telnyxAction(
+  config: RuntimeConfig,
+  callControlId: string,
+  action: string,
+  body: Record<string, unknown> = {},
+): Promise<TelnyxActionResponse> {
   if (!config.TELNYX_API_KEY) throw new Error("TELNYX_API_KEY_MISSING");
   const response = await fetch(`https://api.telnyx.com/v2/calls/${encodeURIComponent(callControlId)}/actions/${action}`, {
     method: "POST",
@@ -60,15 +71,35 @@ async function telnyxAction(config: RuntimeConfig, callControlId: string, action
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
   });
+  const json = await response.json().catch(() => ({})) as TelnyxActionResponse & Record<string, unknown>;
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`TELNYX_${action}_${response.status}: ${text.slice(0, 300)}`);
+    throw new Error(`TELNYX_${action}_${response.status}: ${JSON.stringify(json).slice(0, 300)}`);
   }
+  return json;
+}
+
+function stringValue(payload: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function numberValue(payload: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return 0;
 }
 
 function availableCatalog(context: VoiceContext) {
+  if (!context.agent.actions.catalog) return [];
   return (context.catalog?.products || [])
     .filter((product) => product.available)
+    .slice(0, 100)
     .map((product) => ({
       id: product.id,
       name: product.name,
@@ -81,59 +112,73 @@ function availableCatalog(context: VoiceContext) {
 function systemPrompt(context: VoiceContext) {
   const products = availableCatalog(context);
   return [
-    `Eres ${context.agent.name}, la persona encargada de atender llamadas de ${context.business.name}.`,
-    "Habla en español natural, cálido y profesional. No digas que eres una IA salvo que te lo pregunten directamente.",
-    "Tu prioridad es escuchar, responder preguntas, tomar pedidos y recomendar promociones o complementos de forma pertinente, nunca recitar todo el menú.",
-    "Responde en frases breves porque estás en una llamada. Confirma cantidades, variantes, dirección o retiro y el total antes de cerrar.",
-    "No solicites ni proceses números de tarjeta por voz. Cuando el pedido esté confirmado, indica que enviarás un enlace seguro de pago.",
+    `Eres ${context.agent.name}, asistente virtual de voz de ${context.business.name}.`,
+    "Atiendes exclusivamente llamadas entrantes. Nunca inicies llamadas, no transfieras la llamada y no prometas devolverla.",
+    "Conversa de forma cálida, natural y humana, con frases breves. Haz una sola pregunta a la vez y permite que la persona te interrumpa.",
+    "Detecta el idioma del cliente y responde en ese mismo idioma. El idioma predeterminado es español de Ecuador; también puedes continuar en inglés, portugués u otro idioma compatible.",
+    "No finjas ser una persona. Si te preguntan, responde con naturalidad que eres el asistente virtual del negocio.",
+    "Escucha primero. Responde preguntas, explica promociones pertinentes y ayuda a construir un pedido o reserva sin recitar todo el catálogo.",
+    "Nunca inventes productos, precios, disponibilidad, horarios, promociones ni políticas. Usa únicamente el contexto autorizado del negocio.",
+    "Confirma cantidades, variantes, dirección o retiro y el total antes de cerrar un pedido.",
+    "No solicites números completos de tarjeta, CVV, claves ni códigos. El cobro se realiza mediante un enlace seguro enviado por PayFlow.",
+    "No afirmes que un pedido, reserva o pago fue registrado si una herramienta autorizada no lo confirmó.",
     context.agent.instructions,
-    `Catálogo disponible en JSON: ${JSON.stringify(products)}`,
+    products.length > 0
+      ? `Catálogo publicado y disponible en JSON: ${JSON.stringify(products)}`
+      : "No hay un catálogo publicado disponible. No inventes productos ni precios.",
   ].filter(Boolean).join("\n");
 }
 
-async function llmReply(config: RuntimeConfig, messages: ConversationMessage[]) {
-  const response = await fetch(`${config.LLM_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config.LLM_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.LLM_MODEL,
-      messages,
-      temperature: 0.55,
-      max_tokens: 180,
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const json = await response.json().catch(() => ({})) as Record<string, any>;
-  if (!response.ok) throw new Error(`LLM_${response.status}: ${String(json.error?.message || "Error")}`);
-  return String(json.choices?.[0]?.message?.content || "Lo siento, ¿puede repetirlo?").trim();
+function transcriptFromPayload(payload: Record<string, unknown>) {
+  const raw = payload.message_history || payload.messages;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const row = message as Record<string, unknown>;
+    const text = typeof row.content === "string" ? row.content.trim() : "";
+    if (!text) return [];
+    const role = String(row.role || "system");
+    const speaker = role === "user" ? "customer" : role === "assistant" ? "agent" : "system";
+    return [{ speaker, text }];
+  }).slice(-1000);
 }
 
-async function speak(config: RuntimeConfig, callControlId: string, text: string) {
-  await telnyxAction(config, callControlId, "speak", {
-    payload: text,
-    voice: config.TELNYX_VOICE,
-    language_code: config.TELNYX_LANGUAGE,
-  });
-}
-
-async function listen(config: RuntimeConfig, callControlId: string) {
-  await telnyxAction(config, callControlId, "gather", {
-    input_type: "speech",
-    language_code: config.TELNYX_LANGUAGE,
-    end_silence_timeout_secs: 1.5,
-    timeout_secs: 20,
-  });
-}
-
-function stringValue(payload: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
+function summaryFromPayload(payload: Record<string, unknown>) {
+  const direct = stringValue(payload, "summary", "conversation_summary", "call_summary");
+  if (direct) return direct.slice(0, 2000);
+  const insights = payload.insights || payload.result;
+  if (typeof insights === "string") return insights.slice(0, 2000);
+  if (insights && typeof insights === "object") return JSON.stringify(insights).slice(0, 2000);
   return "";
+}
+
+function scheduleSessionCleanup(callControlId: string) {
+  const timer = setTimeout(() => sessions.delete(callControlId), 10 * 60_000);
+  timer.unref();
+}
+
+async function startAssistant(
+  config: RuntimeConfig,
+  callControlId: string,
+  eventId: string,
+  context: VoiceContext,
+) {
+  if (!config.TELNYX_ASSISTANT_ID) throw new Error("TELNYX_ASSISTANT_ID_MISSING");
+  const assistant: Record<string, unknown> = {
+    id: config.TELNYX_ASSISTANT_ID,
+    instructions: systemPrompt(context),
+    greeting: context.agent.greeting,
+    // An empty tool list prevents a template from dialing or transferring.
+    // PayFlow tools for orders/payments are attached separately after validation.
+    tools: [],
+  };
+  if (config.TELNYX_VOICE) assistant.voice = config.TELNYX_VOICE;
+
+  return telnyxAction(config, callControlId, "ai_assistant_start", {
+    assistant,
+    send_message_history_updates: true,
+    command_id: `payflow-${eventId}`.slice(0, 120),
+  });
 }
 
 export async function handleTelnyxWebhook(input: {
@@ -146,7 +191,13 @@ export async function handleTelnyxWebhook(input: {
     return { status: 401, body: { error: "Firma Telnyx inválida" } };
   }
 
-  const event = JSON.parse(input.rawBody || "{}") as TelnyxEvent;
+  let event: TelnyxEvent;
+  try {
+    event = JSON.parse(input.rawBody || "{}") as TelnyxEvent;
+  } catch {
+    return { status: 400, body: { error: "Webhook Telnyx inválido" } };
+  }
+
   const data = event.data;
   const payload = data?.payload || {};
   const eventType = String(data?.event_type || "");
@@ -157,8 +208,14 @@ export async function handleTelnyxWebhook(input: {
   if (!eventType || !callControlId) return { status: 400, body: { error: "Webhook Telnyx incompleto" } };
 
   if (eventType === "call.initiated") {
-    const direction = stringValue(payload, "direction");
-    if (direction && direction !== "incoming") return { status: 200, body: { status: "ignored_outbound" } };
+    const direction = stringValue(payload, "direction").toLowerCase();
+    if (direction && !["incoming", "inbound"].includes(direction)) {
+      return { status: 200, body: { status: "ignored_outbound" } };
+    }
+    if (!input.config.TELNYX_API_KEY || !input.config.TELNYX_ASSISTANT_ID) {
+      return { status: 503, body: { error: "Telnyx no está completamente configurado" } };
+    }
+    if (sessions.has(callControlId)) return { status: 200, body: { status: "duplicate_initiated" } };
 
     const route: RoutingIdentity = {
       providerPhoneId: stringValue(payload, "connection_id"),
@@ -166,12 +223,10 @@ export async function handleTelnyxWebhook(input: {
       callerPhone: stringValue(payload, "from"),
     };
     const context = await input.payflow.getContext(route, "telnyx");
-    sessions.set(callControlId, {
-      route,
-      context,
-      messages: [{ role: "system", content: systemPrompt(context) }],
+    sessions.set(callControlId, { route, context, providerCallId: callLegId, conversationId: "" });
+    await telnyxAction(input.config, callControlId, "answer", {
+      command_id: `payflow-answer-${eventId}`.slice(0, 120),
     });
-    await telnyxAction(input.config, callControlId, "answer");
     await input.payflow.event({
       idempotencyKey: `telnyx:${eventId}`,
       eventType: "call.started",
@@ -179,6 +234,7 @@ export async function handleTelnyxWebhook(input: {
       route,
       provider: "telnyx",
       occurredAt: data?.occurred_at,
+      data: { status: "ringing" },
     }).catch((error) => console.error("[telnyx] no se pudo registrar inicio", error));
     return { status: 200, body: { status: "answering" } };
   }
@@ -187,45 +243,89 @@ export async function handleTelnyxWebhook(input: {
   if (!session) return { status: 200, body: { status: "session_not_found", event_type: eventType } };
 
   if (eventType === "call.answered") {
-    await speak(input.config, callControlId, session.context.agent.greeting);
-    return { status: 200, body: { status: "greeting" } };
-  }
-
-  if (eventType === "call.speak.ended") {
-    await listen(input.config, callControlId);
-    return { status: 200, body: { status: "listening" } };
-  }
-
-  if (eventType === "call.gather.ended") {
-    const speechPayload = payload.speech;
-    const speech = typeof speechPayload === "object" && speechPayload
-      ? stringValue(speechPayload as Record<string, unknown>, "result", "transcript")
-      : stringValue(payload, "speech", "transcript");
-
-    if (!speech) {
-      await speak(input.config, callControlId, "Disculpe, no alcancé a escucharle. ¿Puede repetirlo?");
-      return { status: 200, body: { status: "reprompting" } };
-    }
-
-    session.messages.push({ role: "user", content: speech });
-    const answer = await llmReply(input.config, session.messages);
-    session.messages.push({ role: "assistant", content: answer });
-    if (session.messages.length > 25) session.messages = [session.messages[0], ...session.messages.slice(-24)];
-    await speak(input.config, callControlId, answer);
-    return { status: 200, body: { status: "responding", response: answer } };
-  }
-
-  if (eventType === "call.hangup") {
-    sessions.delete(callControlId);
+    const response = await startAssistant(input.config, callControlId, eventId, session.context);
+    session.conversationId = String(response.data?.conversation_id || "");
     await input.payflow.event({
       idempotencyKey: `telnyx:${eventId}`,
-      eventType: "call.completed",
-      providerCallId: callLegId,
+      eventType: "call.updated",
+      providerCallId: session.providerCallId,
       route: session.route,
       provider: "telnyx",
       occurredAt: data?.occurred_at,
-      data: { hangupCause: stringValue(payload, "hangup_cause", "hangup_source") },
+      data: { status: "in_progress", answeredAt: data?.occurred_at },
+    }).catch((error) => console.error("[telnyx] no se pudo registrar respuesta", error));
+    return { status: 200, body: { status: "assistant_started", conversation_id: session.conversationId } };
+  }
+
+  if (eventType.includes("message_history_updated")) {
+    const transcript = transcriptFromPayload(payload);
+    if (transcript.length > 0) {
+      await input.payflow.event({
+        idempotencyKey: `telnyx:${eventId}`,
+        eventType: "call.updated",
+        providerCallId: session.providerCallId,
+        route: session.route,
+        provider: "telnyx",
+        occurredAt: data?.occurred_at,
+        data: { transcript },
+      }).catch((error) => console.error("[telnyx] no se pudo guardar transcripción", error));
+    }
+    return { status: 200, body: { status: "conversation_updated" } };
+  }
+
+  if (eventType === "call.conversation_insights.generated") {
+    const summary = summaryFromPayload(payload);
+    const transcript = transcriptFromPayload(payload);
+    await input.payflow.event({
+      idempotencyKey: `telnyx:${eventId}`,
+      eventType: "call.updated",
+      providerCallId: session.providerCallId,
+      route: session.route,
+      provider: "telnyx",
+      occurredAt: data?.occurred_at,
+      data: {
+        ...(summary ? { summary } : {}),
+        ...(transcript.length > 0 ? { transcript } : {}),
+      },
+    }).catch((error) => console.error("[telnyx] no se pudieron guardar insights", error));
+    return { status: 200, body: { status: "insights_saved" } };
+  }
+
+  if (eventType === "call.conversation.ended") {
+    const durationSeconds = Math.max(0, Math.round(numberValue(payload, "duration_sec", "duration_seconds")));
+    await input.payflow.event({
+      idempotencyKey: `telnyx:${eventId}`,
+      eventType: "call.updated",
+      providerCallId: session.providerCallId,
+      route: session.route,
+      provider: "telnyx",
+      occurredAt: data?.occurred_at,
+      data: {
+        ...(durationSeconds > 0 ? { durationSeconds } : {}),
+        outcome: "information",
+      },
+    }).catch((error) => console.error("[telnyx] no se pudo registrar fin de conversación", error));
+    return { status: 200, body: { status: "conversation_ended" } };
+  }
+
+  if (eventType === "call.hangup") {
+    const durationSeconds = Math.max(0, Math.round(
+      numberValue(payload, "duration_sec", "duration_seconds") || numberValue(payload, "duration_millis") / 1000,
+    ));
+    await input.payflow.event({
+      idempotencyKey: `telnyx:${eventId}`,
+      eventType: "call.completed",
+      providerCallId: session.providerCallId,
+      route: session.route,
+      provider: "telnyx",
+      occurredAt: data?.occurred_at,
+      data: {
+        status: "completed",
+        ...(durationSeconds > 0 ? { durationSeconds } : {}),
+        notes: stringValue(payload, "hangup_cause", "hangup_source"),
+      },
     }).catch((error) => console.error("[telnyx] no se pudo registrar cierre", error));
+    scheduleSessionCleanup(callControlId);
     return { status: 200, body: { status: "call_ended" } };
   }
 
