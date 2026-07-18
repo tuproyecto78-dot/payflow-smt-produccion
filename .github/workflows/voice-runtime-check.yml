@@ -16,6 +16,7 @@ on:
       - "src/lib/voice/**"
       - "src/app/api/voice/**"
       - "supabase/migrations/*voice*"
+      - ".github/workflows/voice-runtime-check.yml"
 
 permissions:
   contents: read
@@ -38,4 +39,14 @@ jobs:
       - name: Install
         run: npm ci
       - name: TypeScript and tests
-        run: npm run check
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee voice-runtime-check.log
+      - name: Upload check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-runtime-check-log
+          path: services/voice-runtime/voice-runtime-check.log
+          if-no-files-found: warn
+          retention-days: 3
