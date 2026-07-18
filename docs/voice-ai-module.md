@@ -1,83 +1,103 @@
 # Llamadas IA multiempresa
 
-`Llamadas IA` es un módulo opcional de PayFlow. Cada negocio conserva el número
-que sus clientes ya conocen y desvía sus llamadas hacia una ruta administrada
-por PayFlow. La conversación puede consultar el catálogo, crear pedidos o
-reservas, iniciar un cobro con PayPhone o Stripe y confirmar por WhatsApp.
+`Llamadas IA` es un módulo opcional de PayFlow para atender **solo llamadas
+entrantes**. Cada negocio conserva el número que sus clientes ya conocen y lo
+conecta mediante desvío, portabilidad o SIP a una ruta administrada por
+PayFlow. La conversación puede consultar el catálogo, preparar pedidos o
+reservas, iniciar un cobro seguro y confirmar por WhatsApp.
 
 ## Arquitectura
 
-PayFlow en Vercel es el **plano de control**: configuración, permisos,
-catálogo, pedidos, reservas, pagos, auditoría y panel. El audio en tiempo real
-se ejecuta en `services/voice-runtime`, un servicio persistente para Railway
-basado en Twilio ConversationRelay. Una función serverless no debe mantener la
-sesión de audio/WebSocket de una llamada completa.
+PayFlow en Vercel es el **plano de control**: configuración, permisos, catálogo,
+pedidos, reservas, pagos, auditoría y panel. `services/voice-runtime` se ejecuta
+en Railway y recibe los webhooks de telefonía.
 
-El runtime no decide el `client_id`. PayFlow resuelve el negocio usando el ID
-del número del proveedor o el número de destino. Esto evita que un evento de
-un negocio pueda escribir pedidos o llamadas en otro.
+El runtime nunca decide el `client_id` ni lo acepta desde la llamada. PayFlow
+resuelve el negocio usando el ID del número del proveedor, `connection_id` o el
+número de destino. Esto evita mezclar datos entre empresas.
 
 | Componente | Responsabilidad |
 |---|---|
 | Vercel / PayFlow | panel, autenticación, API, catálogo, pedidos y auditoría |
 | Supabase | aislamiento por `client_id`, llamadas, reservas y eventos durables |
-| Runtime Railway | WebSocket persistente, conversación, LLM y herramientas seguras |
-| Twilio/Fonoster/SIP | recepción o desvío del número conocido del negocio |
+| Runtime Railway | webhooks de voz, validación, enrutamiento y eventos |
+| Telnyx | recepción de llamadas y AI Assistant alojado |
+| Twilio | proveedor alternativo con ConversationRelay |
 | Stripe/PayPhone | creación y confirmación oficial del cobro |
 | WhatsApp Cloud API | enlace de pago y confirmación del pedido o reserva |
 
-## Validación previa
+## Modelo telefónico
 
-Las ramas funcionales se validan primero mediante un despliegue **Preview**
-de Vercel. La migración y las variables de producción se aplican únicamente
-después de comprobar el build, el aislamiento multiempresa y una llamada de
-prueba completa. Crear el Preview no modifica el dominio de producción.
+El cliente registra en PayFlow su número habitual, pero registrar el dato no
+cambia la red telefónica. Para que la IA conteste se requiere una de estas
+rutas:
+
+1. desviar el número actual hacia un número o destino Telnyx;
+2. portar el número a Telnyx;
+3. conectar el operador o central del negocio mediante SIP.
+
+La primera versión asigna una ruta Telnyx exclusiva por negocio. El número de
+destino permite identificar de forma segura qué catálogo, agente y reglas deben
+cargarse.
+
+PayFlow no realiza campañas, marcación automática ni transferencias. Una
+transferencia humana generaría otra llamada saliente y permanece deshabilitada.
 
 ## Puesta en producción
 
-1. Aplicar, en este orden, las migraciones de hardening, catálogo, WhatsApp y
-   `20260717000000_voice_ai_module.sql`.
-2. Configurar `VOICE_RUNTIME_WEBHOOK_SECRET` en Vercel Production y en el
-   almacén de secretos del runtime.
-3. Abrir `/dashboard/llamadas`, seleccionar un negocio y solicitar el módulo.
-4. Un administrador configura proveedor, número de destino/ID y cambia el
-   estado a `active`. Los clientes no pueden editar estos campos técnicos.
-5. Configurar con el operador el desvío del número actual hacia el destino de
-   PayFlow. El número no necesita tener instalada la app de WhatsApp.
-6. Probar una llamada, un pedido, una reserva, una transferencia humana y un
-   pago de prueba antes de habilitar llamadas públicas.
+1. Aplicar las migraciones de hardening, catálogo, WhatsApp,
+   `20260717000000_voice_ai_module.sql` y
+   `20260718000000_telnyx_inbound_provider.sql`.
+2. Configurar `VOICE_RUNTIME_WEBHOOK_SECRET` en Vercel y Railway.
+3. Configurar en Railway `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY` y
+   `TELNYX_ASSISTANT_ID`.
+4. Crear una Voice API Application en Telnyx con webhook:
 
-Para evitar mezclar negocios, la primera versión asigna una ruta/número Twilio
-exclusivo a cada negocio. El negocio conserva su número conocido y lo desvía a
-esa ruta. Si se requiere compartir una sola ruta, el operador/SIP debe conservar
-de forma verificable el número originalmente marcado.
+```text
+POST https://DOMINIO-RAILWAY/telnyx/voice
+```
 
-## Contrato con el runtime
+5. Asociar el número Telnyx o la ruta SIP a esa aplicación.
+6. En `/dashboard/llamadas`, registrar el número habitual del negocio y
+   aprovisionar `provider_phone_id`/`routing_phone`.
+7. Probar una llamada entrante completa antes de habilitarla al público.
 
-Todas las solicitudes son JSON y llevan:
+## Flujo Telnyx
+
+1. Telnyx envía `call.initiated`.
+2. El runtime ignora cualquier dirección que no sea entrante.
+3. PayFlow resuelve el negocio por `connection_id` o número llamado.
+4. El runtime responde la llamada.
+5. En `call.answered`, adjunta el asistente configurado mediante
+   `ai_assistant_start`.
+6. Las instrucciones, saludo y catálogo se personalizan para el negocio.
+7. El asistente detecta el idioma y responde en el mismo idioma.
+8. Los eventos, duración, resumen y transcripción se guardan en Supabase.
+
+## Contrato interno con PayFlow
+
+Todas las solicitudes entre Railway y PayFlow llevan:
 
 ```text
 X-PayFlow-Signature: sha256=HMAC_SHA256(cuerpo_sin_modificar, VOICE_RUNTIME_WEBHOOK_SECRET)
 ```
 
-### Obtener contexto seguro
+### Obtener contexto
 
-`POST /api/voice/runtime/context` devuelve únicamente configuración no
-secreta, personalidad, acciones permitidas y productos reales del negocio.
+`POST /api/voice/runtime/context` recibe:
 
 ```json
 {
-  "provider": "twilio",
-  "providerPhoneId": "PN_DESTINO",
+  "provider": "telnyx",
+  "providerPhoneId": "CONNECTION_ID",
   "businessPhone": "+593..."
 }
 ```
 
-El runtime debe usar los `productId` recibidos; nunca debe enviar precios. La
-base de datos vuelve a calcular el total y bloquea/descuenta inventario de
-forma transaccional.
+Devuelve únicamente configuración no secreta, personalidad, acciones
+permitidas y productos publicados del negocio correspondiente.
 
-### Registrar eventos y ejecutar acciones
+### Registrar eventos
 
 `POST /api/voice/runtime/webhook` acepta eventos idempotentes:
 
@@ -86,49 +106,28 @@ forma transaccional.
 - `reservation.created`;
 - `payment.linked`.
 
-Ejemplo de pedido:
+Las acciones se rechazan si el módulo o el agente están inactivos. Los pedidos
+usan UUID de producto y la base de datos vuelve a calcular precios, total e
+inventario; nunca confía en montos generados por la IA.
 
-```json
-{
-  "idempotencyKey": "twilio:CA123:order:1",
-  "eventType": "order.created",
-  "provider": "twilio",
-  "providerCallId": "CA123",
-  "providerPhoneId": "PN_DESTINO",
-  "businessPhone": "+593...",
-  "callerPhone": "+593...",
-  "data": {
-    "customerName": "Ana",
-    "items": [{ "productId": "UUID_DEL_PRODUCTO", "quantity": 2 }],
-    "notes": "Retiro en local"
-  }
-}
-```
+## Conversación
 
-Las acciones se rechazan si el módulo/agente está inactivo o si el negocio
-deshabilitó pedidos, reservas o pagos.
+El agente debe:
 
-## Pagos
+- hablar con frases breves y naturales;
+- hacer una pregunta a la vez;
+- detectar español, inglés, portugués u otro idioma compatible;
+- recomendar promociones solo cuando sean pertinentes;
+- no inventar productos, precios, horarios ni disponibilidad;
+- explicar que es el asistente virtual si se lo preguntan;
+- no afirmar que una acción fue guardada sin confirmación de una herramienta.
 
-- La IA puede solicitar o vincular un cobro, pero **nunca** puede declarar que
-  fue pagado.
-- Stripe debe usar Checkout y, para múltiples comercios, Stripe Connect. La
-  cuenta conectada pertenece al negocio; PayFlow conserva la clave de
-  plataforma sólo en el servidor.
-- PayPhone usa API Link o Sale desde el backend. Los tokens pertenecen al
-  servidor/almacén de secretos, no a Supabase ni al navegador.
-- Únicamente los webhooks oficiales de Stripe o PayPhone cambian el pedido a
-  `paid`, `failed` o `refunded`.
-- El enlace se envía por la conexión oficial de WhatsApp asociada al mismo
-  `client_id`.
+## Pagos y privacidad
 
-## Privacidad y operación
-
-- La grabación viene desactivada. Si se activa, el agente debe informar y
-  guardar el consentimiento antes de grabar.
-- La retención es configurable entre 1 y 365 días.
-- No se envían tokens, claves, datos de tarjeta ni credenciales al modelo.
-- Los eventos tienen clave idempotente para evitar pedidos o reservas
-  duplicados durante reintentos del proveedor.
-- Las transcripciones sólo son visibles para el negocio correspondiente y los
+- La IA nunca solicita tarjeta completa, CVV, contraseñas ni códigos.
+- Solo los webhooks oficiales de PayPhone o Stripe cambian un pago a `paid`,
+  `failed` o `refunded`.
+- La grabación está desactivada por defecto y requiere consentimiento.
+- Las transcripciones solo son visibles para el negocio correspondiente y los
   roles internos autorizados.
+- No se envían secretos, tokens ni credenciales al modelo.
