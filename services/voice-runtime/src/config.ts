@@ -17,9 +17,10 @@ const schema = z.object({
 
   TELNYX_API_KEY: z.string().optional().default(""),
   TELNYX_PUBLIC_KEY: z.string().optional().default(""),
+  TELNYX_ASSISTANT_ID: z.string().optional().default(""),
   TELNYX_VALIDATE_SIGNATURES: booleanString,
-  TELNYX_LANGUAGE: z.string().min(2).default("es-MX"),
-  TELNYX_VOICE: z.string().min(1).default("female"),
+  // Leave blank to use the voice configured in the Telnyx Assistant portal.
+  TELNYX_VOICE: z.string().optional().default(""),
 
   LLM_API_KEY: z.string().min(1),
   LLM_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
