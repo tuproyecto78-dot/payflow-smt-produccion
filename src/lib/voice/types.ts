@@ -1,5 +1,5 @@
 export type VoiceActivationStatus = "not_enabled" | "requested" | "provisioning" | "active" | "suspended";
-export type VoiceProvider = "twilio" | "fonoster" | "sip" | "custom";
+export type VoiceProvider = "telnyx" | "twilio" | "fonoster" | "sip" | "custom";
 export type VoicePaymentProvider = "none" | "payphone" | "stripe";
 
 export interface VoiceBusiness {

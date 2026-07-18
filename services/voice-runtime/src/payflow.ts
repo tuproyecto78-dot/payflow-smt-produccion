@@ -1,6 +1,8 @@
 import type { RuntimeConfig } from "./config.js";
 import { sha256Signature } from "./security.js";
 
+export type VoiceProvider = "twilio" | "telnyx";
+
 export interface VoiceContext {
   clientId: string;
   business: { name: string; timezone: string; businessPhone: string };
@@ -73,9 +75,9 @@ export class PayFlowClient {
     return json as T;
   }
 
-  getContext(route: Pick<RoutingIdentity, "providerPhoneId" | "businessPhone">) {
+  getContext(route: Pick<RoutingIdentity, "providerPhoneId" | "businessPhone">, provider: VoiceProvider = "twilio") {
     return this.signedPost<VoiceContext>("/api/voice/runtime/context", {
-      provider: "twilio",
+      provider,
       providerPhoneId: route.providerPhoneId,
       businessPhone: route.businessPhone,
     });
@@ -86,13 +88,14 @@ export class PayFlowClient {
     eventType: VoiceEventType;
     providerCallId: string;
     route: RoutingIdentity;
+    provider?: VoiceProvider;
     occurredAt?: string;
     data?: Record<string, unknown>;
   }) {
     return this.signedPost<Record<string, unknown>>("/api/voice/runtime/webhook", {
       idempotencyKey: input.idempotencyKey,
       eventType: input.eventType,
-      provider: "twilio",
+      provider: input.provider || "twilio",
       providerCallId: input.providerCallId,
       providerPhoneId: input.route.providerPhoneId,
       businessPhone: input.route.businessPhone,

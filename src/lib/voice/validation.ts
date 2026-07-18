@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 const optionalPhone = z.string().trim().max(30).regex(/^\+?[0-9 ()-]*$/, "Número de teléfono inválido.");
+const voiceProvider = z.enum(["telnyx", "twilio", "fonoster", "sip", "custom"]);
 
 export const voiceSettingsSchema = z.object({
-  provider: z.enum(["twilio", "fonoster", "sip", "custom"]),
+  provider: voiceProvider,
   businessPhone: optionalPhone,
   routingPhone: optionalPhone,
   providerPhoneId: z.string().trim().max(120),
@@ -28,8 +29,12 @@ export const voiceSettingsSchema = z.object({
     canAnswerFaq: z.boolean(),
   }),
 }).superRefine((value, ctx) => {
-  if (value.humanTransferEnabled && !value.humanTransferPhone) {
-    ctx.addIssue({ code: "custom", path: ["humanTransferPhone"], message: "Indica un número para transferir llamadas." });
+  if (value.humanTransferEnabled) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["humanTransferEnabled"],
+      message: "PayFlow está configurado únicamente para llamadas entrantes; la transferencia saliente permanece deshabilitada.",
+    });
   }
 });
 
@@ -43,7 +48,7 @@ export const voiceRuntimeEventSchema = z.object({
     "reservation.created",
     "payment.linked",
   ]),
-  provider: z.enum(["twilio", "fonoster", "sip", "custom"]),
+  provider: voiceProvider,
   providerCallId: z.string().trim().min(1).max(160),
   providerPhoneId: z.string().trim().max(160).optional().default(""),
   businessPhone: z.string().trim().max(30).optional().default(""),
@@ -81,7 +86,7 @@ export const voiceRuntimeEventSchema = z.object({
 });
 
 export const voiceRuntimeContextSchema = z.object({
-  provider: z.enum(["twilio", "fonoster", "sip", "custom"]),
+  provider: voiceProvider,
   providerPhoneId: z.string().trim().max(160).optional().default(""),
   businessPhone: z.string().trim().max(30).optional().default(""),
 }).superRefine((value, ctx) => {
@@ -92,7 +97,7 @@ export const voiceRuntimeContextSchema = z.object({
 
 export const voiceProvisioningSchema = z.object({
   activationStatus: z.enum(["requested", "provisioning", "active", "suspended"]),
-  provider: z.enum(["twilio", "fonoster", "sip", "custom"]),
+  provider: voiceProvider,
   businessPhone: optionalPhone,
   routingPhone: optionalPhone,
   providerPhoneId: z.string().trim().max(120),
