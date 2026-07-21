@@ -107,7 +107,7 @@ export async function getVoiceCommerceDashboard(input: {
       supabase
         .from("voice_calls")
         .select(
-          "id, started_at, customer_phone, customer_name, status, outcome, duration_seconds, order_id, reservation_id, whatsapp_confirmation_status, transferred_to_human, summary, telephony_cost, ai_cost, currency",
+          "id, started_at, caller_phone, customer_name, status, outcome, duration_seconds, order_id, reservation_id, whatsapp_confirmation_status, transferred_to_human, summary, telephony_cost_estimate, ai_cost_estimate, currency",
         )
         .eq("client_id", input.clientId)
         .order("started_at", { ascending: false })
@@ -143,7 +143,7 @@ export async function getVoiceCommerceDashboard(input: {
     return {
       callId,
       startedAt: String(call.started_at),
-      customerPhone: call.customer_phone ? String(call.customer_phone) : null,
+      customerPhone: call.caller_phone ? String(call.caller_phone) : null,
       customerName: call.customer_name ? String(call.customer_name) : null,
       callStatus: String(call.status),
       outcome: call.outcome ? String(call.outcome) : null,
@@ -208,8 +208,8 @@ export async function getVoiceCommerceDashboard(input: {
       averageTicket: paid.length ? Math.round((attributableSales / paid.length) * 100) / 100 : 0,
       transfers: calls.filter((call) => Boolean(call.transferred_to_human)).length,
       averageDurationSeconds: calls.length ? Math.round(totalSeconds / calls.length) : 0,
-      telephonyCost: calls.reduce((sum, call) => sum + numberValue(call.telephony_cost), 0),
-      aiCost: calls.reduce((sum, call) => sum + numberValue(call.ai_cost), 0),
+      telephonyCost: calls.reduce((sum, call) => sum + numberValue(call.telephony_cost_estimate), 0),
+      aiCost: calls.reduce((sum, call) => sum + numberValue(call.ai_cost_estimate), 0),
       peakHour: peakHourEntry ? `${String(peakHourEntry[0]).padStart(2, "0")}:00` : null,
       currency: references[0]?.currency ?? "USD",
     },
@@ -275,7 +275,7 @@ export async function updateVoicePaymentReferenceStatus(input: {
     .from("voice_payment_references")
     .update({
       status: input.status,
-      status_source: "manual_review",
+      status_source: "manual",
       confirmed_at: input.status === "paid" ? new Date().toISOString() : null,
       confirmed_by: input.status === "paid" ? input.session.userId : null,
     })
