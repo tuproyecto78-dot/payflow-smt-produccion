@@ -4,6 +4,7 @@
 
 alter table if exists public.voice_calls
   add column if not exists customer_name text,
+  add column if not exists reservation_id uuid references public.voice_reservations(id) on delete set null,
   add column if not exists whatsapp_confirmation_status text not null default 'not_requested',
   add column if not exists transferred_to_human boolean not null default false,
   add column if not exists telephony_cost_estimate numeric(12,4) not null default 0,
