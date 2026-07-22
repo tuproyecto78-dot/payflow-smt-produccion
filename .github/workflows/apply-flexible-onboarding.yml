@@ -1,0 +1,52 @@
+name: Apply flexible onboarding
+
+on:
+  push:
+    branches:
+      - agent/onboarding-flexible-payments
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/onboarding-flexible-payments
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply guarded changes
+        run: node scripts/apply-flexible-onboarding.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate changed files
+        run: npx eslint src/components/dashboard/create-flow-dialog.tsx src/app/api/workflows/create-from-template/route.ts src/lib/flow-templates.ts src/app/dashboard/flujos/page.tsx
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Check patch formatting
+        run: git diff --check
+
+      - name: Commit validated onboarding
+        run: |
+          rm scripts/apply-flexible-onboarding.mjs
+          rm .github/workflows/apply-flexible-onboarding.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Improve onboarding with flexible payment providers"
+          git push origin HEAD:agent/onboarding-flexible-payments
