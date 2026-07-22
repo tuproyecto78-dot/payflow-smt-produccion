@@ -9,6 +9,16 @@ type Context = { params: Promise<{ id: string }> };
 const PROMOTIONS_START = "[PAYFLOW_PROMOTIONS_START]";
 const PROMOTIONS_END = "[PAYFLOW_PROMOTIONS_END]";
 
+function removePreviousPromotions(prompt: string) {
+  const start = prompt.indexOf(PROMOTIONS_START);
+  if (start < 0) return prompt.trim();
+  const end = prompt.indexOf(PROMOTIONS_END, start + PROMOTIONS_START.length);
+  if (end < 0) return prompt.slice(0, start).trim();
+  return `${prompt.slice(0, start)} ${prompt.slice(end + PROMOTIONS_END.length)}`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function updateAgentPromotions(nodesValue: unknown, promotions: string) {
   if (!Array.isArray(nodesValue)) return { nodes: [], changed: false };
   let changed = false;
@@ -21,11 +31,7 @@ function updateAgentPromotions(nodesValue: unknown, promotions: string) {
       ? { ...(item.data as Record<string, unknown>) }
       : {};
     const currentPrompt = String(data.systemPrompt || "");
-    const markerExpression = new RegExp(
-      `\\s*\\${PROMOTIONS_START}[\\s\\S]*?\\${PROMOTIONS_END}`,
-      "g"
-    );
-    const basePrompt = currentPrompt.replace(markerExpression, "").trim();
+    const basePrompt = removePreviousPromotions(currentPrompt);
     const promotionsBlock = promotions
       ? ` ${PROMOTIONS_START}\nPROMOCIONES VIGENTES DEL NEGOCIO:\n${promotions}\nUsa únicamente estas promociones mientras estén vigentes. No inventes descuentos.\n${PROMOTIONS_END}`
       : "";
