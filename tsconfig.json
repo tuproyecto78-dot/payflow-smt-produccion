@@ -30,6 +30,9 @@
       "@/lib/file-content-reader": [
         "./src/lib/file-content-reader-v2"
       ],
+      "@/lib/supabase-server": [
+        "./src/lib/supabase-server-v2"
+      ],
       "@/*": [
         "./src/*"
       ]
