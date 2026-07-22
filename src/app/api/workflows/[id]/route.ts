@@ -1,31 +1,52 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireActiveSession } from "@/lib/auth/require-session";
-import {
-  isDemoWorkflowId,
-  getDemoWorkflowById,
-} from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
-import { supabaseUpdateWorkflow } from "@/lib/supabase-server";
+import { isDemoWorkflowId, getDemoWorkflowById } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
+import { getSupabaseServer, supabaseGetWorkflow, supabaseUpdateWorkflow } from "@/lib/supabase-server";
 import { validateWorkflow } from "@/lib/workflow-validator";
 import type { FlowEdge, FlowNode } from "@/lib/workflow-types";
 
-async function getOwnedWorkflow(workflowId: string, userId: string) {
-  const workflow = await db.workflow.findUnique({
-    where: { id: workflowId },
-    include: { project: true },
+async function getOwnedPrismaWorkflow(workflowId: string, userId: string) {
+  const workflow = await db.workflow.findUnique({ where: { id: workflowId }, include: { project: true } });
+  return workflow && workflow.project.userId === userId ? workflow : null;
+}
+
+function normalizeNodes(value: unknown): FlowNode[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((node, index) => {
+    const item = node as Record<string, unknown>;
+    const position = item.position as { x?: unknown; y?: unknown } | undefined;
+    return {
+      id: String(item.id || `node_${index}`),
+      type: String(item.type || "message") as FlowNode["type"],
+      position: {
+        x: typeof position?.x === "number" ? position.x : 0,
+        y: typeof position?.y === "number" ? position.y : 0,
+      },
+      data: item.data && typeof item.data === "object" ? item.data as Record<string, unknown> : {},
+    };
   });
-  if (!workflow || workflow.project.userId !== userId) return null;
-  return workflow;
+}
+
+function normalizeEdges(value: unknown): FlowEdge[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((edge, index) => {
+    const item = edge as Record<string, unknown>;
+    return {
+      id: String(item.id || `edge_${index}`),
+      source: String(item.source || ""),
+      target: String(item.target || ""),
+      sourceHandle: item.sourceHandle == null ? null : String(item.sourceHandle),
+      targetHandle: item.targetHandle == null ? null : String(item.targetHandle),
+    };
+  });
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
 
-  // ─── Local demo flow: return from code, no DB lookup ─────────────
   if (isDemoWorkflowId(id)) {
     const demo = getDemoWorkflowById(id);
     if (demo) {
@@ -43,226 +64,136 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  // ─── Real flow: lookup in DB ─────────────────────────────────────
   try {
-    const workflow = await getOwnedWorkflow(id, session.userId);
-    if (!workflow) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const workflow = await getOwnedPrismaWorkflow(id, session.userId);
+    if (workflow) {
+      return NextResponse.json({
+        workflow: {
+          id: workflow.id,
+          name: workflow.name,
+          projectId: workflow.projectId,
+          nodes: JSON.parse(workflow.nodesJson || "[]"),
+          edges: JSON.parse(workflow.edgesJson || "[]"),
+          createdAt: workflow.createdAt,
+          updatedAt: workflow.updatedAt,
+        },
+      });
     }
-    return NextResponse.json({
-      workflow: {
-        id: workflow.id,
-        name: workflow.name,
-        projectId: workflow.projectId,
-        nodes: JSON.parse(workflow.nodesJson || "[]"),
-        edges: JSON.parse(workflow.edgesJson || "[]"),
-        createdAt: workflow.createdAt,
-        updatedAt: workflow.updatedAt,
-      },
-    });
-  } catch (err) {
-    console.error("[/api/workflows/[id] GET] DB error:", err);
-    return NextResponse.json({ error: "No se pudo cargar el flujo." }, { status: 500 });
+  } catch (error) {
+    console.warn("[workflow GET] Prisma unavailable", error instanceof Error ? error.message : String(error));
   }
+
+  const persistent = await supabaseGetWorkflow(id, session.userId);
+  if (!persistent.ok || !persistent.workflow) {
+    return NextResponse.json({ error: persistent.error || "Not found" }, { status: persistent.error === "Not found" ? 404 : 503 });
+  }
+  const workflow = persistent.workflow;
+  return NextResponse.json({
+    workflow: {
+      id: String(workflow.id || id),
+      name: String(workflow.name || "Flujo"),
+      projectId: String(workflow.project_id || ""),
+      nodes: normalizeNodes(workflow.nodes),
+      edges: normalizeEdges(workflow.edges),
+      createdAt: workflow.created_at || new Date().toISOString(),
+      updatedAt: workflow.updated_at || workflow.created_at || new Date().toISOString(),
+    },
+  });
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-
-  // ─── Demo flow: can't save to DB (read-only local demo) ──────────
   if (isDemoWorkflowId(id)) {
-    return NextResponse.json(
-      {
-        error:
-          "Este es un flujo demo local de solo lectura. Los cambios no se guardan en la base de datos.",
-        code: "DEMO_READONLY",
-      },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "El flujo demo es de solo lectura.", code: "DEMO_READONLY" }, { status: 409 });
   }
 
   try {
     const body = await req.json();
-    const data: Record<string, unknown> = {};
+    const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : undefined;
+    if (name !== undefined && !name) return NextResponse.json({ error: "El nombre del flujo no puede estar vacío." }, { status: 400 });
 
-    if (typeof body.name === "string") {
-      const trimmed = body.name.trim();
-      if (trimmed.length === 0) {
-        return NextResponse.json(
-          { error: "El nombre del flujo no puede estar vacío." },
-          { status: 400 }
-        );
-      }
-      data.name = trimmed.slice(0, 200);
-    }
-
-    // Validate + sanitize nodes array (accept any node type, including ai_agent).
-    let sanitizedNodes: unknown[] | null = null;
-    if (Array.isArray(body.nodes)) {
-      // Each node must have id, type, position. Data can contain any fields
-      // (systemPrompt, prompt, inputVariable, outputVariable, etc.).
-      // We do NOT reject AI agent nodes — they're fully supported.
-      sanitizedNodes = body.nodes.map((n: Record<string, unknown>, idx: number) => {
-        if (!n || typeof n !== "object") {
-          throw new Error(`Nodo en posición ${idx} inválido.`);
-        }
-        const nodeId = String(n.id || `node_${idx}`);
-        const nodeType = String(n.type || "message");
-        const position = n.position as { x?: number; y?: number } | undefined;
-        return {
-          id: nodeId,
-          type: nodeType,
-          position: {
-            x: typeof position?.x === "number" ? position.x : 0,
-            y: typeof position?.y === "number" ? position.y : 0,
-          },
-          data: (n.data as Record<string, unknown>) || {},
-        };
-      });
-      data.nodesJson = JSON.stringify(sanitizedNodes);
-    }
-
-    let sanitizedEdges: unknown[] | null = null;
-    if (Array.isArray(body.edges)) {
-      sanitizedEdges = body.edges.map((e: Record<string, unknown>, idx: number) => {
-        if (!e || typeof e !== "object") {
-          throw new Error(`Conexión en posición ${idx} inválida.`);
-        }
-        return {
-          id: String(e.id || `edge_${idx}`),
-          source: String(e.source || ""),
-          target: String(e.target || ""),
-          sourceHandle: (e.sourceHandle as string) ?? null,
-          targetHandle: (e.targetHandle as string) ?? null,
-        };
-      });
-      data.edgesJson = JSON.stringify(sanitizedEdges);
-    }
-
-    if (sanitizedNodes && sanitizedEdges) {
-      const validation = validateWorkflow(
-        sanitizedNodes as FlowNode[],
-        sanitizedEdges as FlowEdge[]
-      );
+    const nodes = body.nodes === undefined ? undefined : normalizeNodes(body.nodes);
+    const edges = body.edges === undefined ? undefined : normalizeEdges(body.edges);
+    if (nodes && edges) {
+      const validation = validateWorkflow(nodes, edges);
       if (!validation.valid) {
-        return NextResponse.json(
-          { error: "El flujo contiene conexiones inválidas.", validation },
-          { status: 422 }
-        );
+        return NextResponse.json({ error: "El flujo contiene conexiones inválidas.", validation }, { status: 422 });
       }
     }
 
-    // ─── Try Prisma (SQLite/local dev) first ─────────────────────────
     try {
-      const workflow = await getOwnedWorkflow(id, session.userId);
-      if (!workflow) {
-        console.warn("[workflow PUT] workflow not found or not owned (Prisma):", {
-          workflowId: id,
-          userId: session.userId,
+      const workflow = await getOwnedPrismaWorkflow(id, session.userId);
+      if (workflow) {
+        const updated = await db.workflow.update({
+          where: { id },
+          data: {
+            ...(name !== undefined ? { name } : {}),
+            ...(nodes !== undefined ? { nodesJson: JSON.stringify(nodes) } : {}),
+            ...(edges !== undefined ? { edgesJson: JSON.stringify(edges) } : {}),
+          },
         });
-        throw new Error("Workflow not found in Prisma");
-      }
-
-      const updated = await db.workflow.update({
-        where: { id },
-        data,
-      });
-      // Touch project updatedAt
-      await db.project.update({
-        where: { id: workflow.projectId },
-        data: { updatedAt: new Date() },
-      });
-
-      console.log("[workflow PUT] saved via Prisma:", {
-        workflowId: id,
-        nodeCount: sanitizedNodes?.length ?? 0,
-        edgeCount: sanitizedEdges?.length ?? 0,
-      });
-
-      return NextResponse.json({
-        workflow: {
-          id: updated.id,
-          name: updated.name,
-          projectId: updated.projectId,
-          nodes: JSON.parse(updated.nodesJson || "[]"),
-          edges: JSON.parse(updated.edgesJson || "[]"),
-          updatedAt: updated.updatedAt,
-        },
-      });
-    } catch (prismaErr) {
-      // Prisma not available (Vercel without DATABASE_URL) — try Supabase.
-      console.warn("[workflow PUT] Prisma failed, trying Supabase:", prismaErr instanceof Error ? prismaErr.message : String(prismaErr));
-
-      const supaResult = await supabaseUpdateWorkflow(id, session.userId, {
-        name: typeof body.name === "string" ? data.name as string : undefined,
-        nodes: sanitizedNodes || undefined,
-        edges: sanitizedEdges || undefined,
-      });
-
-      if (supaResult.ok && supaResult.workflow) {
-        const wf = supaResult.workflow;
-        console.log("[workflow PUT] saved via Supabase:", {
-          workflowId: id,
-          nodeCount: sanitizedNodes?.length ?? 0,
-          edgeCount: sanitizedEdges?.length ?? 0,
-        });
-
         return NextResponse.json({
           workflow: {
-            id: String(wf.id || id),
-            name: String(wf.name || ""),
-            projectId: String(wf.project_id || ""),
-            nodes: Array.isArray(wf.nodes) ? wf.nodes : [],
-            edges: Array.isArray(wf.edges) ? wf.edges : [],
-            updatedAt: wf.updated_at || new Date().toISOString(),
+            id: updated.id,
+            name: updated.name,
+            projectId: updated.projectId,
+            nodes: JSON.parse(updated.nodesJson || "[]"),
+            edges: JSON.parse(updated.edgesJson || "[]"),
+            updatedAt: updated.updatedAt,
           },
         });
       }
-
-      // Both Prisma and Supabase failed.
-      console.error("[workflow PUT] both Prisma and Supabase failed:", {
-        prismaError: prismaErr instanceof Error ? prismaErr.message : String(prismaErr),
-        supabaseError: supaResult.error,
-      });
-
-      return NextResponse.json(
-        {
-          error:
-            supaResult.error ||
-            "No se pudo guardar el flujo. Verifica la configuración de la base de datos.",
-        },
-        { status: 503 }
-      );
+    } catch (error) {
+      console.warn("[workflow PUT] Prisma unavailable", error instanceof Error ? error.message : String(error));
     }
-  } catch (err) {
-    // Log the full error with context for debugging.
-    console.error("[workflow PUT] error:", {
-      workflowId: id,
-      userId: session.userId,
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    });
 
-    // Return a clear, actionable error message.
-    const message = err instanceof Error ? err.message : "Failed to save workflow.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const result = await supabaseUpdateWorkflow(id, session.userId, { name, nodes, edges });
+    if (!result.ok || !result.workflow) {
+      return NextResponse.json({ error: result.error || "No se pudo guardar el flujo." }, { status: result.error === "Not found" ? 404 : 503 });
+    }
+    const workflow = result.workflow;
+    return NextResponse.json({
+      workflow: {
+        id: String(workflow.id || id),
+        name: String(workflow.name || name || "Flujo"),
+        projectId: String(workflow.project_id || ""),
+        nodes: normalizeNodes(workflow.nodes),
+        edges: normalizeEdges(workflow.edges),
+        updatedAt: workflow.updated_at || new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("[workflow PUT]", error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo guardar el flujo." }, { status: 500 });
   }
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const workflow = await getOwnedWorkflow(id, session.userId);
-  if (!workflow) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (isDemoWorkflowId(id)) return NextResponse.json({ error: "El demo no se elimina." }, { status: 409 });
+
+  try {
+    const workflow = await getOwnedPrismaWorkflow(id, session.userId);
+    if (workflow) {
+      await db.workflow.delete({ where: { id } });
+      return NextResponse.json({ ok: true });
+    }
+  } catch (error) {
+    console.warn("[workflow DELETE] Prisma unavailable", error instanceof Error ? error.message : String(error));
   }
-  await db.workflow.delete({ where: { id } });
+
+  const supabase = getSupabaseServer();
+  if (!supabase) return NextResponse.json({ error: "Base de datos no disponible." }, { status: 503 });
+  const { data: projects, error: projectsError } = await supabase.from("projects").select("id").eq("user_id", session.userId);
+  if (projectsError) return NextResponse.json({ error: projectsError.message }, { status: 503 });
+  const projectIds = (projects || []).map((project) => String(project.id));
+  if (!projectIds.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const { error, count } = await supabase.from("workflows").delete({ count: "exact" }).eq("id", id).in("project_id", projectIds);
+  if (error) return NextResponse.json({ error: error.message }, { status: 503 });
+  if (!count) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
