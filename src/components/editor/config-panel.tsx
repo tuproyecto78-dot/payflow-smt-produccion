@@ -29,6 +29,8 @@ import {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
@@ -49,6 +51,8 @@ const ICONS: Record<string, LucideIcon> = {
   Bot,
   Webhook,
   Square,
+  PackageSearch,
+  PackageCheck,
 };
 
 export interface SelectedNode {
@@ -292,6 +296,58 @@ export function ConfigPanel({
                   placeholder="confirmacion_pedido"
                   className="h-8 text-sm"
                 />
+              </Field>
+            </>
+          )}
+
+          {node.type === "catalog_search" && (
+            <>
+              <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300">
+                Consulta únicamente productos activos del catálogo del negocio.
+              </div>
+              <Field label="Búsqueda" hint="Admite interpolación {{variable}}.">
+                <Input
+                  value={String(data.query || "")}
+                  onChange={(e) => set("query", e.target.value)}
+                  placeholder="{{producto_buscado}}"
+                  className="h-8 text-sm"
+                />
+              </Field>
+              <Field label="Variable de salida">
+                <Input
+                  value={String(data.outputVariable || "")}
+                  onChange={(e) => set("outputVariable", e.target.value)}
+                  placeholder="catalog_product"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+            </>
+          )}
+
+          {node.type === "update_order" && (
+            <>
+              <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300">
+                Acción real: actualiza el pedido y registra un evento auditable.
+              </div>
+              <Field label="ID del pedido" hint="Admite interpolación {{variable}}.">
+                <Input
+                  value={String(data.orderId || "")}
+                  onChange={(e) => set("orderId", e.target.value)}
+                  placeholder="{{order_id}}"
+                  className="h-8 text-sm font-mono"
+                />
+              </Field>
+              <Field label="Nuevo estado">
+                <Select value={String(data.orderStatus || "confirmed")} onValueChange={(value) => set("orderStatus", value)}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="confirmed">Confirmado</SelectItem>
+                    <SelectItem value="preparing">En preparación</SelectItem>
+                    <SelectItem value="ready">Listo</SelectItem>
+                    <SelectItem value="completed">Completado</SelectItem>
+                    <SelectItem value="cancelled">Cancelado</SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
             </>
           )}

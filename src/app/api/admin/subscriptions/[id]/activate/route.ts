@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
-import { ROLES } from "@/lib/roles";
 import { rateLimit, getClientIP, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
 import { getPayphoneConfig, maskStoreId } from "@/lib/payphone/config";
+import { createServiceRoleClient, isSupabaseConfigured } from "@/lib/supabase";
+import { requireAdmin } from "@/lib/auth/require-session";
 
 /**
  * POST /api/admin/subscriptions/[id]/activate
@@ -18,11 +18,8 @@ import { getPayphoneConfig, maskStoreId } from "@/lib/payphone/config";
  * Admin-only.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (session.role !== ROLES.ADMIN && session.role !== ROLES.SUPER_ADMIN) {
-    return NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 });
-  }
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: "Se requiere rol de administrador." }, { status: 403 });
 
   const ip = getClientIP(req);
   if (!rateLimit(`admin-activate:${ip}`, 20, 60_000)) {
@@ -31,12 +28,53 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   try {
     const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    if (body.paymentVerified !== true) {
+      return NextResponse.json(
+        { error: "Debes confirmar que el pago de la suscripción fue verificado." },
+        { status: 400 }
+      );
+    }
+
+    if (isSupabaseConfigured) {
+      const supabase = createServiceRoleClient();
+      const { data: request, error: requestError } = await supabase
+        .from("subscription_requests")
+        .select("id")
+        .eq("id", id)
+        .maybeSingle();
+      if (requestError) throw requestError;
+      if (!request) return NextResponse.json({ error: "Solicitud no encontrada." }, { status: 404 });
+
+      const { data, error } = await supabase.rpc("activate_subscription_request", {
+        p_request_id: id,
+        p_actor_user_id: session.userId,
+      });
+      if (error) {
+        if (error.message.includes("VERIFIED_ACCOUNT_NOT_FOUND")) {
+          return NextResponse.json(
+            { error: "El cliente debe registrarse y confirmar su correo antes de activar la suscripción." },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
+      const result = Array.isArray(data) ? data[0] : data;
+      return NextResponse.json({
+        ok: true,
+        clientId: result?.client_id,
+        message: result?.already_active
+          ? "La suscripción ya estaba activa y fue verificada."
+          : "Cliente y suscripción activados correctamente.",
+      });
+    }
+
     const sub = await db.subscriptionRequest.findUnique({ where: { id } });
     if (!sub) {
       return NextResponse.json({ error: "Solicitud no encontrada." }, { status: 404 });
     }
     if (sub.subscriptionStatus === "activated" && sub.activatedClientId) {
-      return NextResponse.json({ error: "Esta solicitud ya está activada.", clientId: sub.activatedClientId }, { status: 400 });
+      return NextResponse.json({ ok: true, message: "La activación ya existía.", clientId: sub.activatedClientId });
     }
 
     // Read the current PayPhone config (server-only) to seed the PaymentAccount.

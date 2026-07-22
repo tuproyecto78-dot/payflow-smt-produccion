@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { generateFlowFromTemplate, type FlowTemplateParams } from "@/lib/flow-templates";
 import { getClientIP, sanitizeText, GENERIC_ERROR } from "@/lib/security";
+import { validateWorkflow } from "@/lib/workflow-validator";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const ip = getClientIP(req);
 
@@ -32,6 +33,11 @@ export async function POST(req: Request) {
     if (!params.whatsapp_number) return NextResponse.json({ error: "whatsapp_number es obligatorio." }, { status: 400 });
 
     const flow = generateFlowFromTemplate(params);
+    const validation = validateWorkflow(flow.nodes, flow.edges);
+    if (!validation.valid) {
+      console.error("[create-from-template] generated invalid flow", validation.issues);
+      return NextResponse.json({ error: "La plantilla generada no superó la validación.", validation }, { status: 500 });
+    }
 
     // Find or create project (lazy db import)
     let projectId = body.projectId;

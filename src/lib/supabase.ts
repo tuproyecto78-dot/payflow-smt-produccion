@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 /**
@@ -30,6 +31,7 @@ export const SUPABASE_URL = sanitizeSupabaseUrl(
 );
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 export function createClient() {
   if (!isSupabaseConfigured) throw new Error("Supabase no configurado.");
@@ -46,6 +48,21 @@ export async function createServerClientHelper() {
         try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)); } catch {}
       },
     },
+  });
+}
+
+/**
+ * Privileged server client for profile, entitlement and webhook operations.
+ * Never import this helper from a client component and never expose the key in
+ * a NEXT_PUBLIC variable.
+ */
+export function createServiceRoleClient() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase service role is not configured.");
+  }
+
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 

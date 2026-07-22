@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { ensureDemoFlowForAdmin } from "@/lib/auto-seed";
 import { ROLES } from "@/lib/roles";
 import { getDemoFlowItem, isDemoWorkflowId } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * visual example to open.
  */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -120,7 +120,7 @@ export async function GET() {
  * Create a new workflow. Body: { projectId, name }
  */
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

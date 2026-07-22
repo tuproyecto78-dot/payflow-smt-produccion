@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, History, CreditCard, Sparkles, FolderKanban, Loader2, Play, ExternalLink } from "lucide-react";
+import { Workflow, CreditCard, Sparkles, FolderKanban, Loader2, Play, ExternalLink, Users, DollarSign, TrendingUp, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 interface FlowItem {
   id: string;
@@ -21,37 +22,67 @@ interface FlowItem {
   updatedAt: string;
 }
 
+interface AnalyticsOverview {
+  summary: {
+    contactsToday: number;
+    contactsYesterday: number;
+    paymentsToday: number;
+    revenueToday: number;
+    conversion: number;
+    failedRunsToday: number;
+    pendingPayments: number;
+  };
+  funnel: Array<{ name: string; value: number }>;
+  paymentStatus: { approved: number; failed: number; pending: number };
+  alerts: Array<{ level: string; message: string }>;
+  trend: Array<{
+    date: string;
+    contacts: number;
+    inboundMessages: number;
+    paid: number;
+    revenue: number;
+  }>;
+}
+
 export default function DashboardHome() {
   const { user } = useAuthStore();
   const [projects, setProjects] = useState<any[]>([]);
   const [workflows, setWorkflows] = useState<FlowItem[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadData();
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const [projRes, wfRes, analyticsRes] = await Promise.all([
+          fetch("/api/projects", { credentials: "include" }),
+          fetch("/api/workflows", { credentials: "include" }),
+          fetch("/api/analytics/overview?days=30", { credentials: "include" }),
+        ]);
+        if (cancelled) return;
+        if (projRes.ok) {
+          const data = await projRes.json();
+          setProjects(data.projects || []);
+        }
+        if (wfRes.ok) {
+          const data = await wfRes.json();
+          setWorkflows(data.workflows || []);
+        }
+        if (analyticsRes.ok) {
+          setAnalytics(await analyticsRes.json());
+        }
+      } catch {
+        /* El panel conserva un estado vacío si una fuente no está disponible. */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, []);
-
-  async function loadData() {
-    setLoading(true);
-    try {
-      const [projRes, wfRes] = await Promise.all([
-        fetch("/api/projects", { credentials: "include" }),
-        fetch("/api/workflows", { credentials: "include" }),
-      ]);
-      if (projRes.ok) {
-        const data = await projRes.json();
-        setProjects(data.projects || []);
-      }
-      if (wfRes.ok) {
-        const data = await wfRes.json();
-        setWorkflows(data.workflows || []);
-      }
-    } catch {
-      /* no DB */
-    } finally {
-      setLoading(false);
-    }
-  }
 
   // Count only active (non-desactivated, non-draft) flows.
   const activeFlowCount = workflows.filter(
@@ -75,10 +106,84 @@ export default function DashboardHome() {
         </Link>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <StatCard
+          title="Contactos hoy"
+          value={String(analytics?.summary.contactsToday ?? 0)}
+          detail={analytics ? `${analytics.summary.contactsYesterday} ayer` : "Cargando datos"}
+          icon={<Users className="size-5" />}
+        />
+        <StatCard
+          title="Pagos aprobados"
+          value={String(analytics?.summary.paymentsToday ?? 0)}
+          detail="Confirmados por webhook"
+          icon={<CreditCard className="size-5" />}
+        />
+        <StatCard
+          title="Ingresos hoy"
+          value={formatCurrency(analytics?.summary.revenueToday ?? 0)}
+          detail="Solo pagos aprobados"
+          icon={<DollarSign className="size-5" />}
+        />
+        <StatCard
+          title="Conversión"
+          value={`${(analytics?.summary.conversion ?? 0).toFixed(1)}%`}
+          detail="Links que terminaron pagados"
+          icon={<TrendingUp className="size-5" />}
+        />
         <StatCard title="Flujos activos" value={String(activeFlowCount)} icon={<Workflow className="size-5" />} />
-        <StatCard title="Ejecuciones" value="0" icon={<History className="size-5" />} />
-        <StatCard title="Pagos" value="$0" icon={<CreditCard className="size-5" />} />
+        <StatCard
+          title="Alertas hoy"
+          value={String(analytics?.alerts.length ?? 0)}
+          detail={`${analytics?.summary.pendingPayments ?? 0} pagos pendientes`}
+          icon={<AlertTriangle className="size-5" />}
+        />
+      </div>
+
+      <div className="mt-8 grid gap-5 xl:grid-cols-3">
+        <section className="rounded-xl border bg-card p-5 xl:col-span-2">
+          <div className="mb-5">
+            <h2 className="font-semibold">Actividad de los últimos 30 días</h2>
+            <p className="text-xs text-muted-foreground mt-1">Contactos únicos y mensajes recibidos por WhatsApp.</p>
+          </div>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={analytics?.trend || []} margin={{ left: -20, right: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.25} />
+                <XAxis dataKey="date" tickFormatter={(value) => String(value).slice(5)} fontSize={11} />
+                <YAxis allowDecimals={false} fontSize={11} />
+                <Tooltip labelFormatter={(value) => `Fecha: ${value}`} />
+                <Line type="monotone" dataKey="contacts" name="Contactos" stroke="#059669" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="inboundMessages" name="Mensajes recibidos" stroke="#1d4ed8" strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section className="rounded-xl border bg-card p-5">
+          <h2 className="font-semibold">Embudo de hoy</h2>
+          <p className="text-xs text-muted-foreground mt-1 mb-5">Del contacto al pago confirmado.</p>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={analytics?.funnel || []} layout="vertical" margin={{ left: 15, right: 15 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.25} />
+                <XAxis type="number" allowDecimals={false} hide />
+                <YAxis type="category" dataKey="name" width={105} fontSize={11} />
+                <Tooltip />
+                <Bar dataKey="value" name="Cantidad" radius={[0, 6, 6, 0]}>
+                  {(analytics?.funnel || []).map((entry, index) => (
+                    <Cell key={entry.name} fill={["#1d4ed8", "#7c3aed", "#059669"][index] || "#059669"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {analytics?.alerts.map((alert) => (
+            <div key={alert.message} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {alert.message}
+            </div>
+          ))}
+        </section>
       </div>
 
       <div className="mt-8">
@@ -174,7 +279,7 @@ export default function DashboardHome() {
   );
 }
 
-function StatCard({ title, value, icon }: { title: string; value: string; icon: React.ReactNode }) {
+function StatCard({ title, value, icon, detail }: { title: string; value: string; icon: React.ReactNode; detail?: string }) {
   return (
     <div className="rounded-xl border bg-card p-5">
       <div className="flex items-center justify-between mb-2">
@@ -182,6 +287,11 @@ function StatCard({ title, value, icon }: { title: string; value: string; icon: 
         <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">{icon}</div>
       </div>
       <div className="text-2xl font-bold">{value}</div>
+      {detail && <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>}
     </div>
   );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 }

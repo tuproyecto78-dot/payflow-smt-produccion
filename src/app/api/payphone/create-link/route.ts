@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import {
   createPayphoneApiLink,
   generateClientTransactionId,
@@ -13,6 +13,8 @@ import { getPayphoneConfig } from "@/lib/payphone/config";
 import { rateLimit, getClientIP, isValidAmount, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
 import { classifyPayPhoneError, savePaymentError } from "@/lib/payphone-errors";
+import { recordDurablePayment } from "@/lib/operational-telemetry";
+import { isInternalAccessRole } from "@/lib/auth/access-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +59,7 @@ const CreateLinkSchema = z.object({
  *   }
  */
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -91,6 +93,12 @@ export async function POST(req: Request) {
       );
     }
     const body = parsed.data;
+    const effectiveClientId = isInternalAccessRole(session.role)
+      ? body.clientId || session.clientId || null
+      : session.clientId || null;
+    if (!isInternalAccessRole(session.role) && !effectiveClientId) {
+      return NextResponse.json({ error: "La cuenta no tiene un cliente asignado." }, { status: 403 });
+    }
 
     if (body.currency.toUpperCase() !== "USD") {
       return NextResponse.json({ error: "PayPhone solo soporta USD." }, { status: 400 });
@@ -153,7 +161,7 @@ export async function POST(req: Request) {
     const tx = await db.paymentTransaction.create({
       data: {
         userId: session.userId,
-        clientId: body.clientId || null,
+        clientId: effectiveClientId,
         workflowId: body.workflowId || null,
         workflowRunId: body.workflowRunId || null,
         provider: "payphone",
@@ -178,10 +186,26 @@ export async function POST(req: Request) {
       },
     });
 
+    await recordDurablePayment({
+      userId: session.userId,
+      clientId: effectiveClientId,
+      sourceKey: `payphone:${clientTransactionId}`,
+      clientTransactionId,
+      workflowId: body.workflowId || null,
+      workflowRunId: body.workflowRunId || null,
+      provider: "payphone",
+      orderId: clientTransactionId,
+      amount: body.amount,
+      currency: "USD",
+      status: result.ok ? "payment_pending" : "error",
+      paymentLink: result.payment_link || null,
+      rawResponse: result.raw_response,
+    });
+
     // Audit log (no tokens in metadata).
     void logAudit({
       userId: session.userId,
-      clientId: body.clientId || null,
+      clientId: effectiveClientId,
       action: "payphone_link_created",
       entityType: "payment",
       entityId: tx.id,

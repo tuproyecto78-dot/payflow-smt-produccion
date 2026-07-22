@@ -1,232 +1,120 @@
 import { NextResponse } from "next/server";
 import { createSessionToken, setSessionCookie } from "@/lib/session";
 import { ROLES } from "@/lib/roles";
-
-/**
- * POST /api/auth/login
- *
- * Production auth using Supabase Auth.
- * Fallback to Prisma (local dev) or env admin credentials.
- *
- * NEVER returns 500 for wrong credentials (returns 401).
- * NEVER logs passwords, tokens, or secrets.
- */
+import { ensureAccessProfile, isInternalAccessRole, loadAccessProfile } from "@/lib/auth/access-profile";
+import { getClientIP, isValidEmail, rateLimit, RATE_LIMIT_ERROR } from "@/lib/security";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/supabase";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { email, password } = body;
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: "Email and password are required." },
-        { status: 400 }
-      );
+    const email = String(body.email || "").toLowerCase().trim();
+    const password = String(body.password || "");
+    const ip = getClientIP(req);
+
+    if (!isValidEmail(email) || !password) {
+      return NextResponse.json({ error: "Ingresa un correo y una contraseña válidos." }, { status: 400 });
     }
-    const normalizedEmail = String(email).toLowerCase().trim();
-    const passwordStr = String(password);
-
-    // Admin email check (used in all modes)
-    const adminEmail = (process.env.ADMIN_EMAIL || "admin@payflow.smt")
-      .toLowerCase()
-      .trim();
-    const adminPassword = process.env.ADMIN_INITIAL_PASSWORD || "PayFlow2026Admin!";
-    const isAdminEmail = normalizedEmail === adminEmail;
-
-    // ─── Mode 1: Supabase Auth (production) ──────────────────────────
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (supabaseUrl && supabaseAnonKey) {
-      try {
-        const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
-
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: normalizedEmail,
-          password: passwordStr,
-        });
-
-        if (!error && data.user) {
-          // Supabase auth succeeded
-          const userId = data.user.id;
-          const userEmail = data.user.email || normalizedEmail;
-          const userName =
-            data.user.user_metadata?.full_name ||
-            data.user.user_metadata?.name ||
-            null;
-
-          // Determine role + status
-          let role = isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT;
-          let profileStatus = isAdminEmail ? "active" : "pending";
-          let clientId: string | null = null;
-          try {
-            const { data: profileData } = await supabase
-              .from("profiles")
-              .select("role, status, client_id")
-              .eq("user_id", userId)
-              .maybeSingle();
-
-            if (profileData) {
-              role = profileData.role || (isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.APPLICANT);
-              profileStatus = (profileData.status as string) || profileStatus;
-              clientId = (profileData.client_id as string) || null;
-            } else {
-              // Create profile if missing
-              await supabase.from("profiles").upsert({
-                user_id: userId,
-                email: userEmail,
-                full_name: userName || (isAdminEmail ? "Administrator" : null),
-                role,
-                status: isAdminEmail ? "active" : "pending",
-              });
-            }
-          } catch {
-            // profiles table might not exist — use admin check
-          }
-
-          const token = await createSessionToken({
-            userId,
-            email: userEmail,
-            name: userName,
-            role,
-          });
-          await setSessionCookie(token);
-
-          const isActive = profileStatus === "active";
-          return NextResponse.json({
-            user: {
-              id: userId,
-              email: userEmail,
-              name: userName,
-              role,
-              clientId,
-              clientStatus: profileStatus,
-              modules: [],
-              memberRole: null,
-              memberPermissions: null,
-              active: isActive,
-            },
-            // Surface subscription status so the frontend can redirect to
-            // /cuenta/estado when the user is not yet active.
-            subscriptionStatus: isActive ? undefined : "pending",
-          });
-        }
-        // Supabase auth failed (wrong password or user not found)
-        // Don't return 401 yet — try fallbacks below
-        console.error("[login] Supabase auth failed, trying fallbacks");
-      } catch (supabaseErr) {
-        console.error("[login] Supabase error:", supabaseErr instanceof Error ? supabaseErr.message : "unknown");
-        // Don't return — try fallbacks
-      }
+    if (!rateLimit(`auth-login:${ip}:${email}`, 10, 15 * 60_000)) {
+      return NextResponse.json({ error: RATE_LIMIT_ERROR }, { status: 429 });
     }
 
-    // ─── Mode 2: Env admin fallback ──────────────────────────────────
-    // This runs if Supabase failed OR Supabase is not configured
-    if (isAdminEmail && passwordStr === adminPassword) {
-      // Try to resolve the real Prisma admin user ID so that DB queries
-      // (projects, workflows, etc.) filter by the correct userId.
-      // Falls back to "env-admin" if Prisma is unavailable.
-      let realUserId = "env-admin";
-      try {
-        const { db } = await import("@/lib/db");
-        const adminUser = await db.user.findUnique({ where: { email: adminEmail } });
-        if (adminUser) {
-          realUserId = adminUser.id;
-        }
-      } catch {
-        // Prisma not available — keep "env-admin"
+    if (isSupabaseConfigured) {
+      const { createClient } = await import("@supabase/supabase-js");
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error || !data.user) {
+        return NextResponse.json({ error: "Correo o contraseña incorrectos." }, { status: 401 });
+      }
+      if (!data.user.email_confirmed_at) {
+        return NextResponse.json(
+          { error: "Confirma tu correo antes de iniciar sesión.", code: "EMAIL_NOT_VERIFIED" },
+          { status: 403 }
+        );
       }
 
+      const configuredAdminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim();
+      const bootstrapRole = configuredAdminEmail && configuredAdminEmail === email
+        ? ROLES.SUPER_ADMIN
+        : ROLES.APPLICANT;
+      const userName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || null;
+      let profile = await loadAccessProfile(data.user.id, bootstrapRole);
+      if (!profile) {
+        profile = await ensureAccessProfile({
+          userId: data.user.id,
+          email: data.user.email || email,
+          fullName: userName,
+          role: bootstrapRole,
+        });
+      }
+
+      // Preserve an explicitly configured administrator without providing an
+      // alternate password path. Supabase still authenticates the account.
+      if (bootstrapRole === ROLES.SUPER_ADMIN && profile.role !== ROLES.SUPER_ADMIN) {
+        profile = await ensureAccessProfile({
+          userId: data.user.id,
+          email: data.user.email || email,
+          fullName: profile.fullName || userName,
+          role: ROLES.SUPER_ADMIN,
+        });
+      }
+
+      const active = isInternalAccessRole(profile.role) || profile.status === "active";
       const token = await createSessionToken({
-        userId: realUserId,
-        email: adminEmail,
-        name: "Administrator",
-        role: ROLES.SUPER_ADMIN,
+        userId: data.user.id,
+        email: data.user.email || email,
+        name: profile.fullName || userName,
+        role: profile.role,
+        status: profile.status,
+        clientId: profile.clientId,
+        emailVerified: true,
       });
       await setSessionCookie(token);
 
       return NextResponse.json({
+        next: active ? "/dashboard" : "/cuenta/estado",
         user: {
-          id: realUserId,
-          email: adminEmail,
-          name: "Administrator",
-          role: ROLES.SUPER_ADMIN,
-          clientId: null,
-          clientStatus: null,
+          id: data.user.id,
+          email: data.user.email || email,
+          name: profile.fullName || userName,
+          role: profile.role,
+          clientId: profile.clientId,
+          clientStatus: profile.status,
           modules: [],
-          memberRole: null,
-          memberPermissions: null,
-          active: true,
+          active,
         },
       });
     }
 
-    // ─── Mode 3: Prisma/SQLite (local development) ───────────────────
-    try {
-      const { db } = await import("@/lib/db");
-      const bcrypt = await import("bcryptjs");
-
-      const user = await db.user.findUnique({ where: { email: normalizedEmail } });
-      if (user) {
-        const valid = await bcrypt.compare(passwordStr, user.passwordHash);
-        if (valid) {
-          const role = user.role || ROLES.APPLICANT;
-
-          // Look up the profile to determine status.
-          let profileStatus = "active";
-          try {
-            const profile = await db.profile.findUnique({
-              where: { userId: user.id },
-            });
-            if (profile?.status) profileStatus = profile.status;
-          } catch {
-            // Profile table might not exist — default to active
-          }
-          const isActive = profileStatus === "active";
-
-          const token = await createSessionToken({
-            userId: user.id,
-            email: user.email,
-            name: user.name,
-            role,
-          });
-          await setSessionCookie(token);
-
-          return NextResponse.json({
-            user: {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              role,
-              clientId: null,
-              clientStatus: profileStatus,
-              modules: [],
-              memberRole: null,
-              memberPermissions: null,
-              active: isActive,
-            },
-            // Surface subscription status so the frontend can redirect to
-            // /cuenta/estado when the user is not yet active.
-            subscriptionStatus: isActive ? undefined : "pending",
-          });
-        }
-      }
-    } catch {
-      // Prisma not available — continue
+    if (process.env.NODE_ENV === "production" || process.env.ALLOW_LOCAL_AUTH_FALLBACK !== "true") {
+      return NextResponse.json({ error: "El servicio de autenticación no está configurado." }, { status: 503 });
     }
 
-    // All methods failed — wrong credentials
-    return NextResponse.json(
-      { error: "Correo o contraseña incorrectos." },
-      { status: 401 }
-    );
-  } catch (err) {
-    console.error("[login] unexpected error");
-    return NextResponse.json(
-      { error: "Error al iniciar sesión." },
-      { status: 500 }
-    );
+    const [{ db }, bcrypt] = await Promise.all([import("@/lib/db"), import("bcryptjs")]);
+    const user = await db.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      return NextResponse.json({ error: "Correo o contraseña incorrectos." }, { status: 401 });
+    }
+    const role = user.role || ROLES.APPLICANT;
+    const active = isInternalAccessRole(role);
+    const token = await createSessionToken({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role,
+      status: active ? "active" : "pending",
+      emailVerified: true,
+    });
+    await setSessionCookie(token);
+    return NextResponse.json({
+      next: active ? "/dashboard" : "/cuenta/estado",
+      user: { id: user.id, email: user.email, name: user.name, role, active },
+    });
+  } catch (error) {
+    console.error("[login] unexpected error", error instanceof Error ? error.message : "unknown");
+    return NextResponse.json({ error: "Error al iniciar sesión." }, { status: 500 });
   }
 }

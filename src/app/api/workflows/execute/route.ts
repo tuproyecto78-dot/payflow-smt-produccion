@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import {
   isDemoWorkflowId,
   getDemoWorkflowById,
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 import { executeWorkflow } from "@/lib/engine";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
+import { validateWorkflow } from "@/lib/workflow-validator";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ interface ExecuteBody {
  *   }
  */
 export async function POST(req: Request) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json(
       { error: "Tu sesión expiró. Inicia sesión nuevamente." },
@@ -86,9 +87,18 @@ export async function POST(req: Request) {
     );
   }
 
+  const validation = validateWorkflow(nodes, edges);
+  if (!validation.valid) {
+    return NextResponse.json(
+      { success: false, error: "El flujo tiene conexiones inválidas.", validation },
+      { status: 422 }
+    );
+  }
+
   try {
     // Execute the workflow in Mock mode.
     const result = await executeWorkflow(nodes, edges, {
+      clientId: session.clientId,
       forcePaymentOutcome: body.forcePaymentOutcome,
       questionResponses: body.questionResponses,
     });

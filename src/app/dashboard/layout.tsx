@@ -20,6 +20,9 @@ import {
   UserPlus,
   ScrollText,
   Brain,
+  Package,
+  ShoppingBag,
+  PhoneCall,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FlowAssistantPanel, type AISuggestion } from "@/components/dashboard/flow-assistant-panel";
@@ -33,6 +36,9 @@ const NAV_ITEMS = [
   { key: "dashboard", label: "Panel", href: "/dashboard", icon: LayoutDashboard, adminOnly: false },
   { key: "flujos", label: "Flujos", href: "/dashboard/flujos", icon: Workflow, adminOnly: false },
   { key: "ejecuciones", label: "Ejecuciones", href: "/dashboard/ejecuciones", icon: History, adminOnly: false },
+  { key: "catalogo", label: "Catálogo", href: "/dashboard/catalogo", icon: Package, adminOnly: false },
+  { key: "pedidos", label: "Pedidos", href: "/dashboard/pedidos", icon: ShoppingBag, adminOnly: false },
+  { key: "llamadas", label: "Llamadas y WhatsApp", href: "/dashboard/llamadas", icon: PhoneCall, adminOnly: false },
   { key: "nuevos-clientes", label: "Nuevos clientes", href: "/dashboard/nuevos-clientes", icon: UserPlus, adminOnly: true },
   { key: "clientes-activos", label: "Clientes activos", href: "/dashboard/clientes-activos", icon: Users, adminOnly: true },
   { key: "solicitudes", label: "Solicitudes", href: "/dashboard/solicitudes", icon: Inbox, adminOnly: true },
@@ -66,10 +72,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.location.href = `/login?next=${next}`;
       return;
     }
-
-    // Authenticated but role is "applicant" → not yet approved.
-    // Send them to the account-status page instead of the dashboard.
-    if (initialized && user && user.role === "applicant") {
+    if (
+      initialized &&
+      user &&
+      (user.active === false || user.role === "applicant")
+    ) {
       window.location.href = "/cuenta/estado";
     }
   }, [initialized, user, pathname]);
@@ -91,7 +98,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   // Loading state
-  if (!initialized || !user) {
+  if (!initialized || !user || user.active === false || user.role === "applicant") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
         <div className="size-12 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">

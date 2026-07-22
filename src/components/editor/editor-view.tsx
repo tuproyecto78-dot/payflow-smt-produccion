@@ -328,6 +328,12 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
           ...(type === "whatsapp"
             ? { phoneNumber: "+15551234567", message: "¡Hola desde PayFlow SMT!" }
             : {}),
+          ...(type === "catalog_search"
+            ? { query: "{{producto_buscado}}", outputVariable: "catalog_product" }
+            : {}),
+          ...(type === "update_order"
+            ? { orderId: "{{order_id}}", orderStatus: "confirmed" }
+            : {}),
           ...(type === "payment" || type === "create_payment"
             ? {
                 provider: "Mock",

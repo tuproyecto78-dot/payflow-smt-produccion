@@ -94,7 +94,6 @@ const DEMO_NODES: FlowNode[] = [
       providerMode: "payphone_api_link",
       amount: 49.99,
       currency: "USD",
-      description: "Pedido Pro",
       paymentDescription: "Pedido Pro",
       customerName: "Cliente WhatsApp",
       customer: "Cliente WhatsApp",

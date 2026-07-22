@@ -93,6 +93,7 @@ function resolveStatus(
   user: MeUser | null,
   sub?: SubscriptionRequest | null
 ): ProfileStatus {
+  if (user?.active) return "active";
   if (user?.clientStatus === "active") return "active";
   if (sub?.subscriptionStatus === "activated") return "activated";
   if (sub?.subscriptionStatus === "rejected") return "rejected";
@@ -168,7 +169,10 @@ export default function CuentaEstadoPage() {
   }, []);
 
   useEffect(() => {
-    void loadData();
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadData]);
 
   async function handleLogout() {

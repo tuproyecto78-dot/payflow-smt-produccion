@@ -65,46 +65,25 @@ export function AuthView() {
     }
 
     if (mode === "signup") {
-      // User must verify their email before getting a session.
-      window.location.href = "/verificar-correo";
+      window.location.href =
+        result.next ||
+        (result.requiresEmailConfirmation ? "/verificar-correo" : "/cuenta/estado");
       return;
     }
 
-    // Login success — redirect based on subscription status / next param.
+    // The server decides whether the account may enter the dashboard or must
+    // finish verification/subscription first.
     const params = new URLSearchParams(window.location.search);
-    const next = params.get("next") || "/dashboard";
-    if (result.subscriptionStatus === "pending") {
-      window.location.href = "/cuenta/estado";
-    } else {
-      window.location.href = next;
-    }
+    const requested = params.get("next");
+    window.location.href = result.next || requested || "/dashboard";
   }
 
-  async function onGoogle() {
+  function onGoogle() {
     setError(null);
     setGoogleLoading(true);
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const nextParam = params.get("next") || "/cuenta/estado";
-      const res = await fetch(
-        `/api/auth/google?next=${encodeURIComponent(nextParam)}`,
-        {
-          method: "POST",
-          credentials: "include",
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        setError(data.error || "No se pudo iniciar sesión con Google.");
-        setGoogleLoading(false);
-        return;
-      }
-      // Follow the redirect to Supabase OAuth.
-      window.location.href = data.url;
-    } catch {
-      setError("Error de red al conectar con Google.");
-      setGoogleLoading(false);
-    }
+    const params = new URLSearchParams(window.location.search);
+    const nextParam = params.get("next") || "/cuenta/estado";
+    window.location.href = `/api/auth/google?next=${encodeURIComponent(nextParam)}`;
   }
 
   return (

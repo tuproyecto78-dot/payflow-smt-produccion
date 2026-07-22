@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/auth/require-session";
 import { executeWorkflow } from "@/lib/engine";
 import type { PaymentOutcome } from "@/lib/workflow-types";
+import { validateWorkflow } from "@/lib/workflow-validator";
+import { recordWorkflowRunEvent } from "@/lib/operational-telemetry";
 
 async function getOwnedWorkflow(workflowId: string, userId: string) {
   const workflow = await db.workflow.findUnique({
@@ -14,7 +16,7 @@ async function getOwnedWorkflow(workflowId: string, userId: string) {
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -44,6 +46,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     ? (body.edges as Parameters<typeof executeWorkflow>[1])
     : (JSON.parse(workflow.edgesJson || "[]") as Parameters<typeof executeWorkflow>[1]);
 
+  const validation = validateWorkflow(nodes, edges);
+  if (!validation.valid) {
+    return NextResponse.json(
+      { error: "El flujo tiene conexiones inválidas.", validation },
+      { status: 422 }
+    );
+  }
+
   const execution = await db.executionLog.create({
     data: {
       workflowId: workflow.id,
@@ -53,7 +63,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     },
   });
 
+  const telemetryStartedAt = new Date();
   const result = await executeWorkflow(nodes, edges, {
+    clientId: session.clientId,
     forcePaymentOutcome: body.forcePaymentOutcome,
     questionResponses: body.questionResponses,
   });
@@ -66,6 +78,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       variablesJson: JSON.stringify(result.variables),
       completedAt: new Date(),
     },
+  });
+
+  await recordWorkflowRunEvent({
+    userId: session.userId,
+    clientId: session.clientId,
+    workflowId: workflow.id,
+    workflowName: workflow.name,
+    status: result.status,
+    startedAt: telemetryStartedAt,
+    finishedAt: new Date(),
   });
 
   return NextResponse.json({
