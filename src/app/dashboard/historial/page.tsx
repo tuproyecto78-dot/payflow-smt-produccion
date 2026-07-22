@@ -1,156 +1,146 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { ScrollText, Loader2, RefreshCw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, History, Loader2, RefreshCw } from "lucide-react";
 
 interface HistoryEntry {
   id: string;
+  clientId: string | null;
   action: string;
-  flowName: string;
-  flowId: string;
-  timestamp: string;
-  details?: string;
+  entityType: string | null;
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  flow_created: "Flujo creado",
-  flow_edited: "Flujo editado",
-  flow_deleted: "Flujo eliminado",
-  flow_duplicated: "Flujo duplicado",
-  flow_deactivated: "Flujo desactivado",
-  flow_activated: "Flujo activado",
-  flow_executed: "Flujo ejecutado",
-  demo_reset: "Demo restablecido",
-  flow_saved: "Flujo guardado",
-  subscription_request_created: "Solicitud de suscripción creada",
-  client_registered: "Cliente registrado",
-  client_reviewed: "Cliente revisado",
-  client_approved: "Cliente aprobado",
-  client_rejected: "Cliente rechazado",
+  onboarding_completed: "Onboarding completado",
+  workflow_created: "Flujo creado",
+  workflow_updated: "Flujo actualizado",
+  workflow_executed: "Flujo ejecutado",
+  client_profile_updated: "Cliente actualizado",
+  catalog_product_created: "Producto agregado",
+  catalog_product_updated: "Producto actualizado",
+  catalog_product_deleted: "Producto eliminado",
+  catalog_promotions_updated: "Promociones actualizadas",
+  catalog_published: "Catálogo publicado",
+  catalog_order_updated: "Pedido actualizado",
+  subscription_request_created: "Solicitud creada",
   client_activated: "Cliente activado",
-  workflow_created: "Workflow creado",
-  workflow_updated: "Workflow actualizado",
-  workflow_executed: "Workflow ejecutado",
-  payphone_config_checked: "Configuración PayPhone verificada",
-  payphone_link_created: "Link PayPhone generado",
   payment_created: "Pago creado",
-  payment_pending: "Pago pendiente",
   payment_status_updated: "Estado de pago actualizado",
-  login: "Inicio de sesión",
-  logout: "Cierre de sesión",
-  security_error: "Error de seguridad",
 };
 
-const HISTORY_KEY = "payflow_flow_history";
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("es-EC", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-function loadHistory(): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function entryTitle(entry: HistoryEntry) {
+  const businessName = entry.metadata.business_name;
+  const workflowName = entry.metadata.workflow_name;
+  const productName = entry.metadata.name;
+  if (typeof businessName === "string" && businessName) return businessName;
+  if (typeof workflowName === "string" && workflowName) return workflowName;
+  if (typeof productName === "string" && productName) return productName;
+  return entry.entityType || "Sistema";
+}
+
+function entryDetail(entry: HistoryEntry) {
+  const parts: string[] = [];
+  if (typeof entry.metadata.payment_provider === "string") parts.push(`Pago: ${entry.metadata.payment_provider}`);
+  if (typeof entry.metadata.products_imported === "number") parts.push(`${entry.metadata.products_imported} productos importados`);
+  if (typeof entry.metadata.node_count === "number") parts.push(`${entry.metadata.node_count} nodos`);
+  if (typeof entry.metadata.lines === "number") parts.push(`${entry.metadata.lines} líneas de promociones`);
+  return parts.join(" · ") || "Registro persistente";
 }
 
 export default function HistorialPage() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setEntries(loadHistory());
-    setLoading(false);
+  const load = useCallback(async (silent = false) => {
+    silent ? setRefreshing(true) : setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/history", { credentials: "include", cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "No se pudo cargar el historial.");
+      setEntries(Array.isArray(data.entries) ? data.entries : []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el historial.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
-    // Load history on mount — use a microtask to avoid setState-in-effect lint
-    Promise.resolve().then(() => {
-      setEntries(loadHistory());
-      setLoading(false);
-    });
-  }, []);
-
-  function handleClear() {
-    if (confirm("¿Borrar todo el historial? Esta acción no se puede deshacer.")) {
-      localStorage.removeItem(HISTORY_KEY);
-      setEntries([]);
-      toast.success("Historial borrado.");
-    }
-  }
+    void load();
+  }, [load]);
 
   return (
-    <div className="max-w-5xl mx-auto p-6 lg:p-10">
+    <div className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-10">
       <div className="flex items-start justify-between flex-wrap gap-4 mb-8">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Historial</h1>
-          <p className="text-muted-foreground mt-1">Registro de acciones administrativas</p>
+          <p className="text-muted-foreground mt-1">
+            Registro persistente de clientes, catálogos, promociones, flujos y pagos.
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={load}>
-            <RefreshCw className="size-4 mr-2" />
-            Actualizar
-          </Button>
-          {entries.length > 0 && (
-            <Button variant="outline" onClick={handleClear} className="text-rose-600 hover:text-rose-700">
-              <Trash2 className="size-4 mr-2" />
-              Borrar todo
-            </Button>
-          )}
-        </div>
+        <Button variant="outline" onClick={() => void load(true)} disabled={refreshing}>
+          {refreshing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
+          Actualizar
+        </Button>
       </div>
 
+      {error && (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-500/10 p-4 flex gap-3 mb-6">
+          <AlertCircle className="size-5 text-rose-600 shrink-0" />
+          <p className="text-sm">{error}</p>
+        </div>
+      )}
+
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="size-6 animate-spin mr-2" /> Cargando historial…
+        <div className="py-20 flex justify-center text-muted-foreground">
+          <Loader2 className="size-6 mr-2 animate-spin" /> Cargando historial…
         </div>
       ) : entries.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-12 text-center">
-          <ScrollText className="size-12 mx-auto text-muted-foreground/40 mb-4" />
-          <h3 className="text-lg font-semibold mb-1">No hay acciones registradas</h3>
-          <p className="text-muted-foreground text-sm">
-            Las acciones que realices (crear, editar, eliminar flujos, etc.) aparecerán aquí.
+        <div className="rounded-2xl border border-dashed p-12 text-center">
+          <History className="size-12 mx-auto text-muted-foreground/40 mb-4" />
+          <h2 className="font-semibold">No hay eventos persistentes</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Al completar el onboarding, el cliente y su flujo aparecerán aquí.
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="rounded-2xl border bg-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide text-muted-foreground">Fecha</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide text-muted-foreground">Acción</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide text-muted-foreground">Flujo/Cliente</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide text-muted-foreground">Detalle</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase text-muted-foreground">Fecha</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase text-muted-foreground">Acción</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase text-muted-foreground">Cliente / elemento</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase text-muted-foreground">Detalle</th>
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
-                  <tr key={e.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(e.timestamp).toLocaleString("es-EC", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="outline" className="text-[10px]">
-                        {ACTION_LABELS[e.action] || e.action}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 font-medium truncate max-w-[200px]">
-                      {e.flowName}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[200px]">
-                      {e.details || "—"}
-                    </td>
+                {entries.map((entry) => (
+                  <tr key={entry.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(entry.createdAt)}</td>
+                    <td className="px-4 py-3"><Badge variant="outline">{ACTION_LABELS[entry.action] || entry.action}</Badge></td>
+                    <td className="px-4 py-3 font-medium">{entryTitle(entry)}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{entryDetail(entry)}</td>
                   </tr>
                 ))}
               </tbody>
