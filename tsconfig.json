@@ -24,6 +24,9 @@
       }
     ],
     "paths": {
+      "@/components/dashboard/create-flow-dialog": [
+        "./src/components/dashboard/flexible-onboarding-dialog"
+      ],
       "@/*": [
         "./src/*"
       ]
