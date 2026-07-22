@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Clock3,
   CreditCard,
+  ExternalLink,
   Headphones,
   Loader2,
   MessageCircle,
@@ -195,17 +196,17 @@ export function VoiceAiView() {
   const active = status === "active";
   const activationPending = status === "requested" || status === "provisioning";
 
-  if (loading && !data) return <Centered><Loader2 className="mr-2 size-5 animate-spin" />Cargando Llamadas IA…</Centered>;
-  if (loadError) return <Centered><div className="max-w-lg text-center"><CircleAlert className="mx-auto mb-3 size-10 text-amber-500" /><h1 className="text-lg font-semibold">No pudimos abrir Llamadas IA</h1><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><Button className="mt-5" onClick={() => void load(selectedClientId)}>Reintentar</Button></div></Centered>;
+  if (loading && !data) return <Centered><Loader2 className="mr-2 size-5 animate-spin" />Cargando llamadas y voz IA…</Centered>;
+  if (loadError) return <Centered><div className="max-w-lg text-center"><CircleAlert className="mx-auto mb-3 size-10 text-amber-500" /><h1 className="text-lg font-semibold">No pudimos abrir llamadas y voz IA</h1><p className="mt-2 text-sm text-muted-foreground">{loadError}</p><Button className="mt-5" onClick={() => void load(selectedClientId)}>Reintentar</Button></div></Centered>;
 
   return <div className="mx-auto max-w-7xl space-y-6 p-5 lg:p-8">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight">Llamadas IA</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Llamadas y voz IA</h1>
           <StatusBadge status={status} />
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">El número de tu negocio que siempre contesta, toma pedidos, reserva, cobra y confirma por WhatsApp.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Telefonía entrante con Twilio o Telnyx y un canal independiente para Llamadas por WhatsApp.</p>
       </div>
       <div className="flex items-center gap-2">
         {(data?.businesses.length || 0) > 0 && <Select value={selectedClientId || undefined} onValueChange={selectBusiness}>
@@ -225,7 +226,7 @@ export function VoiceAiView() {
           <TabsTrigger value="llamadas">Llamadas</TabsTrigger>
           <TabsTrigger value="agente">Agente IA</TabsTrigger>
           <TabsTrigger value="operacion">Pedidos y reservas</TabsTrigger>
-          <TabsTrigger value="numero">Número</TabsTrigger>
+          <TabsTrigger value="numero">Telefonía</TabsTrigger>
           <TabsTrigger value="configuracion">Configuración</TabsTrigger>
         </TabsList>
 
@@ -236,11 +237,16 @@ export function VoiceAiView() {
             <Metric title="Atendidas" value={data?.metrics.completedCalls || 0} icon={Headphones} />
             <Metric title="Conversiones" value={data?.metrics.convertedCalls || 0} icon={Sparkles} />
           </div>
+          <CallChannels
+            active={active}
+            provider={settings.provider}
+            whatsappMessagingReady={data?.integrations.whatsapp || false}
+          />
           <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
             <LiveCallCard active={active} businessPhone={settings.businessPhone} />
             <Card><CardHeader><CardTitle className="text-base">Integraciones del negocio</CardTitle></CardHeader><CardContent className="space-y-3">
               <Integration label="Catálogo y precios" ready={data?.integrations.catalog || false} icon={Package} />
-              <Integration label="WhatsApp Cloud API" ready={data?.integrations.whatsapp || false} icon={MessageCircle} />
+              <Integration label="WhatsApp Cloud API (mensajes)" ready={data?.integrations.whatsapp || false} icon={MessageCircle} />
               <Integration label="PayPhone" ready={data?.integrations.payphone || false} icon={CreditCard} />
               <Integration label="Stripe" ready={data?.integrations.stripe || false} icon={CreditCard} />
             </CardContent></Card>
@@ -276,7 +282,7 @@ function AgentPanel({ agent, onChange }: { agent: VoiceAgent; onChange: (agent: 
 
 function NumberPanel({ settings, canProvision, provisioning, onChange, onProvision }: { settings: Omit<VoiceModuleSettings, "clientId">; canProvision: boolean; provisioning: boolean; onChange: (value: Omit<VoiceModuleSettings, "clientId">) => void; onProvision: () => void }) {
   const set = <K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) => onChange({ ...settings, [key]: value });
-  return <div className="grid gap-5 lg:grid-cols-2"><Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><PhoneForwarded className="size-5 text-emerald-500" />Número del negocio</CardTitle></CardHeader><CardContent className="space-y-4"><Field label="Número que ya conocen tus clientes"><Input value={settings.businessPhone} onChange={(event) => set("businessPhone", event.target.value)} placeholder="+593…" /></Field>{canProvision ? <><div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">Zona de aprovisionamiento para administradores. El cliente no puede modificar el destino técnico ni activar el runtime.</div><Field label="Estado del módulo"><Select value={settings.activationStatus === "not_enabled" ? "requested" : settings.activationStatus} onValueChange={(value) => set("activationStatus", value as typeof settings.activationStatus)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="requested">Solicitado</SelectItem><SelectItem value="provisioning">Configurando</SelectItem><SelectItem value="active">Activo</SelectItem><SelectItem value="suspended">Suspendido</SelectItem></SelectContent></Select></Field><Field label="Proveedor de telefonía"><Select value={settings.provider} onValueChange={(value) => set("provider", value as typeof settings.provider)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="twilio">Twilio Voice</SelectItem><SelectItem value="fonoster">Fonoster</SelectItem><SelectItem value="sip">Troncal SIP</SelectItem><SelectItem value="custom">Proveedor personalizado</SelectItem></SelectContent></Select></Field><Field label="Número o destino de desvío"><Input value={settings.routingPhone} onChange={(event) => set("routingPhone", event.target.value)} placeholder="Asignado por PayFlow" /></Field><Field label="ID del número en el proveedor"><Input value={settings.providerPhoneId} onChange={(event) => set("providerPhoneId", event.target.value)} placeholder="No pegues tokens ni claves" /></Field>{settings.provider === "sip" && <Field label="Dominio SIP"><Input value={settings.sipDomain} onChange={(event) => set("sipDomain", event.target.value)} placeholder="sip.negocio.example" /></Field>}<Button onClick={onProvision} disabled={provisioning}>{provisioning && <Loader2 className="mr-2 size-4 animate-spin" />}Actualizar aprovisionamiento</Button></> : <div className="rounded-lg border bg-muted/40 p-4 text-sm"><p className="font-medium">Ruta administrada por PayFlow</p><p className="mt-1 text-xs text-muted-foreground">Después de solicitar el módulo, el equipo configura el proveedor y te entrega el destino para activar el desvío con tu operador.</p></div>}</CardContent></Card><Card><CardHeader><CardTitle className="text-base">Cómo se conecta</CardTitle></CardHeader><CardContent className="space-y-4 text-sm"><Step number="1" title="Conserva el número actual" text="El cliente no necesita instalar WhatsApp ni cambiar el número que sus compradores conocen." /><Step number="2" title="Desvía las llamadas" text="Claro, Movistar, CNT o la central SIP envían las llamadas al destino asignado por PayFlow." /><Step number="3" title="PayFlow identifica el negocio" text="El número de destino carga el catálogo, agente, pagos y reglas correctas de ese cliente." /><Step number="4" title="La IA atiende y confirma" text="El pedido o reserva queda en PayFlow; el cobro y la confirmación llegan por WhatsApp." /></CardContent></Card></div>;
+  return <div className="grid gap-5 lg:grid-cols-2"><Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><PhoneForwarded className="size-5 text-emerald-500" />Número telefónico del negocio</CardTitle></CardHeader><CardContent className="space-y-4"><Field label="Número que ya conocen tus clientes"><Input value={settings.businessPhone} onChange={(event) => set("businessPhone", event.target.value)} placeholder="+593…" /></Field>{canProvision ? <><div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">Zona de aprovisionamiento para administradores. El cliente no puede modificar el destino técnico ni activar el runtime.</div><Field label="Estado del módulo"><Select value={settings.activationStatus === "not_enabled" ? "requested" : settings.activationStatus} onValueChange={(value) => set("activationStatus", value as typeof settings.activationStatus)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="requested">Solicitado</SelectItem><SelectItem value="provisioning">Configurando</SelectItem><SelectItem value="active">Activo</SelectItem><SelectItem value="suspended">Suspendido</SelectItem></SelectContent></Select></Field><Field label="Proveedor de telefonía"><Select value={settings.provider} onValueChange={(value) => set("provider", value as typeof settings.provider)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="twilio">Twilio Voice</SelectItem><SelectItem value="telnyx">Telnyx Voice</SelectItem><SelectItem value="fonoster">Fonoster</SelectItem><SelectItem value="sip">Troncal SIP</SelectItem><SelectItem value="custom">Proveedor personalizado</SelectItem></SelectContent></Select></Field><Field label="Número o destino de desvío"><Input value={settings.routingPhone} onChange={(event) => set("routingPhone", event.target.value)} placeholder="Asignado por PayFlow" /></Field><Field label="ID del número en el proveedor"><Input value={settings.providerPhoneId} onChange={(event) => set("providerPhoneId", event.target.value)} placeholder="No pegues tokens ni claves" /></Field>{settings.provider === "sip" && <Field label="Dominio SIP"><Input value={settings.sipDomain} onChange={(event) => set("sipDomain", event.target.value)} placeholder="sip.negocio.example" /></Field>}<Button onClick={onProvision} disabled={provisioning}>{provisioning && <Loader2 className="mr-2 size-4 animate-spin" />}Actualizar aprovisionamiento</Button></> : <div className="rounded-lg border bg-muted/40 p-4 text-sm"><p className="font-medium">Ruta administrada por PayFlow</p><p className="mt-1 text-xs text-muted-foreground">Después de solicitar el módulo, el equipo configura el proveedor y te entrega el destino para activar el desvío con tu operador.</p></div>}</CardContent></Card><Card><CardHeader><CardTitle className="text-base">Cómo se conecta la telefonía</CardTitle></CardHeader><CardContent className="space-y-4 text-sm"><Step number="1" title="Conserva el número actual" text="El cliente mantiene el número que sus compradores conocen; este proceso corresponde a telefonía tradicional." /><Step number="2" title="Desvía las llamadas" text="Claro, Movistar, CNT o la central SIP envían las llamadas al destino asignado por PayFlow." /><Step number="3" title="PayFlow identifica el negocio" text="El número de destino carga el catálogo, agente, pagos y reglas correctas de ese cliente." /><Step number="4" title="La IA atiende y confirma" text="El pedido o reserva queda en PayFlow; el cobro y la confirmación llegan por WhatsApp." /><div className="rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200"><strong>Llamadas por WhatsApp es otro canal.</strong> Se habilita por separado en Meta y no utiliza el desvío configurado con Twilio, Telnyx o SIP.</div></CardContent></Card></div>;
 }
 
 function SettingsPanel({ settings, onChange }: { settings: Omit<VoiceModuleSettings, "clientId">; onChange: (value: Omit<VoiceModuleSettings, "clientId">) => void }) {
@@ -294,6 +300,39 @@ function RecentCalls({ calls, onOpen, title = "Llamadas recientes" }: { calls: V
 function CallDialog({ call, onClose }: { call: VoiceCall | null; onClose: () => void }) { return <Dialog open={Boolean(call)} onOpenChange={(open) => !open && onClose()}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Llamada {call?.callerPhone}</DialogTitle></DialogHeader>{call && <div className="space-y-5"><div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-3"><Info label="Estado" value={call.status} /><Info label="Resultado" value={call.outcome} /><Info label="Duración" value={formatDuration(call.durationSeconds)} /></div>{call.summary && <div><h3 className="text-sm font-semibold">Resumen</h3><p className="mt-1 text-sm text-muted-foreground">{call.summary}</p></div>}<div><h3 className="mb-2 text-sm font-semibold">Transcripción</h3>{call.transcript.length === 0 ? <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No hay transcripción guardada.</div> : <div className="space-y-2">{call.transcript.map((line, index) => <div key={index} className={cn("max-w-[90%] rounded-xl p-3 text-sm", line.speaker === "agent" ? "ml-auto bg-emerald-50 dark:bg-emerald-500/10" : "bg-muted")}><p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">{line.speaker === "agent" ? "Agente" : "Cliente"}</p>{line.text}</div>)}</div>}</div>{call.orderId && <Link href="/dashboard/pedidos"><Button variant="outline"><ShoppingBag className="mr-2 size-4" />Ver pedido creado</Button></Link>}</div>}</DialogContent></Dialog>; }
 
 function NoBusiness({ businesses, onSelect }: { businesses: VoiceBusiness[]; onSelect: (id: string) => void }) { return <Card className="border-dashed"><CardContent className="py-16 text-center"><PhoneCall className="mx-auto mb-3 size-10 text-muted-foreground" /><h2 className="font-semibold">Selecciona un negocio</h2><p className="mt-1 text-sm text-muted-foreground">Cada número, agente y llamada se mantiene separado por negocio.</p>{businesses.length > 0 && <Button className="mt-4" onClick={() => onSelect(businesses[0].id)}>Seleccionar {businesses[0].businessName}</Button>}</CardContent></Card>; }
+function CallChannels({ active, provider, whatsappMessagingReady }: { active: boolean; provider: VoiceModuleSettings["provider"]; whatsappMessagingReady: boolean }) {
+  const providerNames: Record<VoiceModuleSettings["provider"], string> = {
+    telnyx: "Telnyx",
+    twilio: "Twilio",
+    fonoster: "Fonoster",
+    sip: "Troncal SIP",
+    custom: "Proveedor personalizado",
+  };
+
+  return <Card>
+    <CardHeader>
+      <CardTitle className="text-base">Canales de llamadas</CardTitle>
+    </CardHeader>
+    <CardContent className="grid gap-3 md:grid-cols-2">
+      <div className="flex items-start gap-3 rounded-xl border p-4">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><PhoneCall className="size-5" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">Línea telefónica del negocio</p><Badge variant={active ? "default" : "outline"}>{active ? "Activa" : "Pendiente"}</Badge></div>
+          <p className="mt-1 text-xs text-muted-foreground">Llamadas entrantes atendidas por la IA mediante {providerNames[provider]}.</p>
+        </div>
+      </div>
+      <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50/50 p-4 dark:border-green-500/25 dark:bg-green-500/5">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300"><MessageCircle className="size-5" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">Llamadas por WhatsApp</p><Badge variant="outline">Por configurar</Badge></div>
+          <p className="mt-1 text-xs text-muted-foreground">{whatsappMessagingReady ? "La mensajería de WhatsApp ya está lista. Las llamadas son otro canal de Meta y requieren habilitación y conexión propias." : "Primero conecta WhatsApp Cloud API; luego habilita Calling API para el número del negocio."}</p>
+          <a href="https://developers.facebook.com/documentation/business-messaging/whatsapp/calling" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:underline dark:text-green-300">Ver configuración oficial de Meta <ExternalLink className="size-3" /></a>
+        </div>
+      </div>
+    </CardContent>
+  </Card>;
+}
+
 function Metric({ title, value, icon: Icon }: { title: string; value: number; icon: typeof PhoneCall }) { return <Card><CardContent className="flex items-center justify-between p-4"><div><p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p><p className="mt-1 text-2xl font-bold">{value}</p></div><div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon className="size-5" /></div></CardContent></Card>; }
 function Integration({ label, ready, icon: Icon }: { label: string; ready: boolean; icon: typeof Package }) { return <div className="flex items-center gap-3 rounded-lg border p-3"><Icon className="size-4 text-muted-foreground" /><span className="flex-1 text-sm font-medium">{label}</span>{ready ? <Badge className="border-0 bg-emerald-100 text-emerald-700"><Check className="mr-1 size-3" />Listo</Badge> : <Badge variant="outline"><X className="mr-1 size-3" />Pendiente</Badge>}</div>; }
 function StatusBadge({ status }: { status: string }) { const map: Record<string, string> = { not_enabled: "No contratado", requested: "Solicitado", provisioning: "Configurando", active: "Activo", suspended: "Suspendido" }; return <Badge variant={status === "active" ? "default" : "outline"}>{map[status] || status}</Badge>; }
