@@ -5,18 +5,28 @@ import { CreateFlowDialog as FlexibleOnboardingDialog } from "./flexible-onboard
 
 type Props = React.ComponentProps<typeof FlexibleOnboardingDialog>;
 
+type KnowledgeSource = {
+  source_id?: string;
+  type?: string;
+  name?: string;
+  rawText?: string;
+  rows?: Record<string, string>[];
+  headers?: string[];
+};
+
 /**
- * Keeps the structured result returned by /api/knowledge/process and adds it to
- * the final onboarding request. The visual wizard remains unchanged; this
- * wrapper only repairs the data hand-off that previously kept counts but threw
- * away the actual products and knowledge before saving.
+ * Repairs the data hand-off without changing the approved visual wizard. The
+ * original dialog only retained counters after processing; this wrapper keeps
+ * the structured products and source text until the final persistent request.
  */
 export function CreateFlowDialog(props: Props) {
   const detectedRef = useRef<Record<string, unknown> | null>(null);
+  const sourcesRef = useRef<KnowledgeSource[]>([]);
 
   useEffect(() => {
     if (!props.open) {
       detectedRef.current = null;
+      sourcesRef.current = [];
       return;
     }
 
@@ -24,8 +34,31 @@ export function CreateFlowDialog(props: Props) {
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      const response = await originalFetch(input, init);
 
+      // Enrich before sending, so the onboarding endpoint is called exactly once.
+      if (url.includes("/api/workflows/create-flexible-onboarding") && init?.body) {
+        try {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          const businessName = String(body.businessName || "");
+          body.detectedKnowledge = detectedRef.current;
+          body.knowledgeSources = sourcesRef.current;
+          body.isDemo = /\b(demo|prueba|test)\b/i.test(businessName);
+          return originalFetch(input, { ...init, body: JSON.stringify(body) });
+        } catch {
+          return originalFetch(input, init);
+        }
+      }
+
+      if (url.includes("/api/knowledge/process") && init?.body) {
+        try {
+          const requestPayload = JSON.parse(String(init.body)) as { sources?: KnowledgeSource[] };
+          sourcesRef.current = Array.isArray(requestPayload.sources) ? requestPayload.sources : [];
+        } catch {
+          sourcesRef.current = [];
+        }
+      }
+
+      const response = await originalFetch(input, init);
       if (url.includes("/api/knowledge/process") && response.ok) {
         try {
           const payload = await response.clone().json();
@@ -33,22 +66,9 @@ export function CreateFlowDialog(props: Props) {
             detectedRef.current = payload.merged as Record<string, unknown>;
           }
         } catch {
-          // The original response remains untouched; the wizard will show its own error.
+          // The original response remains untouched; the dialog handles errors.
         }
       }
-
-      if (url.includes("/api/workflows/create-flexible-onboarding") && init?.body) {
-        try {
-          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-          const businessName = String(body.businessName || "");
-          body.detectedKnowledge = detectedRef.current;
-          body.isDemo = /\b(demo|prueba|test)\b/i.test(businessName);
-          return originalFetch(input, { ...init, body: JSON.stringify(body) });
-        } catch {
-          return response;
-        }
-      }
-
       return response;
     };
 
