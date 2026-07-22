@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ComponentProps } from "react";
 import { CreateFlowDialog as FlexibleOnboardingDialog } from "./flexible-onboarding-dialog";
 
-type Props = React.ComponentProps<typeof FlexibleOnboardingDialog>;
+type Props = ComponentProps<typeof FlexibleOnboardingDialog>;
 
 type KnowledgeSource = {
   source_id?: string;
@@ -13,6 +13,14 @@ type KnowledgeSource = {
   rows?: Record<string, string>[];
   headers?: string[];
 };
+
+function detectedPromotions(sources: KnowledgeSource[]) {
+  return sources
+    .map((source) => String(source.rawText || "").trim())
+    .filter((text) => /promoci[oó]n|descuento|oferta|2x1|happy hour/i.test(text))
+    .join("\n\n")
+    .slice(0, 12000);
+}
 
 /**
  * Repairs the data hand-off without changing the approved visual wizard. The
@@ -33,7 +41,12 @@ export function CreateFlowDialog(props: Props) {
     const originalFetch = window.fetch.bind(window);
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+          ? input.toString()
+          : input.url;
 
       // Enrich before sending, so the onboarding endpoint is called exactly once.
       if (url.includes("/api/workflows/create-flexible-onboarding") && init?.body) {
@@ -43,7 +56,37 @@ export function CreateFlowDialog(props: Props) {
           body.detectedKnowledge = detectedRef.current;
           body.knowledgeSources = sourcesRef.current;
           body.isDemo = /\b(demo|prueba|test)\b/i.test(businessName);
-          return originalFetch(input, { ...init, body: JSON.stringify(body) });
+
+          const response = await originalFetch(input, {
+            ...init,
+            body: JSON.stringify(body),
+          });
+
+          if (response.ok) {
+            try {
+              const payload = await response.clone().json();
+              const clientId = typeof payload.client_id === "string" ? payload.client_id : "";
+              const promotions = detectedPromotions(sourcesRef.current);
+              if (clientId && promotions) {
+                const promotionResponse = await originalFetch(
+                  `/api/admin/clients/${encodeURIComponent(clientId)}/promotions`,
+                  {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ promotions }),
+                  }
+                );
+                if (!promotionResponse.ok) {
+                  console.warn("[persistent-onboarding] promotions could not be linked to AI");
+                }
+              }
+            } catch (promotionError) {
+              console.warn("[persistent-onboarding] promotions hand-off failed", promotionError);
+            }
+          }
+
+          return response;
         } catch {
           return originalFetch(input, init);
         }
@@ -51,8 +94,12 @@ export function CreateFlowDialog(props: Props) {
 
       if (url.includes("/api/knowledge/process") && init?.body) {
         try {
-          const requestPayload = JSON.parse(String(init.body)) as { sources?: KnowledgeSource[] };
-          sourcesRef.current = Array.isArray(requestPayload.sources) ? requestPayload.sources : [];
+          const requestPayload = JSON.parse(String(init.body)) as {
+            sources?: KnowledgeSource[];
+          };
+          sourcesRef.current = Array.isArray(requestPayload.sources)
+            ? requestPayload.sources
+            : [];
         } catch {
           sourcesRef.current = [];
         }
