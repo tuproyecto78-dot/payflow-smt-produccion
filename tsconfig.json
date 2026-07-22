@@ -25,7 +25,10 @@
     ],
     "paths": {
       "@/components/dashboard/create-flow-dialog": [
-        "./src/components/dashboard/flexible-onboarding-dialog"
+        "./src/components/dashboard/persistent-onboarding-wrapper"
+      ],
+      "@/lib/file-content-reader": [
+        "./src/lib/file-content-reader-v2"
       ],
       "@/*": [
         "./src/*"
