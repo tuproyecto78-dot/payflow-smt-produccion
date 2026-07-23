@@ -1,0 +1,1105 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import ReactFlow, {
+     5→  Background,
+     6→  BackgroundVariant,
+     7→  ConnectionMode,
+     8→  Controls,
+     9→  MiniMap,
+    10→  ReactFlowProvider,
+    11→  addEdge,
+    12→  useEdgesState,
+    13→  useNodesState,
+    14→  useReactFlow,
+    15→  type Connection,
+    16→  type Edge,
+    17→  type Node,
+    18→  type NodeChange,
+    19→  type EdgeChange,
+    20→  applyNodeChanges,
+    21→  applyEdgeChanges,
+    22→} from "reactflow";
+    23→import { useAppStore, type WorkflowSummary } from "@/stores/app-store";
+    24→import { NodePalette } from "./node-palette";
+    25→import { ConfigPanel, type SelectedNode } from "./config-panel";
+    26→import { WhatsAppSimulator } from "./whatsapp-simulator";
+    27→import { FloatingPanel } from "./floating-panel";
+    28→import { ExecutionLog } from "./execution-log";
+    29→import { PayFlowNode } from "./nodes/payflow-node";
+    30→import {
+    31→  NODE_METADATA,
+    32→  type FlowEdge,
+    33→  type FlowNode,
+    34→  type LogEntry,
+    35→  type NodeType,
+    36→  type PaymentOutcome,
+    37→  type WhatsAppSimMessage,
+    38→} from "@/lib/workflow-types";
+    39→import { Button } from "@/components/ui/button";
+    40→import { Input } from "@/components/ui/input";
+    41→import {
+    42→  Dialog,
+    43→  DialogContent,
+    44→  DialogDescription,
+    45→  DialogFooter,
+    46→  DialogHeader,
+    47→  DialogTitle,
+    48→} from "@/components/ui/dialog";
+    49→import {
+    50→  Select,
+    51→  SelectContent,
+    52→  SelectItem,
+    53→  SelectTrigger,
+    54→  SelectValue,
+    55→} from "@/components/ui/select";
+    56→import { Label } from "@/components/ui/label";
+    57→import { Badge } from "@/components/ui/badge";
+    58→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    59→import {
+    60→  ArrowLeft,
+    61→  Save,
+    62→  Play,
+    63→  Loader2,
+    64→  Smartphone,
+    65→  Terminal,
+    66→  Check,
+    67→  AlertTriangle,
+    68→  LayoutTemplate,
+    69→  RotateCcw,
+    70→} from "lucide-react";
+    71→import { toast } from "sonner";
+    72→import { cn } from "@/lib/utils";
+    73→import { TEMPLATES, type WorkflowTemplate } from "@/lib/templates";
+    74→import {
+    75→  isDemoWorkflowId,
+    76→  getDemoWorkflowById,
+    77→  DEMO_DEFAULT_SELECTED_NODE,
+    78→} from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
+    79→import { EdgeWithDelete } from "./nodes/edge-with-delete";
+    80→
+    81→const nodeTypes = { payflow: PayFlowNode };
+    82→const edgeTypes = { edgeWithDelete: EdgeWithDelete };
+    83→
+    84→function toFlowNode(n: FlowNode): Node {
+    85→  return {
+    86→    id: n.id,
+    87→    type: "payflow",
+    88→    position: n.position,
+    89→    data: { ...n.data, nodeType: n.type },
+    90→  };
+    91→}
+    92→
+    93→function toApiNode(n: Node): FlowNode {
+    94→  const { nodeType, ...rest } = n.data as Record<string, unknown>;
+    95→  return {
+    96→    id: n.id,
+    97→    type: (nodeType as NodeType) || "message",
+    98→    position: n.position,
+    99→    data: rest,
+   100→  };
+   101→}
+   102→
+   103→function toApiEdge(e: Edge): FlowEdge {
+   104→  return {
+   105→    id: e.id,
+   106→    source: e.source,
+   107→    target: e.target,
+   108→    sourceHandle: e.sourceHandle ?? null,
+   109→    targetHandle: e.targetHandle ?? null,
+   110→  };
+   111→}
+   112→
+   113→function makeId() {
+   114→  return `n_${Math.random().toString(36).slice(2, 9)}`;
+   115→}
+   116→
+   117→interface RunResult {
+   118→  status: string;
+   119→  entries: LogEntry[];
+   120→  variables: Record<string, unknown>;
+   121→  whatsappMessages: WhatsAppSimMessage[];
+   122→  finalNode?: string;
+   123→  error?: string;
+   124→}
+   125→
+   126→function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
+   127→  const { goDashboard } = useAppStore();
+   128→  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+   129→  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+   130→  const [selectedId, setSelectedId] = useState<string | null>(null);
+   131→  const [name, setName] = useState(workflow.name);
+   132→  const [saving, setSaving] = useState(false);
+   133→  const [running, setRunning] = useState(false);
+   134→  const [runOpen, setRunOpen] = useState(false);
+   135→  const [simOpen, setSimOpen] = useState(false);
+   136→  const [simPos, setSimPos] = useState({ x: 220, y: 90 });
+   137→  const [tplOpen, setTplOpen] = useState(false);
+   138→  const [result, setResult] = useState<RunResult | null>(null);
+   139→  const [visibleEntries, setVisibleEntries] = useState<LogEntry[]>([]);
+   140→  const [visibleMessages, setVisibleMessages] = useState<WhatsAppSimMessage[]>([]);
+   141→  const [dirty, setDirty] = useState(false);
+   142→  const [loaded, setLoaded] = useState(false);
+   143→  const [activeTab, setActiveTab] = useState<"config" | "run">("config");
+   144→  const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   145→  const { screenToFlowPosition, fitView } = useReactFlow();
+   146→
+   147→  // Cargar flujo
+   148→  useEffect(() => {
+   149→    let cancelled = false;
+   150→    (async () => {
+   151→      try {
+   152→        const res = await fetch(`/api/workflows/${workflow.id}`);
+   153→        const data = await res.json();
+   154→        if (cancelled) return;
+   155→        const wf = data.workflow;
+   156→        setName(wf.name);
+   157→        const flowNodes: FlowNode[] = wf.nodes || [];
+   158→
+   159→        // ─── Demo flow: auto-select "create-payment" node ──────────
+   160→        // When opening the demo flow, select the "Crear pago" node by
+   161→        // default so the right panel shows the payment config.
+   162→        if (isDemoWorkflowId(workflow.id)) {
+   163→          const demo = getDemoWorkflowById(workflow.id);
+   164→          if (demo) {
+   165→            const defaultSelected =
+   166→              flowNodes.find((n) => n.id === DEMO_DEFAULT_SELECTED_NODE)?.id ||
+   167→              null;
+   168→            if (defaultSelected) {
+   169→              setSelectedId(defaultSelected);
+   170→            }
+   171→          }
+   172→        }
+   173→
+   174→        if (flowNodes.length === 0) {
+   175→          const startId = makeId();
+   176→          const endId = makeId();
+   177→          const seedNodes: Node[] = [
+   178→            {
+   179→              id: startId,
+   180→              type: "payflow",
+   181→              position: { x: 80, y: 200 },
+   182→              data: { label: "Inicio", trigger: "manual", nodeType: "start" },
+   183→            },
+   184→            {
+   185→              id: endId,
+   186→              type: "payflow",
+   187→              position: { x: 420, y: 200 },
+   188→              data: { label: "Fin", message: "Listo", nodeType: "end" },
+   189→            },
+   190→          ];
+   191→          const seedEdges: Edge[] = [
+   192→            {
+   193→              id: `e_${startId}_${endId}`,
+   194→              source: startId,
+   195→              target: endId,
+   196→              sourceHandle: "out",
+   197→            },
+   198→          ];
+   199→          setNodes(seedNodes);
+   200→          setEdges(seedEdges);
+   201→          setDirty(true);
+   202→        } else {
+   203→          setNodes(flowNodes.map(toFlowNode));
+   204→          setEdges(
+   205→            (wf.edges || []).map((e: FlowEdge) => ({
+   206→              id: e.id,
+   207→              source: e.source,
+   208→              target: e.target,
+   209→              sourceHandle: e.sourceHandle ?? undefined,
+   210→              targetHandle: e.targetHandle ?? undefined,
+   211→            }))
+   212→          );
+   213→        }
+   214→        setLoaded(true);
+   215→      } catch {
+   216→        toast.error("Error al cargar el flujo");
+   217→        setLoaded(true);
+   218→      }
+   219→    })();
+   220→    return () => {
+   221→      cancelled = true;
+   222→      if (replayTimer.current) clearTimeout(replayTimer.current);
+   223→    };
+   224→  }, [workflow.id]);
+   225→
+   226→  // Ajustar vista tras la primera carga — fitView centra todos los nodos
+   227→  useEffect(() => {
+   228→    if (loaded && nodes.length > 0) {
+   229→      const t = setTimeout(() => fitView({ padding: 0.25, duration: 400, maxZoom: 1.2 }), 150);
+   230→      return () => clearTimeout(t);
+   231→    }
+   232→  }, [loaded, nodes.length, fitView]);
+   233→
+   234→  // Listener para el botón eliminar (X) de los nodos
+   235→  useEffect(() => {
+   236→    function handler(e: Event) {
+   237→      const detail = (e as CustomEvent).detail as { id: string };
+   238→      if (detail?.id) {
+   239→        deleteNode(detail.id);
+   240→      }
+   241→    }
+   242→    window.addEventListener("payflow:delete-node", handler as EventListener);
+   243→    return () =>
+   244→      window.removeEventListener("payflow:delete-node", handler as EventListener);
+   245→  }, []);
+   246→
+   247→  const onConnect = useCallback(
+   248→    (connection: Connection) => {
+   249→      // Prevent self-connections.
+   250→      if (connection.source === connection.target) {
+   251→        toast.warning("Conexión no permitida: un nodo no puede conectarse a sí mismo.");
+   252→        return;
+   253→      }
+   254→      // Prevent duplicate connections (same source + target + sourceHandle).
+   255→      setEdges((eds) => {
+   256→        const exists = eds.some(
+   257→          (e) =>
+   258→            e.source === connection.source &&
+   259→            e.target === connection.target &&
+   260→            (e.sourceHandle || null) === (connection.sourceHandle || null)
+   261→        );
+   262→        if (exists) {
+   263→          toast.info("Esa conexión ya existe.");
+   264→          return eds;
+   265→        }
+   266→        return addEdge(
+   267→          {
+   268→            ...connection,
+   269→            id: `e_${makeId()}`,
+   270→            type: "edgeWithDelete",
+   271→            selectable: true,
+   272→            focusable: true,
+   273→          },
+   274→          eds
+   275→        );
+   276→      });
+   277→      setDirty(true);
+   278→    },
+   279→    [setEdges]
+   280→  );
+   281→
+   282→  const onNodesChangeWrapped = useCallback(
+   283→    (changes: NodeChange[]) => {
+   284→      setNodes((nds) => applyNodeChanges(changes, nds));
+   285→      if (changes.some((c) => c.type === "position" || c.type === "remove" || c.type === "add")) {
+   286→        setDirty(true);
+   287→      }
+   288→    },
+   289→    [setNodes]
+   290→  );
+   291→
+   292→  const onEdgesChangeWrapped = useCallback(
+   293→    (changes: EdgeChange[]) => {
+   294→      setEdges((eds) => applyEdgeChanges(changes, eds));
+   295→      if (changes.some((c) => c.type === "remove" || c.type === "add")) {
+   296→        setDirty(true);
+   297→      }
+   298→    },
+   299→    [setEdges]
+   300→  );
+   301→
+   302→  const addNode = useCallback(
+   303→    (type: NodeType) => {
+   304→      const meta = NODE_METADATA[type];
+   305→      const id = makeId();
+   306→      const center = screenToFlowPosition({
+   307→        x: window.innerWidth / 2,
+   308→        y: window.innerHeight / 2,
+   309→      });
+   310→      const newNode: Node = {
+   311→        id,
+   312→        type: "payflow",
+   313→        position: {
+   314→          x: center.x - 90 + (Math.random() * 60 - 30),
+   315→          y: center.y - 30 + (Math.random() * 60 - 30),
+   316→        },
+   317→        data: {
+   318→          label: meta.label,
+   319→          nodeType: type,
+   320→          ...(type === "start" ? { trigger: "manual" } : {}),
+   321→          ...(type === "message" ? { message: "¡Hola!" } : {}),
+   322→          ...(type === "question"
+   323→            ? { question: "¿En qué puedo ayudarte?", variable: "user_response", defaultResponse: "sí" }
+   324→            : {}),
+   325→          ...(type === "condition"
+   326→            ? { variable: "payment_outcome", operator: "equals", value: "payment_success" }
+   327→            : {}),
+   328→          ...(type === "whatsapp"
+   329→            ? { phoneNumber: "+15551234567", message: "¡Hola desde PayFlow SMT!" }
+   330→            : {}),
+   331→          ...(type === "payment" || type === "create_payment"
+   332→            ? {
+   333→                provider: "Mock",
+   334→                amount: 49.99,
+   335→                currency: "USD",
+   336→                description: "Pago",
+   337→                customer: "",
+   338→                phoneNumber: "+15551234567",
+   339→                orderId: "ord_{{timestamp}}",
+   340→              }
+   341→            : {}),
+   342→          ...(type === "verify_payment"
+   343→            ? { orderId: "{{payment_order_id}}", outputVariable: "payment_status" }
+   344→            : {}),
+   345→          ...(type === "wait_confirmation" ? { timeout: 30 } : {}),
+   346→          ...(type === "ai_agent"
+   347→            ? { systemPrompt: "Eres un asistente útil.", prompt: "Hola", outputVariable: "ai_response" }
+   348→            : {}),
+   349→          ...(type === "api" ? { method: "GET", url: "", outputVariable: "api_response" } : {}),
+   350→          ...(type === "end" ? { message: "Flujo completado" } : {}),
+   351→        },
+   352→      };
+   353→      setNodes((nds) => nds.concat(newNode));
+   354→      setSelectedId(id);
+   355→      setActiveTab("config");
+   356→      setDirty(true);
+   357→    },
+   358→    [screenToFlowPosition, setNodes]
+   359→  );
+   360→
+   361→  const selectedNode = useMemo<SelectedNode | null>(() => {
+   362→    if (!selectedId) return null;
+   363→    const n = nodes.find((x) => x.id === selectedId);
+   364→    if (!n) return null;
+   365→    return {
+   366→      id: n.id,
+   367→      type: (n.data as { nodeType: NodeType }).nodeType,
+   368→      data: n.data as Record<string, unknown>,
+   369→    };
+   370→  }, [selectedId, nodes]);
+   371→
+   372→  const updateNodeData = useCallback(
+   373→    (id: string, data: Record<string, unknown>) => {
+   374→      setNodes((nds) =>
+   375→        nds.map((n) =>
+   376→          n.id === id ? { ...n, data: { ...n.data, ...data } } : n
+   377→        )
+   378→      );
+   379→      setDirty(true);
+   380→    },
+   381→    [setNodes]
+   382→  );
+   383→
+   384→  const deleteNode = useCallback(
+   385→    (id: string) => {
+   386→      setNodes((nds) => nds.filter((n) => n.id !== id));
+   387→      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+   388→      setSelectedId((cur) => (cur === id ? null : cur));
+   389→      setDirty(true);
+   390→      toast.success("Nodo eliminado");
+   391→    },
+   392→    [setNodes, setEdges]
+   393→  );
+   394→
+   395→  const applyTemplate = useCallback(
+   396→    (tpl: WorkflowTemplate) => {
+   397→      const idMap = new Map<string, string>();
+   398→      // Generar nuevos IDs únicos para evitar colisiones.
+   399→      const newNodes: Node[] = tpl.nodes.map((n) => {
+   400→        const newId = makeId();
+   401→        idMap.set(n.id, newId);
+   402→        return {
+   403→          id: newId,
+   404→          type: "payflow",
+   405→          position: n.position,
+   406→          data: { ...n.data, nodeType: n.type },
+   407→        };
+   408→      });
+   409→      const newEdges: Edge[] = tpl.edges.map((e, i) => ({
+   410→        id: `e_tpl_${i}_${makeId()}`,
+   411→        source: idMap.get(e.source) || e.source,
+   412→        target: idMap.get(e.target) || e.target,
+   413→        sourceHandle: e.sourceHandle ?? undefined,
+   414→        targetHandle: e.targetHandle ?? undefined,
+   415→      }));
+   416→      setNodes(newNodes);
+   417→      setEdges(newEdges);
+   418→      setSelectedId(null);
+   419→      setDirty(true);
+   420→      setName(tpl.name);
+   421→      setTplOpen(false);
+   422→      toast.success(`Plantilla "${tpl.name}" aplicada`);
+   423→      setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 80);
+   424→    },
+   425→    [setNodes, setEdges, fitView]
+   426→  );
+   427→
+   428→  /** Reset the demo flow to its original state from code. */
+   429→  function resetDemo() {
+   430→    if (!isDemoWorkflowId(workflow.id)) {
+   431→      toast.info("Solo el flujo demo puede restablecerse.");
+   432→      return;
+   433→    }
+   434→    const demo = getDemoWorkflowById(workflow.id);
+   435→    if (!demo) {
+   436→      toast.error("No se pudo cargar el flujo demo.");
+   437→      return;
+   438→    }
+   439→    // Clear localStorage for this demo.
+   440→    try {
+   441→      localStorage.removeItem(`payflow_demo_workflow_${workflow.id}`);
+   442→    } catch {
+   443→      // ignore
+   444→    }
+   445→    // Reload nodes + edges from the clean demo definition.
+   446→    setNodes(demo.nodes.map(toFlowNode));
+   447→    setEdges(
+   448→      demo.edges.map((e) => ({
+   449→        id: e.id,
+   450→        source: e.source,
+   451→        target: e.target,
+   452→        sourceHandle: e.sourceHandle ?? undefined,
+   453→        targetHandle: e.targetHandle ?? undefined,
+   454→        type: "edgeWithDelete",
+   455→        selectable: true,
+   456→        focusable: true,
+   457→      }))
+   458→    );
+   459→    setName(demo.name);
+   460→    setSelectedId(DEMO_DEFAULT_SELECTED_NODE);
+   461→    setDirty(false);
+   462→    toast.success("Flujo demo restablecido.");
+   463→    setTimeout(() => fitView({ padding: 0.25, duration: 400, maxZoom: 1.2 }), 100);
+   464→  }
+   465→
+   466→  async function save() {
+   467→    setSaving(true);
+   468→    try {
+   469→      // ─── Demo flow: save to localStorage ONLY (no DB, no API) ────
+   470→      if (isDemoWorkflowId(workflow.id)) {
+   471→        try {
+   472→          localStorage.setItem(
+   473→            `payflow_demo_workflow_${workflow.id}`,
+   474→            JSON.stringify({
+   475→              name,
+   476→              nodes: nodes.map(toApiNode),
+   477→              edges: edges.map(toApiEdge),
+   478→              updatedAt: new Date().toISOString(),
+   479→            })
+   480→          );
+   481→          setDirty(false);
+   482→          toast.success("Flujo demo guardado localmente.");
+   483→        } catch {
+   484→          toast.error("No se pudo guardar localmente. Intenta nuevamente.");
+   485→        }
+   486→        return;
+   487→      }
+   488→      // ─── Real flow: try API save ──────────────────────────────────
+   489→      const res = await fetch(`/api/workflows/${workflow.id}`, {
+   490→        method: "PUT",
+   491→        credentials: "include",
+   492→        headers: { "Content-Type": "application/json" },
+   493→        body: JSON.stringify({
+   494→          name,
+   495→          nodes: nodes.map(toApiNode),
+   496→          edges: edges.map(toApiEdge),
+   497→        }),
+   498→      });
+   499→
+   500→      const data = await res.json().catch(() => ({}));
+   501→
+   502→      if (!res.ok) {
+   503→        if (res.status === 401) {
+   504→          toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
+   505→          setTimeout(() => {
+   506→            window.location.href = `/login?next=/dashboard/flujos/${workflow.id}`;
+   507→          }, 1500);
+   508→          return;
+   509→        }
+   510→        // Fallback: save to localStorage so the user doesn't lose work.
+   511→        try {
+   512→          localStorage.setItem(
+   513→            `payflow_workflow_${workflow.id}`,
+   514→            JSON.stringify({
+   515→              name,
+   516→              nodes: nodes.map(toApiNode),
+   517→              edges: edges.map(toApiEdge),
+   518→              updatedAt: new Date().toISOString(),
+   519→            })
+   520→          );
+   521→          setDirty(false);
+   522→          toast.success("Guardado local temporal. La base no está disponible.");
+   523→        } catch {
+   524→          toast.error(data?.error || "No se pudo guardar el flujo. Intenta nuevamente.");
+   525→        }
+   526→        return;
+   527→      }
+   528→
+   529→      setDirty(false);
+   530→      toast.success("Flujo guardado correctamente.");
+   531→    } catch (err) {
+   532→      // Network error — try localStorage fallback.
+   533→      try {
+   534→        localStorage.setItem(
+   535→          `payflow_workflow_${workflow.id}`,
+   536→          JSON.stringify({
+   537→            name,
+   538→            nodes: nodes.map(toApiNode),
+   539→            edges: edges.map(toApiEdge),
+   540→            updatedAt: new Date().toISOString(),
+   541→          })
+   542→        );
+   543→        setDirty(false);
+   544→        toast.success("Guardado local temporal. La base no está disponible.");
+   545→      } catch {
+   546→        toast.error("No se pudo guardar localmente. Intenta nuevamente.");
+   547→        console.error("[save] error:", err);
+   548→      }
+   549→    } finally {
+   550→      setSaving(false);
+   551→    }
+   552→  }
+   553→
+   554→  function resetNodeFlags() {
+   555→    setNodes((nds) =>
+   556→      nds.map((n) => {
+   557→        const d = { ...n.data };
+   558→        delete (d as Record<string, unknown>).__running;
+   559→        delete (d as Record<string, unknown>).__done;
+   560→        delete (d as Record<string, unknown>).__error;
+   561→        return { ...n, data: d };
+   562→      })
+   563→    );
+   564→  }
+   565→
+   566→  function markNode(id: string, flag: "__running" | "__done" | "__error", clear = false) {
+   567→    setNodes((nds) =>
+   568→      nds.map((n) => {
+   569→        if (n.id !== id) return n;
+   570→        const d = { ...n.data } as Record<string, unknown>;
+   571→        if (clear) {
+   572→          delete d.__running;
+   573→          delete d.__done;
+   574→          delete d.__error;
+   575→        }
+   576→        if (flag === "__running") d.__running = true;
+   577→        if (flag === "__done") d.__done = true;
+   578→        if (flag === "__error") d.__error = true;
+   579→        return { ...n, data: d };
+   580→      })
+   581→    );
+   582→  }
+   583→
+   584→  async function run(forceOutcome?: PaymentOutcome, questionResponses?: Record<string, string>) {
+   585→    setRunOpen(false);
+   586→    setRunning(true);
+   587→    setResult(null);
+   588→    setVisibleEntries([]);
+   589→    setVisibleMessages([]);
+   590→    setActiveTab("run");
+   591→    resetNodeFlags();
+   592→    try {
+   593→      // Use the new /api/workflows/execute endpoint (works without DB,
+   594→      // loads demo flow locally, supports Mock execution).
+   595→      const res = await fetch(`/api/workflows/execute`, {
+   596→        method: "POST",
+   597→        credentials: "include",
+   598→        headers: { "Content-Type": "application/json" },
+   599→        body: JSON.stringify({
+   600→          workflowId: workflow.id,
+   601→          nodes: nodes.map(toApiNode),
+   602→          edges: edges.map(toApiEdge),
+   603→          forcePaymentOutcome: forceOutcome,
+   604→          questionResponses,
+   605→        }),
+   606→      });
+   607→
+   608→      const data = await res.json().catch(() => ({}));
+   609→
+   610→      if (res.status === 401) {
+   611→        toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
+   612→        setTimeout(() => {
+   613→          window.location.href = `/login?next=/dashboard/flujos/${workflow.id}`;
+   614→        }, 1500);
+   615→        setRunning(false);
+   616→        return;
+   617→      }
+   618→      if (res.status === 500) {
+   619→        toast.error(data?.error || "Error interno al ejecutar el flujo. Revisa logs de Vercel.");
+   620→        setRunning(false);
+   621→        return;
+   622→      }
+   623→      if (!res.ok) {
+   624→        toast.error(data?.error || "No se pudo conectar con el endpoint de ejecución.");
+   625→        setRunning(false);
+   626→        return;
+   627→      }
+   628→
+   629→      // The new endpoint returns { success, logs, result, ... } at the top level.
+   630→      // Convert to the RunResult shape expected by replay().
+   631→      const r: RunResult = {
+   632→        status: data.status === "completed" ? "success" : data.status,
+   633→        entries: data.logs || [],
+   634→        variables: data.variables || {},
+   635→        whatsappMessages: data.whatsappMessages || [],
+   636→        finalNode: data.finalNode,
+   637→        error: data.error,
+   638→      };
+   639→
+   640→      setResult(r);
+   641→      setSimOpen(true);
+   642→
+   643→      // Skip replay if there are too many entries (prevents RangeError/stack overflow).
+   644→      // Just show the result directly in the run tab + simulator panel.
+   645→      if (r.entries.length <= 50) {
+   646→        try {
+   647→          await replay(r);
+   648→        } catch (replayErr) {
+   649→          console.error("[run] replay error:", replayErr);
+   650→        }
+   651→      } else {
+   652→        // For large executions, just show all entries at once without animation.
+   653→        setVisibleEntries(r.entries);
+   654→        setVisibleMessages(r.whatsappMessages);
+   655→      }
+   656→
+   657→      if (r.status === "success") {
+   658→        toast.success("Flujo completado");
+   659→      } else if (r.status === "failed") {
+   660→        toast.error("El flujo falló");
+   661→      } else {
+   662→        toast.warning("Ejecución detenida");
+   663→      }
+   664→    } catch (err) {
+   665→      console.error("[run] network error:", err);
+   666→      toast.error("No se pudo conectar con el endpoint de ejecución.");
+   667→    } finally {
+   668→      setRunning(false);
+   669→    }
+   670→  }
+   671→
+   672→  async function replay(r: RunResult) {
+   673→    setNodes((nds) =>
+   674→      nds.map((n) => {
+   675→        const d = { ...n.data } as Record<string, unknown>;
+   676→        delete d.__running;
+   677→        delete d.__done;
+   678→        delete d.__error;
+   679→        return { ...n, data: d };
+   680→      })
+   681→    );
+   682→    for (let i = 0; i < r.entries.length; i++) {
+   683→      const entry = r.entries[i];
+   684→      if (entry.status === "started" && entry.nodeId !== "—") {
+   685→        markNode(entry.nodeId, "__running");
+   686→      }
+   687→      setVisibleEntries((prev) => [...prev, entry]);
+   688→      // Show whatsapp messages up to this entry (guard against missing timestamps).
+   689→      const entryTime = entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now();
+   690→      const upto = r.whatsappMessages.filter((m) => {
+   691→        const mTime = new Date(m.timestamp).getTime();
+   692→        return !isNaN(mTime) && mTime <= entryTime;
+   693→      });
+   694→      setVisibleMessages(upto);
+   695→      const next = r.entries[i + 1];
+   696→      if (entry.nodeId !== "—" && (!next || next.nodeId !== entry.nodeId)) {
+   697→        const finalEntry = entry.status === "error";
+   698→        if (entry.nodeId !== "—") {
+   699→          markNode(entry.nodeId, finalEntry ? "__error" : "__done", true);
+   700→        }
+   701→      }
+   702→      await new Promise((resolve) => {
+   703→        replayTimer.current = setTimeout(resolve, 280);
+   704→      });
+   705→    }
+   706→    setVisibleMessages(r.whatsappMessages);
+   707→  }
+   708→
+   709→  return (
+   710→    <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+   711→      {/* Barra de herramientas */}
+   712→      <header className="h-14 shrink-0 border-b border-border bg-card flex items-center gap-3 px-3 lg:px-4">
+   713→        <Button variant="ghost" size="sm" onClick={goDashboard} className="shrink-0">
+   714→          <ArrowLeft className="size-4 mr-1" />
+   715→          <span className="hidden sm:inline">Volver</span>
+   716→        </Button>
+   717→        <div className="h-6 w-px bg-border" />
+   718→        <Input
+   719→          value={name}
+   720→          onChange={(e) => {
+   721→            setName(e.target.value);
+   722→            setDirty(true);
+   723→          }}
+   724→          className="h-8 w-40 sm:w-56 lg:w-72 text-sm font-medium border-transparent hover:border-border focus-visible:border-border"
+   725→        />
+   726→        {dirty && (
+   727→          <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
+   728→            sin guardar
+   729→          </Badge>
+   730→        )}
+   731→        <div className="flex-1" />
+   732→        <Button
+   733→          variant="outline"
+   734→          size="sm"
+   735→          onClick={() => setTplOpen(true)}
+   736→          className="hidden md:inline-flex"
+   737→        >
+   738→          <LayoutTemplate className="size-4 mr-1.5" />
+   739→          Plantillas
+   740→        </Button>
+   741→        <Button
+   742→          variant="outline"
+   743→          size="sm"
+   744→          onClick={() => setSimOpen(true)}
+   745→          className="hidden md:inline-flex"
+   746→        >
+   747→          <Smartphone className="size-4 mr-1.5" />
+   748→          Simulador
+   749→        </Button>
+   750→        <Button
+   751→          variant="outline"
+   752→          size="sm"
+   753→          onClick={save}
+   754→          disabled={saving}
+   755→          className="shrink-0"
+   756→        >
+   757→          {saving ? (
+   758→            <Loader2 className="size-4 mr-1.5 animate-spin" />
+   759→          ) : (
+   760→            <Save className="size-4 mr-1.5" />
+   761→          )}
+   762→          Guardar
+   763→        </Button>
+   764→        <Button size="sm" onClick={() => setRunOpen(true)} disabled={running} className="shrink-0">
+   765→          {running ? (
+   766→            <Loader2 className="size-4 mr-1.5 animate-spin" />
+   767→          ) : (
+   768→            <Play className="size-4 mr-1.5" />
+   769→          )}
+   770→          Ejecutar
+   771→        </Button>
+   772→        {isDemoWorkflowId(workflow.id) && (
+   773→          <Button
+   774→            variant="outline"
+   775→            size="sm"
+   776→            onClick={resetDemo}
+   777→            className="shrink-0"
+   778→            title="Volver al esquema limpio del demo"
+   779→          >
+   780→            <RotateCcw className="size-4 mr-1.5" />
+   781→            <span className="hidden sm:inline">Restablecer demo</span>
+   782→          </Button>
+   783→        )}
+   784→      </header>
+   785→
+   786→      {/* Área principal del editor */}
+   787→      <div className="flex-1 flex overflow-hidden min-h-0">
+   788→        <NodePalette onAddNode={addNode} />
+   789→
+   790→        {/* Lienzo */}
+   791→        <div className="flex-1 relative min-w-0 min-h-0">
+   792→          <ReactFlow
+   793→            nodes={nodes}
+   794→            edges={edges}
+   795→            onNodesChange={onNodesChangeWrapped}
+   796→            onEdgesChange={onEdgesChangeWrapped}
+   797→            onConnect={onConnect}
+   798→            onNodeClick={(_, n) => {
+   799→              setSelectedId(n.id);
+   800→              setActiveTab("config");
+   801→            }}
+   802→            onEdgeClick={() => {
+   803→              // Edge is selected via ReactFlow's internal state.
+   804→              // The delete button appears automatically on the selected edge.
+   805→            }}
+   806→            onPaneClick={() => setSelectedId(null)}
+   807→            nodeTypes={nodeTypes}
+   808→            edgeTypes={edgeTypes}
+   809→            fitView
+   810→            fitViewOptions={{ padding: 0.2 }}
+   811→            defaultEdgeOptions={{
+   812→              type: "edgeWithDelete",
+   813→              selectable: true,
+   814→              focusable: true,
+   815→              style: { stroke: "#94a3b8", strokeWidth: 2 },
+   816→            }}
+   817→            connectionMode={ConnectionMode.Loose}
+   818→            deleteKeyCode={["Backspace", "Delete"]}
+   819→            proOptions={{ hideAttribution: true }}
+   820→            className="bg-background"
+   821→          >
+   822→            <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} color="#cbd5e1" />
+   823→            <Controls showInteractive={false} />
+   824→            <MiniMap
+   825→              nodeColor={(n) => {
+   826→                const t = (n.data as { nodeType?: NodeType })?.nodeType;
+   827→                return t ? NODE_METADATA[t].color : "#94a3b8";
+   828→              }}
+   829→              maskColor="rgba(0,0,0,0.05)"
+   830→              className="!bg-card"
+   831→            />
+   832→          </ReactFlow>
+   833→
+   834→          {/* Estado de ejecución flotante */}
+   835→          {(running || result) && (
+   836→            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+   837→              <StatusPill running={running} status={result?.status} />
+   838→            </div>
+   839→          )}
+   840→
+   841→          {/* Pestañas rápidas en móvil */}
+   842→          <div className="md:hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex gap-2">
+   843→            <Button
+   844→              size="sm"
+   845→              variant="secondary"
+   846→              onClick={() => setSimOpen(true)}
+   847→              className="shadow-lg"
+   848→            >
+   849→              <Smartphone className="size-4 mr-1.5" />
+   850→              WhatsApp
+   851→            </Button>
+   852→            <Button
+   853→              size="sm"
+   854→              variant="secondary"
+   855→              onClick={() => setActiveTab("run")}
+   856→              className="shadow-lg"
+   857→            >
+   858→              <Terminal className="size-4 mr-1.5" />
+   859→              Registros
+   860→            </Button>
+   861→          </div>
+   862→        </div>
+   863→
+   864→        {/* Panel derecho: configuración + registros */}
+   865→        <div className="w-80 shrink-0 border-l border-border bg-card/50 flex-col hidden md:flex min-h-0">
+   866→          <Tabs
+   867→            value={activeTab}
+   868→            onValueChange={(v) => setActiveTab(v as "config" | "run")}
+   869→            className="flex-1 flex flex-col min-h-0"
+   870→          >
+   871→            <TabsList className="grid grid-cols-2 m-2 mb-0 shrink-0">
+   872→              <TabsTrigger value="config">
+   873→                <Terminal className="size-3.5 mr-1.5" /> Config
+   874→              </TabsTrigger>
+   875→              <TabsTrigger value="run">
+   876→                <Play className="size-3.5 mr-1.5" /> Ejecutar
+   877→              </TabsTrigger>
+   878→            </TabsList>
+   879→            <TabsContent
+   880→              value="config"
+   881→              className="flex-1 m-0 mt-0 data-[state=active]:flex flex-col min-h-0 overflow-hidden"
+   882→            >
+   883→              <ConfigPanel
+   884→                node={selectedNode}
+   885→                onChange={updateNodeData}
+   886→                onDelete={deleteNode}
+   887→              />
+   888→            </TabsContent>
+   889→            <TabsContent
+   890→              value="run"
+   891→              className="flex-1 m-0 data-[state=active]:flex flex-col min-h-0 overflow-hidden"
+   892→            >
+   893→              <ExecutionLog
+   894→                entries={visibleEntries}
+   895→                running={running}
+   896→                result={result}
+   897→              />
+   898→            </TabsContent>
+   899→          </Tabs>
+   900→        </div>
+   901→      </div>
+   902→
+   903→      {/* Diálogo de plantillas */}
+   904→      <TemplateDialog
+   905→        open={tplOpen}
+   906→        onOpenChange={setTplOpen}
+   907→        onApply={applyTemplate}
+   908→      />
+   909→
+   910→      {/* Diálogo de ejecución */}
+   911→      <RunDialog
+   912→        open={runOpen}
+   913→        onOpenChange={setRunOpen}
+   914→        onRun={(outcome, responses) => run(outcome, responses)}
+   915→        running={running}
+   916→      />
+   917→
+   918→      {/* Panel del simulador (iPhone flotante arrastrable) */}
+   919→      <FloatingPanel
+   920→        open={simOpen}
+   921→        onClose={() => setSimOpen(false)}
+   922→        title="Simulador de WhatsApp"
+   923→        position={simPos}
+   924→        onPositionChange={setSimPos}
+   925→      >
+   926→        <div className="w-[230px] h-[460px]">
+   927→          <WhatsAppSimulator messages={visibleMessages} running={running} />
+   928→        </div>
+   929→      </FloatingPanel>
+   930→    </div>
+   931→  );
+   932→}
+   933→
+   934→function StatusPill({ running, status }: { running: boolean; status?: string }) {
+   935→  if (running) {
+   936→    return (
+   937→      <div className="flex items-center gap-2 rounded-full bg-card border border-border shadow-md px-3 py-1.5 text-xs font-medium">
+   938→        <Loader2 className="size-3.5 animate-spin text-primary" />
+   939→        Ejecutando flujo…
+   940→      </div>
+   941→    );
+   942→  }
+   943→  if (status === "success") {
+   944→    return (
+   945→      <div className="flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 shadow-md px-3 py-1.5 text-xs font-medium">
+   946→        <Check className="size-3.5" />
+   947→        Completado con éxito
+   948→      </div>
+   949→    );
+   950→  }
+   951→  if (status === "failed" || status === "stopped") {
+   952→    return (
+   953→      <div className="flex items-center gap-2 rounded-full bg-red-50 border border-red-200 text-red-700 shadow-md px-3 py-1.5 text-xs font-medium">
+   954→        <AlertTriangle className="size-3.5" />
+   955→        {status === "failed" ? "La ejecución falló" : "Ejecución detenida"}
+   956→      </div>
+   957→    );
+   958→  }
+   959→  return null;
+   960→}
+   961→
+   962→function RunDialog({
+   963→  open,
+   964→  onOpenChange,
+   965→  onRun,
+   966→  running,
+   967→}: {
+   968→  open: boolean;
+   969→  onOpenChange: (o: boolean) => void;
+   970→  onRun: (outcome?: PaymentOutcome, responses?: Record<string, string>) => void;
+   971→  running: boolean;
+   972→}) {
+   973→  const [outcome, setOutcome] = useState<PaymentOutcome | "random">("random");
+   974→
+   975→  return (
+   976→    <Dialog open={open} onOpenChange={onOpenChange}>
+   977→      <DialogContent className="sm:max-w-md">
+   978→        <DialogHeader>
+   979→          <DialogTitle>Ejecutar flujo</DialogTitle>
+   980→          <DialogDescription>
+   981→            Ejecuta el flujo del lienzo. Los nodos simulados imitarán
+   982→            WhatsApp, pagos y respuestas de IA.
+   983→          </DialogDescription>
+   984→        </DialogHeader>
+   985→        <div className="space-y-4 py-2">
+   986→          <div className="space-y-2">
+   987→            <Label className="text-sm">Resultado del pago (simulado)</Label>
+   988→            <Select
+   989→              value={outcome}
+   990→              onValueChange={(v) => setOutcome(v as PaymentOutcome | "random")}
+   991→            >
+   992→              <SelectTrigger>
+   993→                <SelectValue />
+   994→              </SelectTrigger>
+   995→              <SelectContent>
+   996→                <SelectItem value="random">Aleatorio (ponderado)</SelectItem>
+   997→                <SelectItem value="payment_success">payment_success</SelectItem>
+   998→                <SelectItem value="payment_failed">payment_failed</SelectItem>
+   999→                <SelectItem value="payment_pending">payment_pending</SelectItem>
+  1000→                <SelectItem value="error">error</SelectItem>
+  1001→              </SelectContent>
+  1002→            </Select>
+  1003→            <p className="text-xs text-muted-foreground">
+  1004→              Fuerza el resultado del nodo de pago. Úsalo para probar todas las
+  1005→              ramas.
+  1006→            </p>
+  1007→          </div>
+  1008→          <div className="rounded-md bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
+  1009→            Los nodos de pregunta usarán su respuesta por defecto configurada.
+  1010→            Los mensajes de WhatsApp y las llamadas al agente de IA se simulan.
+  1011→          </div>
+  1012→        </div>
+  1013→        <DialogFooter>
+  1014→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1015→            Cancelar
+  1016→          </Button>
+  1017→          <Button
+  1018→            onClick={() => onRun(outcome === "random" ? undefined : outcome)}
+  1019→            disabled={running}
+  1020→          >
+  1021→            {running ? (
+  1022→              <Loader2 className="size-4 mr-2 animate-spin" />
+  1023→            ) : (
+  1024→              <Play className="size-4 mr-2" />
+  1025→            )}
+  1026→            Ejecutar ahora
+  1027→          </Button>
+  1028→        </DialogFooter>
+  1029→      </DialogContent>
+  1030→    </Dialog>
+  1031→  );
+  1032→}
+  1033→
+  1034→export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
+  1035→  return (
+  1036→    <ReactFlowProvider>
+  1037→      <EditorInner workflow={workflow} />
+  1038→    </ReactFlowProvider>
+  1039→  );
+  1040→}
+  1041→
+  1042→function TemplateDialog({
+  1043→  open,
+  1044→  onOpenChange,
+  1045→  onApply,
+  1046→}: {
+  1047→  open: boolean;
+  1048→  onOpenChange: (o: boolean) => void;
+  1049→  onApply: (tpl: WorkflowTemplate) => void;
+  1050→}) {
+  1051→  return (
+  1052→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1053→      <DialogContent className="sm:max-w-lg">
+  1054→        <DialogHeader>
+  1055→          <DialogTitle className="flex items-center gap-2">
+  1056→            <LayoutTemplate className="size-5 text-primary" />
+  1057→            Plantillas de flujos
+  1058→          </DialogTitle>
+  1059→          <DialogDescription>
+  1060→            Aplica una plantilla preconstruida. Reemplazará el contenido actual
+  1061→            del lienzo.
+  1062→          </DialogDescription>
+  1063→        </DialogHeader>
+  1064→        <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pf-scroll">
+  1065→          {TEMPLATES.map((tpl) => (
+  1066→            <div
+  1067→              key={tpl.id}
+  1068→              className="rounded-lg border border-border p-3 hover:border-primary/50 hover:bg-accent/40 transition-colors"
+  1069→            >
+  1070→              <div className="flex items-start justify-between gap-3">
+  1071→                <div className="min-w-0 flex-1">
+  1072→                  <h4 className="text-sm font-semibold">{tpl.name}</h4>
+  1073→                  <p className="text-xs text-muted-foreground mt-1">
+  1074→                    {tpl.description}
+  1075→                  </p>
+  1076→                  <div className="flex flex-wrap gap-1 mt-2">
+  1077→                    <Badge variant="secondary" className="text-[10px]">
+  1078→                      {tpl.nodes.length} nodos
+  1079→                    </Badge>
+  1080→                    <Badge variant="secondary" className="text-[10px]">
+  1081→                      {tpl.edges.length} conexiones
+  1082→                    </Badge>
+  1083→                  </div>
+  1084→                </div>
+  1085→                <Button
+  1086→                  size="sm"
+  1087→                  onClick={() => onApply(tpl)}
+  1088→                  className="shrink-0"
+  1089→                >
+  1090→                  Aplicar
+  1091→                </Button>
+  1092→              </div>
+  1093→            </div>
+  1094→          ))}
+  1095→        </div>
+  1096→        <DialogFooter>
+  1097→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+  1098→            Cancelar
+  1099→          </Button>
+  1100→        </DialogFooter>
+  1101→      </DialogContent>
+  1102→    </Dialog>
+  1103→  );
+  1104→}
+  1105→

@@ -16,6 +16,10 @@ interface ExecuteBody {
   edges?: FlowEdge[];
   forcePaymentOutcome?: PaymentOutcome;
   questionResponses?: Record<string, string>;
+  // Message typed by the client in the WhatsApp simulator.
+  // When set, the first `whatsapp` node with an outputVariable uses it
+  // as the inbound client reply, so the AI agent receives it as input.
+  clientMessage?: string;
 }
 
 /**
@@ -101,6 +105,7 @@ export async function POST(req: Request) {
       clientId: session.clientId,
       forcePaymentOutcome: body.forcePaymentOutcome,
       questionResponses: body.questionResponses,
+      clientMessage: body.clientMessage,
     });
 
     // Build a clean logs array for the UI (guard against undefined entries).

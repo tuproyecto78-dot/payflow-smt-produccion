@@ -21,6 +21,10 @@ interface EngineOptions {
   questionResponses?: Record<string, string>;
   // Max nodes to process (cycle protection).
   maxSteps?: number;
+  // Message typed by the client in the WhatsApp simulator.
+  // When set, the first `whatsapp` node that has an `outputVariable`
+  // will use this as the inbound client reply (instead of the default).
+  clientMessage?: string;
 }
 
 function nowIso() {
@@ -252,12 +256,17 @@ export async function executeWorkflow(
           // Esto permite encadenar WhatsApp → Agente IA pasándole la respuesta.
           const outputVariable = String(data.outputVariable || "");
           if (outputVariable) {
+            // Priority: clientMessage (simulator) > questionResponses > defaultResponse > "sí"
             const override = options.questionResponses?.[outputVariable];
             const reply =
+              options.clientMessage ??
               override ??
               (data.defaultResponse
                 ? resolveTemplate(String(data.defaultResponse), ctx.variables)
                 : "sí");
+            // Mark that the clientMessage has been consumed so subsequent
+            // whatsapp nodes in the same run fall back to default behavior.
+            if (options.clientMessage) options.clientMessage = undefined;
             ctx.variables[outputVariable] = reply;
             // Registrar la respuesta entrante en el simulador de WhatsApp
             ctx.whatsappMessages.push({

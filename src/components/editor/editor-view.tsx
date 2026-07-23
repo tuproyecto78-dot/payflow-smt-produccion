@@ -138,6 +138,7 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
   const [result, setResult] = useState<RunResult | null>(null);
   const [visibleEntries, setVisibleEntries] = useState<LogEntry[]>([]);
   const [visibleMessages, setVisibleMessages] = useState<WhatsAppSimMessage[]>([]);
+  const [simError, setSimError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<"config" | "run">("config");
@@ -712,6 +713,108 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     setVisibleMessages(r.whatsappMessages);
   }
 
+  /**
+   * Handle a message typed by the client in the WhatsApp simulator.
+   *
+   * Appends the inbound message to the visible chat immediately, then
+   * re-executes the workflow from the start passing `clientMessage` so the
+   * first WhatsApp node with an outputVariable captures it, and the AI
+   * agent receives it as input. Shows the IA/business reply and any error.
+   */
+  async function handleClientMessage(text: string) {
+    if (running || !text.trim()) return;
+    setSimError(null);
+    setRunning(true);
+    setActiveTab("run");
+    resetNodeFlags();
+
+    // 1. Show the client's inbound message immediately in the chat.
+    const clientPhone = "+1 555 123 4567";
+    const inboundMsg: WhatsAppSimMessage = {
+      id: `sim-in-${Date.now()}`,
+      direction: "inbound",
+      phone: clientPhone,
+      text,
+      timestamp: new Date().toISOString(),
+      nodeId: "simulator",
+    };
+    // Keep previous conversation context (so it feels like a real chat).
+    setVisibleMessages((prev) => [...prev, inboundMsg]);
+
+    try {
+      const res = await fetch(`/api/workflows/execute`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workflowId: workflow.id,
+          nodes: nodes.map(toApiNode),
+          edges: edges.map(toApiEdge),
+          clientMessage: text,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 401) {
+        toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
+        setSimError("Sesión expirada. Inicia sesión nuevamente.");
+        setRunning(false);
+        return;
+      }
+      if (!res.ok || data?.success === false) {
+        const msg = data?.error || "No se pudo ejecutar el flujo.";
+        setSimError(msg);
+        toast.error(msg);
+        setRunning(false);
+        return;
+      }
+
+      // 2. Replace visible messages with the full conversation from the run
+      //    (preserves the client's inbound + adds the business outbound replies).
+      const newMessages: WhatsAppSimMessage[] = Array.isArray(
+        data.whatsappMessages
+      )
+        ? data.whatsappMessages
+        : [];
+
+      // If the run did not echo the client's inbound (no whatsapp node with
+      // outputVariable), keep the one we added so the user sees their text.
+      const hasInboundEcho = newMessages.some(
+        (m) => m.direction === "inbound" && m.text === text
+      );
+      const finalMessages = hasInboundEcho
+        ? newMessages
+        : [inboundMsg, ...newMessages];
+
+      setVisibleMessages(finalMessages);
+
+      // 3. Update the run log entries (no replay animation for chat mode).
+      setResult({
+        status: data.status === "completed" ? "success" : data.status,
+        entries: data.logs || [],
+        variables: data.variables || {},
+        whatsappMessages: finalMessages,
+        finalNode: data.finalNode,
+        error: data.error,
+      });
+      setVisibleEntries(data.logs || []);
+
+      if (data.status === "completed") {
+        toast.success("Respuesta generada");
+      } else if (data.error) {
+        setSimError(data.error);
+        toast.error(data.error);
+      }
+    } catch (err) {
+      console.error("[simulator] network error:", err);
+      setSimError("No se pudo conectar con el endpoint de ejecución.");
+      toast.error("No se pudo conectar con el endpoint de ejecución.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
       {/* Barra de herramientas */}
@@ -930,7 +1033,12 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
         onPositionChange={setSimPos}
       >
         <div className="w-[230px] h-[460px]">
-          <WhatsAppSimulator messages={visibleMessages} running={running} />
+          <WhatsAppSimulator
+            messages={visibleMessages}
+            running={running}
+            onSendMessage={handleClientMessage}
+            error={simError}
+          />
         </div>
       </FloatingPanel>
     </div>

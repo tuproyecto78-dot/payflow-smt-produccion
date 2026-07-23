@@ -16,6 +16,8 @@ import {
   Plus,
   Smile,
   X,
+  Send,
+  AlertTriangle,
 } from "lucide-react";
 import type { WhatsAppSimMessage } from "@/lib/workflow-types";
 import { cn } from "@/lib/utils";
@@ -26,27 +28,47 @@ export function WhatsAppSimulator({
   messages,
   running,
   compact = false,
+  onSendMessage,
+  error,
 }: {
   messages: WhatsAppSimMessage[];
   running: boolean;
   compact?: boolean;
+  /** Called when the client types a message and presses Send / Enter. */
+  onSendMessage?: (text: string) => void;
+  /** Optional error message to display inside the chat (e.g. AI failure). */
+  error?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, error, running]);
 
   const phone =
     messages.length > 0
       ? messages[messages.length - 1].phone
       : "+1 555 123 4567";
 
+  function handleSend() {
+    const text = draft.trim();
+    if (!text || running || !onSendMessage) return;
+    setDraft("");
+    onSendMessage(text);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
   // Agrupar mensajes por día para el separador de WhatsApp
   const grouped = groupByDay(messages);
-  const now = format(new Date(), "HH:mm");
 
   return (
     <div className="w-full h-full flex items-center justify-center">
@@ -109,7 +131,7 @@ export function WhatsAppSimulator({
               backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23d4cab6' fill-opacity='0.25'%3E%3Cpath d='M20 20.5V18H0v-2h20V14h2v2h18v2H22v2.5a2 2 0 1 1-2 0z'/%3E%3C/g%3E%3C/svg%3E")`,
             }}
           >
-            {messages.length === 0 ? (
+            {messages.length === 0 && !error ? (
               <div className="h-full flex flex-col items-center justify-center text-center px-3">
                 <div className="bg-[#fff3d0] text-[#5a4a1a] text-[10px] px-3 py-1 rounded-md shadow-sm mb-3">
                   Hoy
@@ -117,10 +139,12 @@ export function WhatsAppSimulator({
                 <div className="bg-white/70 backdrop-blur-sm rounded-lg px-3 py-2 text-center max-w-[200px] shadow-sm">
                   <MessageCircle className="size-5 mx-auto mb-1 text-emerald-600" />
                   <p className="text-[10px] font-medium text-emerald-900">
-                    Aún no hay mensajes
+                    Simulador de WhatsApp
                   </p>
                   <p className="text-[9px] text-emerald-700/70 mt-0.5">
-                    Ejecuta el flujo para ver la conversación de WhatsApp.
+                    {onSendMessage
+                      ? "Escribe un mensaje abajo como si fueras el cliente para probar el flujo."
+                      : "Ejecuta el flujo para ver la conversación de WhatsApp."}
                   </p>
                 </div>
               </div>
@@ -138,6 +162,14 @@ export function WhatsAppSimulator({
                     ))}
                   </div>
                 ))}
+                {error && (
+                  <div className="flex justify-center my-2">
+                    <div className="bg-red-50 border border-red-200 text-red-700 text-[9px] rounded-md px-2 py-1.5 shadow-sm flex items-start gap-1 max-w-[90%]">
+                      <AlertTriangle className="size-2.5 shrink-0 mt-0.5" />
+                      <span className="leading-tight">{error}</span>
+                    </div>
+                  </div>
+                )}
                 {running && (
                   <div className="flex justify-start">
                     <div className="bg-white rounded-lg rounded-tl-none px-2.5 py-2 shadow-sm flex items-center gap-1">
@@ -151,19 +183,56 @@ export function WhatsAppSimulator({
             )}
           </div>
 
-          {/* Barra de entrada de mensaje */}
-          <div className="absolute bottom-0 left-0 right-0 h-8 z-20 bg-[#f0f0f0] flex items-center gap-1 px-1.5 py-1">
-            <div className="flex-1 bg-white rounded-full px-3 py-1.5 flex items-center gap-2">
-              <Smile className="size-4 text-gray-500 shrink-0" />
-              <span className="text-[10px] text-gray-400 flex-1">
-                Mensaje
-              </span>
-              <Camera className="size-4 text-gray-500 shrink-0" />
-              <Plus className="size-4 text-gray-500 shrink-0" />
-            </div>
-            <div className="size-8 rounded-full bg-[#075e54] flex items-center justify-center shrink-0">
-              <Mic className="size-4 text-white" />
-            </div>
+          {/* Barra de entrada de mensaje — funcional cuando onSendMessage está definido */}
+          <div className="absolute bottom-0 left-0 right-0 h-10 z-20 bg-[#f0f0f0] flex items-center gap-1 px-1.5 py-1">
+            {onSendMessage ? (
+              <>
+                <div className="flex-1 bg-white rounded-full px-2.5 py-1 flex items-center gap-1.5 min-w-0">
+                  <Smile className="size-3.5 text-gray-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={running}
+                    placeholder={running ? "Procesando…" : "Mensaje"}
+                    data-no-drag
+                    className="flex-1 min-w-0 bg-transparent text-[10px] text-gray-800 placeholder:text-gray-400 outline-none disabled:opacity-50"
+                    aria-label="Escribe un mensaje como cliente"
+                  />
+                  <Camera className="size-3.5 text-gray-500 shrink-0" />
+                  <Plus className="size-3.5 text-gray-500 shrink-0" />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={running || !draft.trim()}
+                  data-no-drag
+                  aria-label="Enviar mensaje"
+                  className="size-8 rounded-full bg-[#075e54] flex items-center justify-center shrink-0 transition-colors hover:bg-[#054c44] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {draft.trim() && !running ? (
+                    <Send className="size-3.5 text-white" />
+                  ) : (
+                    <Mic className="size-3.5 text-white" />
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex-1 bg-white rounded-full px-3 py-1.5 flex items-center gap-2">
+                  <Smile className="size-4 text-gray-500 shrink-0" />
+                  <span className="text-[10px] text-gray-400 flex-1">
+                    Mensaje
+                  </span>
+                  <Camera className="size-4 text-gray-500 shrink-0" />
+                  <Plus className="size-4 text-gray-500 shrink-0" />
+                </div>
+                <div className="size-8 rounded-full bg-[#075e54] flex items-center justify-center shrink-0">
+                  <Mic className="size-4 text-white" />
+                </div>
+              </>
+            )}
           </div>
 
           {/* Indicador "en vivo" flotante */}
