@@ -2,6 +2,14 @@ import "server-only";
 
 import { executeWorkflow as executeLegacyWorkflow } from "./engine";
 import { createServiceRoleClient } from "@/lib/supabase";
+import {
+  detectSimulatorIntent,
+  formatSimulatorCatalog,
+  formatSimulatorPromotions,
+  getSimulatorDataNeeds,
+  type SimulatorCatalogItem,
+  type SimulatorIntent,
+} from "@/lib/simulator-intent";
 import type {
   ExecutionResult,
   FlowEdge,
@@ -23,15 +31,7 @@ export interface GeminiEngineOptions {
   aiMode?: AiDeliveryMode;
 }
 
-type CatalogProduct = {
-  name: string;
-  description: string;
-  price: number;
-  currency: string;
-  stock: number;
-  trackInventory: boolean;
-  category: string;
-};
+type CatalogProduct = SimulatorCatalogItem;
 
 type BusinessContext = {
   businessName: string;
@@ -39,7 +39,7 @@ type BusinessContext = {
   promotions: string;
 };
 
-type AiIntent = "greeting" | "catalog" | "promotion" | "buy" | "other";
+type ContextSource = "none" | "catalog" | "promotions";
 
 type GeminiCallResult = {
   text: string;
@@ -54,65 +54,28 @@ function entry(input: Omit<LogEntry, "timestamp">): LogEntry {
   return { ...input, timestamp: nowIso() };
 }
 
-function detectIntent(message: string): AiIntent {
-  const text = message.toLowerCase().trim();
-  if (!text) return "greeting";
-
-  const promotionTerms = ["promoción", "promocion", "descuento", "oferta", "combo", "especial"];
-  const buyTerms = [
-    "quiero pedir",
-    "quiero comprar",
-    "quiero ordenar",
-    "hacer pedido",
-    "realizar pedido",
-    "deseo pedir",
-    "deseo comprar",
-    "cómo pago",
-    "como pago",
-    "link de pago",
-  ];
-  const catalogTerms = [
-    "menú",
-    "menu",
-    "carta",
-    "plato",
-    "platos",
-    "producto",
-    "productos",
-    "precio",
-    "precios",
-    "qué tienen",
-    "que tienen",
-    "qué hay",
-    "que hay",
-    "disponible",
-  ];
-  const greetings = [
-    "hola",
-    "buenas",
-    "buenos días",
-    "buenos dias",
-    "buenas tardes",
-    "buenas noches",
-    "saludos",
-  ];
-
-  if (promotionTerms.some((term) => text.includes(term))) return "promotion";
-  if (buyTerms.some((term) => text.includes(term))) return "buy";
-  if (catalogTerms.some((term) => text.includes(term))) return "catalog";
-  if (greetings.some((term) => text === term || text.startsWith(`${term} `))) return "greeting";
-  return "other";
-}
-
 function safeMetadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 }
 
-async function loadBusinessContext(clientId: string): Promise<BusinessContext> {
-  const supabase = createServiceRoleClient();
+function extractPromotions(value: unknown): string {
+  const metadata = safeMetadata(value);
+  if (typeof metadata.promotions === "string") {
+    return metadata.promotions.trim();
+  }
+  if (Array.isArray(metadata.promotions)) {
+    return metadata.promotions
+      .map((promotion) => String(promotion || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return "";
+}
 
-  const [businessResult, productsResult, promotionsResult] = await Promise.all([
+async function loadCatalogContext(clientId: string): Promise<BusinessContext> {
+  const supabase = createServiceRoleClient();
+  const [businessResult, productsResult] = await Promise.all([
     supabase
       .from("client_accounts")
       .select("business_name")
@@ -125,14 +88,6 @@ async function loadBusinessContext(clientId: string): Promise<BusinessContext> {
       .eq("active", true)
       .order("name", { ascending: true })
       .limit(150),
-    supabase
-      .from("audit_logs")
-      .select("metadata")
-      .eq("client_id", clientId)
-      .eq("action", "catalog_promotions_updated")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
   ]);
 
   if (businessResult.error) {
@@ -140,9 +95,6 @@ async function loadBusinessContext(clientId: string): Promise<BusinessContext> {
   }
   if (productsResult.error) {
     throw new Error(`No se pudo consultar el catálogo: ${productsResult.error.message}`);
-  }
-  if (promotionsResult.error) {
-    throw new Error(`No se pudieron consultar las promociones: ${promotionsResult.error.message}`);
   }
 
   const products: CatalogProduct[] = (productsResult.data || []).map((row) => {
@@ -158,54 +110,78 @@ async function loadBusinessContext(clientId: string): Promise<BusinessContext> {
     };
   });
 
-  const promotionMetadata = safeMetadata(promotionsResult.data?.metadata);
-  const promotions = typeof promotionMetadata.promotions === "string"
-    ? promotionMetadata.promotions.trim()
-    : "";
-
   return {
     businessName: String(businessResult.data?.business_name || "el negocio"),
     products,
-    promotions,
+    promotions: "",
   };
 }
 
-function formatCatalog(context: BusinessContext): string {
-  if (context.products.length === 0) {
-    return "No hay productos activos cargados en el catálogo.";
+async function loadPromotionContext(clientId: string): Promise<BusinessContext> {
+  const supabase = createServiceRoleClient();
+  const { data: business, error: businessError } = await supabase
+    .from("client_accounts")
+    .select("business_name")
+    .eq("id", clientId)
+    .maybeSingle();
+
+  if (businessError) {
+    throw new Error(`No se pudo consultar el negocio: ${businessError.message}`);
   }
 
-  return context.products
-    .map((product) => {
-      const stock = product.trackInventory
-        ? product.stock > 0
-          ? `stock ${product.stock}`
-          : "sin stock"
-        : "stock no controlado";
-      const detail = [product.category, product.description].filter(Boolean).join(" · ");
-      return `- ${product.name}: ${product.price.toFixed(2)} ${product.currency} · ${stock}${detail ? ` · ${detail}` : ""}`;
-    })
-    .join("\n");
+  const [updatedResult, onboardingResult] = await Promise.all([
+    supabase
+      .from("audit_logs")
+      .select("metadata")
+      .eq("action", "catalog_promotions_updated")
+      .contains("metadata", { client_id: clientId })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("audit_logs")
+      .select("metadata")
+      .eq("action", "onboarding_completed")
+      .eq("entity_type", "client_account")
+      .eq("entity_id", clientId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (updatedResult.error) {
+    throw new Error(
+      `No se pudieron consultar las promociones: ${updatedResult.error.message}`
+    );
+  }
+  if (onboardingResult.error) {
+    throw new Error(
+      `No se pudieron consultar las promociones iniciales: ${onboardingResult.error.message}`
+    );
+  }
+
+  return {
+    businessName: String(business?.business_name || "el negocio"),
+    products: [],
+    promotions:
+      extractPromotions(updatedResult.data?.metadata) ||
+      extractPromotions(onboardingResult.data?.metadata),
+  };
 }
 
-function buildInstructions(context: BusinessContext, intent: AiIntent, mode: AiDeliveryMode): string {
-  const promotions = context.promotions || "No hay promociones vigentes registradas.";
-
+function buildInstructions(
+  intent: SimulatorIntent,
+  mode: AiDeliveryMode
+): string {
   return [
-    `Eres el asistente comercial de ${context.businessName}.`,
+    "Eres un asistente comercial de PayFlow SMT.",
     "Responde en español claro, breve y amable.",
-    "Usa únicamente los datos del catálogo y promociones incluidos abajo.",
-    "Nunca inventes productos, precios, disponibilidad, promociones, horarios ni condiciones.",
-    "Cuando falte un dato, dilo de forma explícita y ofrece derivar la consulta al negocio.",
-    "No confirmes que un pago fue recibido, aprobado o acreditado. Solo un webhook oficial o una persona autorizada puede confirmarlo.",
-    "Si el usuario solo consulta información, no inicies cobro, pedido ni aviso al negocio.",
-    "Si manifiesta intención real de compra, recopila producto, cantidad y datos mínimos antes de mencionar el siguiente paso de pago.",
+    "No inventes productos, precios, promociones, horarios ni disponibilidad.",
+    "El catálogo y las promociones solo se consultan cuando la intención lo exige.",
+    "No confirmes pedidos ni pagos y no actives WhatsApp.",
+    "Si el usuario quiere comprar, solicita primero el producto y la cantidad.",
     `Intención preliminar detectada por el sistema: ${intent}.`,
-    `Modo actual: ${mode}. En modo asistido tu respuesta es una sugerencia pendiente de aprobación y no debe considerarse enviada.`,
-    "CATÁLOGO REAL DEL NEGOCIO:",
-    formatCatalog(context),
-    "PROMOCIONES VIGENTES:",
-    promotions,
+    `Modo actual: ${mode}. En modo asistido la respuesta queda pendiente de aprobación.`,
   ].join("\n");
 }
 
@@ -330,14 +306,16 @@ function directConversationResult(input: {
   message: string;
   answer: string;
   mode: AiDeliveryMode;
-  intent: AiIntent;
+  intent: SimulatorIntent;
   model: string;
-  clientId: string;
-  productCount: number;
+  provider: "gemini" | "payflow-rules";
+  clientId?: string | null;
+  productCount?: number;
+  dataSource: ContextSource;
 }): ExecutionResult {
   const started = nowIso();
   const responseText = input.mode === "assisted"
-    ? `📝 Sugerencia de Gemini pendiente de aprobación:\n\n${input.answer}`
+    ? `📝 Sugerencia pendiente de aprobación:\n\n${input.answer}`
     : input.answer;
 
   const messages: WhatsAppSimMessage[] = [
@@ -355,7 +333,7 @@ function directConversationResult(input: {
       phone: "+593000000000",
       text: responseText,
       timestamp: nowIso(),
-      nodeId: "gemini-agent",
+      nodeId: "simulator-response",
     },
   ];
 
@@ -365,23 +343,35 @@ function directConversationResult(input: {
       nodeType: "whatsapp",
       nodeLabel: "Mensaje del cliente",
       status: "success",
-      message: `Mensaje recibido en modo ${input.mode}.`,
+      message: `Intención detectada: ${input.intent}.`,
     }),
-    entry({
+  ];
+
+  if (input.dataSource === "catalog") {
+    entries.push(entry({
       nodeId: "catalog-context",
       nodeType: "catalog_search",
       nodeLabel: "Catálogo real",
       status: "success",
-      message: `Se consultaron ${input.productCount} productos activos para el cliente ${input.clientId}.`,
-    }),
-    entry({
-      nodeId: "gemini-agent",
-      nodeType: "ai_agent",
-      nodeLabel: "Agente Gemini",
+      message: `Se consultaron ${input.productCount || 0} productos activos.`,
+    }));
+  } else if (input.dataSource === "promotions") {
+    entries.push(entry({
+      nodeId: "promotions-context",
+      nodeType: "catalog_search",
+      nodeLabel: "Promociones reales",
       status: "success",
-      message: `Proveedor: Gemini · modelo: ${input.model} · intención: ${input.intent} · modo: ${input.mode}.`,
-    }),
-  ];
+      message: "Se consultaron únicamente las promociones del negocio.",
+    }));
+  }
+
+  entries.push(entry({
+    nodeId: "simulator-response",
+    nodeType: "ai_agent",
+    nodeLabel: input.provider === "gemini" ? "Agente Gemini" : "Reglas PayFlow",
+    status: "success",
+    message: `Proveedor: ${input.provider} · modelo: ${input.model} · modo: ${input.mode}.`,
+  }));
 
   if (input.mode === "assisted") {
     entries.push(entry({
@@ -400,14 +390,16 @@ function directConversationResult(input: {
       user_response: input.message,
       ai_response: input.answer,
       ai_intent: input.intent,
-      ai_provider: "gemini",
+      ai_provider: input.provider,
       ai_model: input.model,
       ai_mode: input.mode,
-      catalog_items_consulted: input.productCount,
+      catalog_items_consulted: input.productCount || 0,
+      promotions_consulted: input.dataSource === "promotions",
+      business_data_consulted: input.dataSource !== "none",
       ai_requires_approval: input.mode === "assisted",
     },
     whatsappMessages: messages,
-    finalNode: input.mode === "assisted" ? "approval-gate" : "gemini-agent",
+    finalNode: input.mode === "assisted" ? "approval-gate" : "simulator-response",
   };
 }
 
@@ -418,8 +410,7 @@ export async function executeWorkflow(
 ): Promise<ExecutionResult> {
   const message = options.clientMessage?.trim();
 
-  // El botón Ejecutar conserva el motor completo de nodos.
-  // Los mensajes del simulador usan Gemini y el catálogo real del cliente.
+  // The regular Run button preserves the complete node engine.
   if (!message) {
     return executeLegacyWorkflow(nodes, edges, options);
   }
@@ -442,57 +433,103 @@ export async function executeWorkflow(
     };
   }
 
-  if (!options.clientId) {
+  const intent = detectSimulatorIntent(message);
+  const needs = getSimulatorDataNeeds(intent);
+
+  // A plain greeting is intentionally deterministic and database-free.
+  if (intent === "greeting") {
+    return directConversationResult({
+      message,
+      answer: "¡Hola! ¿En qué puedo ayudarte?",
+      mode,
+      intent,
+      model: "deterministic-v1",
+      provider: "payflow-rules",
+      dataSource: "none",
+    });
+  }
+
+  if ((needs.catalog || needs.promotions) && !options.clientId) {
     return {
       status: "failed",
       entries: [entry({
-        nodeId: "catalog-context",
+        nodeId: "business-context",
         nodeType: "catalog_search",
-        nodeLabel: "Catálogo real",
+        nodeLabel: "Datos reales del negocio",
         status: "error",
-        message: "No se pudo asociar este flujo con un cliente. Revisa el historial de creación del flujo.",
+        message: "No se pudo asociar este flujo con un cliente.",
       })],
-      variables: { ai_mode: mode },
+      variables: { ai_mode: mode, ai_intent: intent },
       whatsappMessages: [],
-      finalNode: "catalog-context",
-      error: "El flujo no tiene un cliente asociado para consultar el catálogo.",
+      finalNode: "business-context",
+      error: "El flujo no tiene un cliente asociado para consultar datos reales.",
     };
   }
 
   try {
-    const context = await loadBusinessContext(options.clientId);
-    const intent = detectIntent(message);
-    const instructions = buildInstructions(context, intent, mode);
-    const ai = await callGemini({ message, instructions });
+    if (needs.catalog && options.clientId) {
+      const context = await loadCatalogContext(options.clientId);
+      return directConversationResult({
+        message,
+        answer: formatSimulatorCatalog(context.products),
+        mode,
+        intent,
+        model: "catalog-query-v1",
+        provider: "payflow-rules",
+        clientId: options.clientId,
+        productCount: context.products.length,
+        dataSource: "catalog",
+      });
+    }
 
+    if (needs.promotions && options.clientId) {
+      const context = await loadPromotionContext(options.clientId);
+      return directConversationResult({
+        message,
+        answer: formatSimulatorPromotions(context.promotions),
+        mode,
+        intent,
+        model: "promotions-query-v1",
+        provider: "payflow-rules",
+        clientId: options.clientId,
+        dataSource: "promotions",
+      });
+    }
+
+    // Other conversational intents use Gemini without loading catalog or promotions.
+    const ai = await callGemini({
+      message,
+      instructions: buildInstructions(intent, mode),
+    });
     return directConversationResult({
       message,
       answer: ai.text,
       mode,
       intent,
       model: ai.model,
-      clientId: options.clientId,
-      productCount: context.products.length,
+      provider: "gemini",
+      dataSource: "none",
     });
   } catch (error) {
     const messageText = error instanceof Error
       ? error.message
-      : "No se pudo generar la respuesta con Gemini.";
+      : "No se pudo generar la respuesta del simulador.";
     return {
       status: "failed",
       entries: [entry({
-        nodeId: "gemini-agent",
+        nodeId: "simulator-response",
         nodeType: "ai_agent",
-        nodeLabel: "Agente Gemini",
+        nodeLabel: "Simulador real",
         status: "error",
         message: messageText,
       })],
       variables: {
         ai_provider: "gemini",
         ai_mode: mode,
+        ai_intent: intent,
       },
       whatsappMessages: [],
-      finalNode: "gemini-agent",
+      finalNode: "simulator-response",
       error: messageText,
     };
   }
