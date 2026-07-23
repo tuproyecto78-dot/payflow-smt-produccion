@@ -1938,3 +1938,38 @@ Files modified: 2
 - src/lib/engine.ts (detectIntent: info-first priority + más keywords; buildMockResponse: catálogo siempre listado para info)
 
 `bun run lint` → 0 errors.
+
+---
+Task ID: simulator-stop-flow-non-buy-intent
+Agent: main agent (Z.ai Code)
+Task: El usuario reportó "no se efectuado ningún cambio" con captura del simulador. Análisis VLM de la captura: el cliente escribió "Hola" (greeting), el Agente IA respondió correctamente con saludo, PERO el flujo continuó a un nodo "Aviso al negocio" que envió "Nueva solicitud de : " (vacío). El error: el ai-agent solo tenía handles "out" e "info"; cuando la intención era "greeting" y no había handle específico, caía a "out" que ejecutaba nodos de pago/aviso incorrectamente.
+
+Work Log:
+- Análisis VLM de la captura Screenshot_2026-07-23-11-57-24-864: confirmó que el flujo personalizado del usuario ("La estancia") ejecutaba "Aviso al negocio" después del ai-agent incluso cuando el cliente solo escribió "Hola" (greeting). El mensaje "Nueva solicitud de : " salía vacío porque no había intención de compra.
+- Causa raíz de arquitectura: el ai-agent tenía solo 2 handles (out=comprar, info=catálogo). Cuando intent="greeting" no había handle específico, y la lógica `nextHandle = intent === "buy" || !hasInfoEdge ? "out" : "info"` hacía que greeting cayera a "out", ejecutando nodos de pago/aviso.
+- Fix 1 — src/lib/workflow-types.ts: ai_agent ahora tiene 3 handles: "out" (Comprar), "info" (Info / catálogo), "greeting" (Saludo).
+- Fix 2 — src/lib/engine.ts (nodo ai_agent): nueva lógica de bifurcación:
+  - intent "buy" → handle "out" (proceed a pago/orden)
+  - intent "info" → handle "info" si existe, sino DETENER flujo (shouldStop=true, nextHandle=null)
+  - intent "greeting" → handle "greeting" si existe, sino DETENER flujo
+  - Logs explicativos en español cuando se detiene: "Intención de consulta detectada sin rama de catálogo configurada. El flujo se detiene para evitar disparar nodos de pago o aviso. Conecta el handle «Info / catálogo» del Agente IA a un nodo WhatsApp para responder consultas."
+  - Esto previene el bug clásico: cliente dice "Hola" o "¿Qué platos tienen?" → se dispara payment/notice node que solo debería firing con intención real de compra.
+
+Verification (pruebas con curl):
+- TEST 1: clientMessage="Hola" → ai_intent=greeting → flujo se DETIENE después del ai-agent → create_payment NO ejecutado ✓ (antes caía a "out" y ejecutaba aviso al negocio)
+- TEST 2: clientMessage="¿Qué platos tienen hoy con precios?" → ai_intent=info → va a whatsapp-info (rama catálogo) → responde con catálogo completo → create_payment NO ejecutado ✓
+- TEST 3 (buy): validado en task anterior (commit cc36076) — "Quiero comprar" → ai_intent=buy → create-payment → payment-success ✓
+- bun run lint: 0 errores (2 warnings preexistentes en otros archivos)
+- Commit 02c688f pusheado a GitHub — Vercel desplegará automáticamente
+
+Stage Summary:
+- El error de arquitectura está corregido: el ai-agent ahora tiene 3 handles (comprar/info/saludo) y cuando la intención NO es de compra y no hay handle específico, el flujo se DETIENE en lugar de caer a "out" y disparar nodos de pago/aviso.
+- Esto significa que cuando un cliente escriba "Hola" o "¿Qué platos tienen?" en cualquier flujo (no solo el demo), NO se disparará "Aviso al negocio", "Crear pago", ni ningún nodo que asuma intención de compra.
+- Para que el flujo personalizado del usuario ("La estancia") responda saludos y consultas correctamente, el usuario debe conectar los handles "Info / catálogo" y "Saludo" del Agente IA a nodos WhatsApp en su flujo. Si no los conecta, el flujo se detiene limpiamente sin ejecutar nodos de pago.
+- El log explica claramente qué hacer: "Conecta el handle «Info / catálogo» del Agente IA a un nodo WhatsApp para responder consultas."
+
+Files modified: 2
+- src/lib/workflow-types.ts (ai_agent: 3 handles out/info/greeting)
+- src/lib/engine.ts (bifurcación: buy→out, info→info o stop, greeting→greeting o stop)
+
+`bun run lint` → 0 errors.
