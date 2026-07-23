@@ -741,17 +741,26 @@ function EditorInner({ workflow }: { workflow: WorkflowSummary }) {
     // Keep previous conversation context (so it feels like a real chat).
     setVisibleMessages((prev) => [...prev, inboundMsg]);
 
+    // For demo workflows, DO NOT send the editor nodes (which may be stale
+    // from localStorage). Let the API load the canonical demo flow from code
+    // so the clientMessage reaches the correct whatsapp-received node and
+    // the AI agent can detect intent properly.
+    const isDemo = isDemoWorkflowId(workflow.id);
+    const bodyPayload: Record<string, unknown> = {
+      workflowId: workflow.id,
+      clientMessage: text,
+    };
+    if (!isDemo) {
+      bodyPayload.nodes = nodes.map(toApiNode);
+      bodyPayload.edges = edges.map(toApiEdge);
+    }
+
     try {
       const res = await fetch(`/api/workflows/execute`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workflowId: workflow.id,
-          nodes: nodes.map(toApiNode),
-          edges: edges.map(toApiEdge),
-          clientMessage: text,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       const data = await res.json().catch(() => ({}));

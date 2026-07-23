@@ -935,7 +935,7 @@ const DEMO_CATALOG = [
  * Detect the client's intent from their message.
  * - "buy": explicit purchase intent (quiero comprar, pagar, llevar, pedir, cuánto cuesta + producto)
  * - "info": questions about products, prices, menu, hours, location
- * - "greeting": hola, buenas, etc.
+ * - "greeting": hola, buenas, etc. — ONLY when the message is a pure greeting
  */
 function detectIntent(text: string): AiIntent {
   const t = text.toLowerCase().trim();
@@ -945,26 +945,32 @@ function detectIntent(text: string): AiIntent {
   const buyKeywords = [
     "comprar", "pagar", "llevar", "pedir", "ordenar", "quiero el", "quiero la",
     "deseo", "reservar", "separar", "facturar", "transferir", "tarjeta",
-    "cómo pago", "como pago", "link de pago", "link pago",
+    "cómo pago", "como pago", "link de pago", "link pago", "realizar pedido",
+    "hacer pedido", "quiero pedir", "quiero ordenar", "quiero comprar",
   ];
-  // Info signals
+  // Info signals — questions about products, prices, menu, etc.
   const infoKeywords = [
     "qué", "que", "cuánto", "cuanto", "precio", "precios", "menú", "menu",
     "platos", "plato", "carta", "tienen", "hay", "disponible", "horario",
     "horarios", "dónde", "donde", "ubicación", "ubicacion", "ayuda", "info",
     "información", "informacion", "quién", "quien", "cuál", "cual",
+    "cuales", "cuáles", "lista", "listar", "ver", "muestr", "catálogo",
+    "catalogo", "opciones", "opción", "opcion",
   ];
-  const greetingKeywords = ["hola", "buenas", "buenos días", "buenas tardes", "buenas noches", "saludos"];
+  const greetingKeywords = ["hola", "buenas", "buenos días", "buenas tardes", "buenas noches", "saludos", "hey", "ola"];
 
-  if (greetingKeywords.some((k) => t.includes(k)) && t.length < 25) {
-    return "greeting";
-  }
-  if (buyKeywords.some((k) => t.includes(k))) {
-    return "buy";
-  }
-  if (infoKeywords.some((k) => t.includes(k))) {
-    return "info";
-  }
+  // Check info FIRST (before greeting) so "¿Qué platos tienen?" is info,
+  // not greeting. A pure greeting like "hola" has no info keywords.
+  const hasInfo = infoKeywords.some((k) => t.includes(k));
+  const hasBuy = buyKeywords.some((k) => t.includes(k));
+  const hasGreeting = greetingKeywords.some((k) => t.includes(k));
+
+  // If the message has info keywords, it's info (even if it also has hola).
+  if (hasInfo) return "info";
+  // If it has buy keywords, it's buy.
+  if (hasBuy) return "buy";
+  // Pure greeting (short, no info/buy keywords).
+  if (hasGreeting && t.length < 30) return "greeting";
   // Default: treat short affirmative answers as buy intent, else info.
   const affirmative = ["sí", "si", "claro", "obvio", "de acuerdo", "adelante"];
   if (affirmative.some((k) => t === k)) return "buy";
@@ -983,19 +989,22 @@ function buildCatalogContext(): string {
  * Build a contextual mock response based on the detected intent.
  * This replaces the old "Confirmo que deseas continuar con el pago."
  * which was always returned regardless of the client's message.
+ *
+ * For "info" intent, ALWAYS responds with the full catalog (products +
+ * prices + descriptions) so the client gets a real answer.
  */
 function buildMockResponse(intent: AiIntent, clientText: string): string {
   if (intent === "greeting") {
-    return "¡Hola! 👋 Soy el asistente virtual. ¿En qué puedo ayudarte hoy? Puedes preguntarme por nuestros platos, precios o realizar un pedido.";
+    return "¡Hola! 👋 Bienvenido. Puedo ayudarte con nuestro menú, precios o tomar tu pedido. ¿Qué deseas saber?";
   }
   if (intent === "info") {
-    // If the client asks about prices/products, list the catalog.
+    // Always respond with the full catalog when the client asks for info.
     const catalogLines = DEMO_CATALOG.map(
-      (p) => `• ${p.name} — ${p.price.toFixed(2)} ${p.currency} (${p.description})`
+      (p) => `• ${p.name} — ${p.price.toFixed(2)} ${p.currency}\n   ${p.description}`
     ).join("\n");
-    return `Claro, aquí tienes nuestro menú de hoy:\n\n${catalogLines}\n\n¿Te gustaría realizar un pedido? Escríbeme "quiero pedir" y lo gestiono enseguida.`;
+    return `📋 *Nuestro menú de hoy:*\n\n${catalogLines}\n\n¿Te gustaría realizar un pedido? Dime "quiero pedir" y lo gestiono enseguida. 🛒`;
   }
   // buy intent — confirm the purchase intent and hand off to payment.
-  return `¡Perfecto! Para procesar tu pedido, te generaré un link seguro de pago. Cuando lo completes, confirmaremos tu transacción. 🛒`;
+  return `¡Perfecto! 🛒 Para procesar tu pedido, te generaré un link seguro de pago. Cuando lo completes, confirmaremos tu transacción.`;
 }
 
