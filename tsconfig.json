@@ -27,6 +27,12 @@
       "@/components/dashboard/create-flow-dialog": [
         "./src/components/dashboard/persistent-onboarding-wrapper"
       ],
+      "@/components/editor/editor-view": [
+        "./src/components/editor/editor-view-openai"
+      ],
+      "@/lib/engine": [
+        "./src/lib/engine-openai"
+      ],
       "@/lib/file-content-reader": [
         "./src/lib/file-content-reader-v2"
       ],
