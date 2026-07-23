@@ -6,6 +6,10 @@ import {
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 import { executeWorkflow, type AiDeliveryMode } from "@/lib/engine";
 import { createServiceRoleClient } from "@/lib/supabase";
+import {
+  detectSimulatorIntent,
+  getSimulatorDataNeeds,
+} from "@/lib/simulator-intent";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
 import { validateWorkflow } from "@/lib/workflow-validator";
 
@@ -36,35 +40,46 @@ async function resolveWorkflowClientId(input: {
 
   const supabase = createServiceRoleClient();
 
-  // Primary link: workflow audit written by the persistent onboarding.
-  const { data: workflowAudit, error: auditError } = await supabase
-    .from("audit_logs")
-    .select("client_id")
-    .eq("entity_type", "workflow")
-    .eq("entity_id", input.workflowId)
-    .not("client_id", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (auditError) {
-    console.error("[workflow execute] audit client lookup failed", auditError.message);
-  }
-  if (workflowAudit?.client_id) return String(workflowAudit.client_id);
-
-  // Secondary link: onboarding_completed metadata contains the workflow id.
+  // Existing onboarding audits store the tenant in entity_id and the workflow
+  // relationship in metadata. audit_logs has no client_id column.
   const { data: onboardingAudit, error: onboardingError } = await supabase
     .from("audit_logs")
-    .select("client_id")
+    .select("entity_id,metadata")
+    .eq("user_id", input.sessionUserId)
     .eq("action", "onboarding_completed")
+    .eq("entity_type", "client_account")
     .contains("metadata", { workflow_id: input.workflowId })
-    .not("client_id", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (onboardingError) {
     console.error("[workflow execute] onboarding client lookup failed", onboardingError.message);
   }
-  if (onboardingAudit?.client_id) return String(onboardingAudit.client_id);
+  if (onboardingAudit?.entity_id) return String(onboardingAudit.entity_id);
+
+  // New workflow audits also keep client_id inside metadata.
+  const { data: workflowAudit, error: auditError } = await supabase
+    .from("audit_logs")
+    .select("metadata")
+    .eq("user_id", input.sessionUserId)
+    .eq("action", "workflow_created")
+    .eq("entity_type", "workflow")
+    .eq("entity_id", input.workflowId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (auditError) {
+    console.error("[workflow execute] workflow audit lookup failed", auditError.message);
+  }
+  const workflowMetadata =
+    workflowAudit?.metadata &&
+    typeof workflowAudit.metadata === "object" &&
+    !Array.isArray(workflowAudit.metadata)
+      ? workflowAudit.metadata as Record<string, unknown>
+      : {};
+  if (typeof workflowMetadata.client_id === "string" && workflowMetadata.client_id) {
+    return workflowMetadata.client_id;
+  }
 
   // Final safe fallback for older records: project name + owner must match a client.
   const { data: workflow, error: workflowError } = await supabase
@@ -154,11 +169,27 @@ export async function POST(req: Request) {
   }
 
   try {
-    const clientId = await resolveWorkflowClientId({
-      workflowId,
-      sessionUserId: session.userId,
-      sessionClientId: session.clientId,
-    });
+    const clientMessage = typeof body.clientMessage === "string"
+      ? body.clientMessage.slice(0, 4000)
+      : undefined;
+    const simulatorIntent = clientMessage
+      ? detectSimulatorIntent(clientMessage)
+      : null;
+    const dataNeeds = simulatorIntent
+      ? getSimulatorDataNeeds(simulatorIntent)
+      : null;
+    const requiresClientData =
+      !clientMessage || dataNeeds?.catalog === true || dataNeeds?.promotions === true;
+
+    // Greetings and general conversation do not resolve a tenant through
+    // audit_logs. Catalog and promotion requests still require real tenant data.
+    const clientId = session.clientId || (requiresClientData
+      ? await resolveWorkflowClientId({
+          workflowId,
+          sessionUserId: session.userId,
+          sessionClientId: session.clientId,
+        })
+      : null);
 
     const result = await executeWorkflow(nodes, edges, {
       workflowId,
@@ -166,9 +197,7 @@ export async function POST(req: Request) {
       aiMode,
       forcePaymentOutcome: body.forcePaymentOutcome,
       questionResponses: body.questionResponses,
-      clientMessage: typeof body.clientMessage === "string"
-        ? body.clientMessage.slice(0, 4000)
-        : undefined,
+      clientMessage,
     });
 
     const logs = Array.isArray(result?.entries)
