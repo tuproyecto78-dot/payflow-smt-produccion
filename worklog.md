@@ -1754,3 +1754,70 @@ Files modified: 1
 - src/app/terms/page.tsx (server component con metadata SEO)
 
 `bun run lint` → exit 0, no errors, no warnings.
+
+---
+Task ID: simulator-client-message-input
+Agent: main agent (Z.ai Code)
+Task: El simulador de WhatsApp del editor de flujos no permitía escribir un mensaje como cliente, imposibilitando probar conversaciones reales ni validar si el agente IA responde usando el catálogo. Implementar simulador funcional: caja de texto visible, botón Enviar o Enter, iniciar desde nodo WhatsApp recibido, pasar mensaje al agente IA como entrada del cliente, mostrar respuesta y errores en pantalla, guardar en historial. No conectar WhatsApp real.
+
+Work Log:
+- Análisis del flujo existente:
+  - src/lib/engine.ts: nodo "whatsapp" maneja salida (outbound) y, si tiene outputVariable, captura respuesta del cliente (inbound) desde options.questionResponses o data.defaultResponse.
+  - nodo "ai_agent": lee inputVariable de ctx.variables (ej. {{user_response}}) y lo pasa al proveedor de IA.
+  - src/app/api/workflows/execute/route.ts: aceptaba workflowId, nodes, edges, forcePaymentOutcome, questionResponses.
+  - src/components/editor/editor-view.tsx: función run() ejecuta el flujo y hace replay; WhatsAppSimulator era solo display (barra de entrada decorativa).
+  - src/components/editor/whatsapp-simulator.tsx: input "Mensaje" era un span estático, sin onChange ni onSubmit.
+- Modifiqué src/lib/engine.ts:
+  - Añadí `clientMessage?: string` a EngineOptions.
+  - En el nodo "whatsapp" con outputVariable, prioridad: clientMessage (simulador) > questionResponses > defaultResponse > "sí". Tras consumir clientMessage, se resetea a undefined para que nodos whatsapp posteriores usen default.
+- Modifiqué src/app/api/workflows/execute/route.ts:
+  - Añadí `clientMessage?: string` a ExecuteBody.
+  - Pasé clientMessage a executeWorkflow options.
+- Reescribí src/components/editor/whatsapp-simulator.tsx:
+  - Añadí props: onSendMessage(text), error.
+  - Reemplacé la barra de entrada decorativa por una funcional: input text con value/onChange/onKeyDown (Enter envía), botón circular con icono Send (cuando hay texto) o Mic (vacío), disabled mientras running.
+  - Estado local `draft` para el texto.
+  - Muestra error dentro del chat como burbuja roja con icono AlertTriangle.
+  - Mensaje vacío actualizado: "Escribe un mensaje abajo como si fueras el cliente para probar el flujo" cuando onSendMessage está definido.
+  - data-no-drag en input y botón para no interferir con ReactFlow.
+- Modifiqué src/components/editor/editor-view.tsx:
+  - Añadí estado `simError`.
+  - Añadí función `handleClientMessage(text)`:
+    1. Crea WhatsAppSimMessage inbound inmediato y lo agrega a visibleMessages (UX: el usuario ve su mensaje al instante).
+    2. POST /api/workflows/execute con { workflowId, nodes, edges, clientMessage: text }.
+    3. Reemplaza visibleMessages con la conversación completa de la ejecución (preserva el inbound del cliente si el engine no lo ecó).
+    4. Actualiza result + visibleEntries (log) sin replay animation (modo chat).
+    5. Maneja errores: 401 (sesión expirada), errores del servidor, errores de red — los muestra en simError + toast.
+  - Pasé onSendMessage={handleClientMessage} y error={simError} al WhatsAppSimulator del FloatingPanel.
+- NO se conectó WhatsApp Business API real (solo Mock). El flujo se ejecuta en modo Mock completo: WhatsApp → Agente IA (mock) → Crear pago (Mock) → Verificar pago → WhatsApp éxito → Fin.
+
+Verification (Agent Browser + VLM, con login admin@payflow.smt):
+- Login exitoso → /dashboard/flujos/demo-cobro-whatsapp-ia carga el editor con 10 nodos.
+- Botón "Simulador" abre el FloatingPanel con el iPhone.
+- Snapshot confirma: textbox "Escribe un mensaje como cliente" (ref=e65) + button "Enviar mensaje" (ref=e66, disabled cuando vacío).
+- Escribí "Hola, quiero comprar el producto" → botón se habilitó → click Enviar.
+- VLM confirma conversación visible: "Mensaje del cliente (burbuja izquierda): 'Hola, quiero comprar el producto'. Respuestas del negocio (burbujas verdes derecha): bienvenida + confirmación de pago. Caja de texto inferior con campo 'Mensaje'."
+- Log de ejecución confirma el flujo completo end-to-end:
+  - "Respuesta del cliente recibida: 'Hola, quiero comprar el producto' → guardada en {{user_response}}"
+  - "Entrada recibida: {{user_response}}='Hola, quiero comprar el producto'" (Agente IA recibió el mensaje del cliente)
+  - "Resultado generado: {{ai_confirmation}}='Confirmo que deseas continuar con el pago.'"
+  - "Pago de 49.99 USD exitoso vía Mock"
+  - "¡Pago confirmado! Gracias, tu transacción fue aprobada correctamente."
+- Variables finales guardadas en historial: user_response, ai_confirmation, payment_outcome, payment_status, payment_amount, etc.
+- Toast "Respuesta generada" aparece al completar.
+- bun run lint: 0 errores, 0 warnings.
+- Commit e9ca2f2 pusheado a GitHub (tras rebase) — Vercel desplegará automáticamente.
+
+Stage Summary:
+- El simulador de WhatsApp ahora es funcional: caja de texto visible, botón Enviar (o Enter), el mensaje del cliente se pasa al agente IA como entrada, la respuesta se muestra en pantalla, los errores se muestran como burbuja roja, y todo se guarda en el historial de ejecución.
+- El mensaje del cliente fluye: input → POST /api/workflows/execute?clientMessage=... → engine nodo whatsapp (outputVariable=user_response) → nodo ai_agent (inputVariable=user_response) → respuesta → nodo create_payment (Mock) → nodo whatsapp éxito → fin.
+- No se conectó WhatsApp Business API real. Todo en modo Mock para pruebas internas.
+- Cuando se configure un proveedor de IA real (AI_PROVIDER != mock), el agente IA usará el catálogo y la información cargada para responder al mensaje del cliente de forma contextual.
+
+Files modified: 4
+- src/lib/engine.ts (clientMessage en EngineOptions + nodo whatsapp)
+- src/app/api/workflows/execute/route.ts (clientMessage en ExecuteBody)
+- src/components/editor/whatsapp-simulator.tsx (caja de texto + botón Enviar + error display)
+- src/components/editor/editor-view.tsx (handleClientMessage + simError + onSendMessage/error props)
+
+`bun run lint` → exit 0, no errors, no warnings.
