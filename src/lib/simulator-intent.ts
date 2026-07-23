@@ -2,6 +2,7 @@ export type SimulatorIntent =
   | "greeting"
   | "catalog"
   | "promotion"
+  | "payment"
   | "buy"
   | "other";
 
@@ -48,6 +49,23 @@ const CATALOG_TERMS = [
   "disponibles",
 ];
 
+const PAYMENT_TERMS = [
+  "pago",
+  "pagos",
+  "formas de pago",
+  "forma de pago",
+  "método de pago",
+  "metodo de pago",
+  "métodos de pago",
+  "metodos de pago",
+  "aceptan tarjeta",
+  "tarjeta",
+  "transferencia",
+  "link de pago",
+  "cómo pago",
+  "como pago",
+];
+
 const BUY_TERMS = [
   "quiero pedir",
   "quiero comprar",
@@ -56,9 +74,6 @@ const BUY_TERMS = [
   "realizar pedido",
   "deseo pedir",
   "deseo comprar",
-  "cómo pago",
-  "como pago",
-  "link de pago",
 ];
 
 const GREETINGS = [
@@ -75,10 +90,11 @@ export function detectSimulatorIntent(message: string): SimulatorIntent {
   const text = message.toLocaleLowerCase("es").trim();
   if (!text) return "greeting";
 
-  // Data intents take precedence so “Hola, ¿qué platos tienen?” still
-  // consults the catalog, while a plain “Hola” remains database-free.
+  // Specific business-data intents take precedence so a mixed message such as
+  // “Hola, ¿qué platos tienen?” still uses the real catalog.
   if (PROMOTION_TERMS.some((term) => text.includes(term))) return "promotion";
   if (CATALOG_TERMS.some((term) => text.includes(term))) return "catalog";
+  if (PAYMENT_TERMS.some((term) => text.includes(term))) return "payment";
   if (BUY_TERMS.some((term) => text.includes(term))) return "buy";
   if (GREETINGS.some((term) => text === term || text.startsWith(`${term} `))) {
     return "greeting";

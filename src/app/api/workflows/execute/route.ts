@@ -6,10 +6,6 @@ import {
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 import { executeWorkflow, type AiDeliveryMode } from "@/lib/engine";
 import { createServiceRoleClient } from "@/lib/supabase";
-import {
-  detectSimulatorIntent,
-  getSimulatorDataNeeds,
-} from "@/lib/simulator-intent";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
 import { validateWorkflow } from "@/lib/workflow-validator";
 
@@ -40,8 +36,6 @@ async function resolveWorkflowClientId(input: {
 
   const supabase = createServiceRoleClient();
 
-  // Existing onboarding audits store the tenant in entity_id and the workflow
-  // relationship in metadata. audit_logs has no client_id column.
   const { data: onboardingAudit, error: onboardingError } = await supabase
     .from("audit_logs")
     .select("entity_id,metadata")
@@ -53,11 +47,13 @@ async function resolveWorkflowClientId(input: {
     .limit(1)
     .maybeSingle();
   if (onboardingError) {
-    console.error("[workflow execute] onboarding client lookup failed", onboardingError.message);
+    console.error(
+      "[workflow execute] onboarding client lookup failed",
+      onboardingError.message
+    );
   }
   if (onboardingAudit?.entity_id) return String(onboardingAudit.entity_id);
 
-  // New workflow audits also keep client_id inside metadata.
   const { data: workflowAudit, error: auditError } = await supabase
     .from("audit_logs")
     .select("metadata")
@@ -69,19 +65,24 @@ async function resolveWorkflowClientId(input: {
     .limit(1)
     .maybeSingle();
   if (auditError) {
-    console.error("[workflow execute] workflow audit lookup failed", auditError.message);
+    console.error(
+      "[workflow execute] workflow audit lookup failed",
+      auditError.message
+    );
   }
   const workflowMetadata =
     workflowAudit?.metadata &&
     typeof workflowAudit.metadata === "object" &&
     !Array.isArray(workflowAudit.metadata)
-      ? workflowAudit.metadata as Record<string, unknown>
+      ? (workflowAudit.metadata as Record<string, unknown>)
       : {};
-  if (typeof workflowMetadata.client_id === "string" && workflowMetadata.client_id) {
+  if (
+    typeof workflowMetadata.client_id === "string" &&
+    workflowMetadata.client_id
+  ) {
     return workflowMetadata.client_id;
   }
 
-  // Final safe fallback for older records: project name + owner must match a client.
   const { data: workflow, error: workflowError } = await supabase
     .from("workflows")
     .select("project_id")
@@ -91,7 +92,7 @@ async function resolveWorkflowClientId(input: {
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
-    .select("name, user_id")
+    .select("name,user_id")
     .eq("id", workflow.project_id)
     .eq("user_id", input.sessionUserId)
     .maybeSingle();
@@ -112,10 +113,10 @@ async function resolveWorkflowClientId(input: {
  * POST /api/workflows/execute
  *
  * - The regular Run button keeps the complete node-by-node simulator.
- * - Messages typed in the WhatsApp simulator use Gemini with the real catalog
- *   scoped to the client linked to the workflow.
- * - ClickUp remains an independent internal-management integration.
- * - No real WhatsApp message is sent from this endpoint.
+ * - Every typed simulator message resolves the business tenant first.
+ * - The engine loads identity, business type, catalog, promotions and rules
+ *   before producing a deterministic response or calling Gemini.
+ * - No real WhatsApp message or payment is executed from this endpoint.
  */
 export async function POST(req: Request) {
   const session = await requireActiveSession();
@@ -169,27 +170,22 @@ export async function POST(req: Request) {
   }
 
   try {
-    const clientMessage = typeof body.clientMessage === "string"
-      ? body.clientMessage.slice(0, 4000)
-      : undefined;
-    const simulatorIntent = clientMessage
-      ? detectSimulatorIntent(clientMessage)
-      : null;
-    const dataNeeds = simulatorIntent
-      ? getSimulatorDataNeeds(simulatorIntent)
-      : null;
-    const requiresClientData =
-      !clientMessage || dataNeeds?.catalog === true || dataNeeds?.promotions === true;
+    const clientMessage =
+      typeof body.clientMessage === "string"
+        ? body.clientMessage.slice(0, 4000)
+        : undefined;
 
-    // Greetings and general conversation do not resolve a tenant through
-    // audit_logs. Catalog and promotion requests still require real tenant data.
-    const clientId = session.clientId || (requiresClientData
-      ? await resolveWorkflowClientId({
-          workflowId,
-          sessionUserId: session.userId,
-          sessionClientId: session.clientId,
-        })
-      : null);
+    // Structural rule: all real simulator conversations require a tenant.
+    // The regular node-run path keeps the previous session fallback behavior.
+    const clientId =
+      session.clientId ||
+      (clientMessage || workflowId
+        ? await resolveWorkflowClientId({
+            workflowId,
+            sessionUserId: session.userId,
+            sessionClientId: session.clientId,
+          })
+        : null);
 
     const result = await executeWorkflow(nodes, edges, {
       workflowId,
@@ -217,26 +213,29 @@ export async function POST(req: Request) {
       (result?.variables?.payment_status as string) ||
       "unknown";
 
-    return NextResponse.json({
-      success: result?.status === "success",
-      workflowId,
-      clientId,
-      aiMode,
-      requiresApproval: result?.variables?.ai_requires_approval === true,
-      suggestedResponse: result?.variables?.ai_response || null,
-      status: result?.status === "success" ? "completed" : result?.status || "failed",
-      result: paymentOutcome,
-      logs,
-      whatsappMessages: result?.whatsappMessages || [],
-      variables: result?.variables || {},
-      finalNode: result?.finalNode,
-      error: result?.error,
-    }, { status: result?.status === "failed" ? 422 : 200 });
+    return NextResponse.json(
+      {
+        success: result?.status === "success",
+        workflowId,
+        clientId,
+        aiMode,
+        requiresApproval: result?.variables?.ai_requires_approval === true,
+        suggestedResponse: result?.variables?.ai_response || null,
+        status:
+          result?.status === "success" ? "completed" : result?.status || "failed",
+        result: paymentOutcome,
+        logs,
+        whatsappMessages: result?.whatsappMessages || [],
+        variables: result?.variables || {},
+        finalNode: result?.finalNode,
+        error: result?.error,
+      },
+      { status: result?.status === "failed" ? 422 : 200 }
+    );
   } catch (err) {
     console.error("[/api/workflows/execute] error:", err);
-    const message = err instanceof Error
-      ? err.message
-      : "Error interno al ejecutar el flujo.";
+    const message =
+      err instanceof Error ? err.message : "Error interno al ejecutar el flujo.";
     return NextResponse.json(
       {
         success: false,
