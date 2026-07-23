@@ -97,8 +97,9 @@ async function resolveWorkflowClientId(input: {
  * POST /api/workflows/execute
  *
  * - The regular Run button keeps the complete node-by-node simulator.
- * - Messages typed in the WhatsApp simulator use OpenAI with the real catalog
+ * - Messages typed in the WhatsApp simulator use Gemini with the real catalog
  *   scoped to the client linked to the workflow.
+ * - ClickUp remains an independent internal-management integration.
  * - No real WhatsApp message is sent from this endpoint.
  */
 export async function POST(req: Request) {
@@ -165,7 +166,9 @@ export async function POST(req: Request) {
       aiMode,
       forcePaymentOutcome: body.forcePaymentOutcome,
       questionResponses: body.questionResponses,
-      clientMessage: typeof body.clientMessage === "string" ? body.clientMessage.slice(0, 4000) : undefined,
+      clientMessage: typeof body.clientMessage === "string"
+        ? body.clientMessage.slice(0, 4000)
+        : undefined,
     });
 
     const logs = Array.isArray(result?.entries)
@@ -202,7 +205,9 @@ export async function POST(req: Request) {
     }, { status: result?.status === "failed" ? 422 : 200 });
   } catch (err) {
     console.error("[/api/workflows/execute] error:", err);
-    const message = err instanceof Error ? err.message : "Error interno al ejecutar el flujo.";
+    const message = err instanceof Error
+      ? err.message
+      : "Error interno al ejecutar el flujo.";
     return NextResponse.json(
       {
         success: false,
