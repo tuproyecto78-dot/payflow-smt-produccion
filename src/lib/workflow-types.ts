@@ -325,7 +325,10 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
     icon: "Bot",
     category: "intelligence",
     color: "#ec4899",
-    outputs: [{ id: "out", label: "Siguiente" }],
+    outputs: [
+      { id: "out", label: "Comprar" },
+      { id: "info", label: "Info / catálogo" },
+    ],
   },
 
   // ── Integraciones ─────────────────────────────────

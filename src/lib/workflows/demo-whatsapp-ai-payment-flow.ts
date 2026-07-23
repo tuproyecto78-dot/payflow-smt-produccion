@@ -35,7 +35,7 @@ export interface DemoWorkflow {
   edges: FlowEdge[];
 }
 
-// ─── Nodes (10 nodes per spec) ────────────────────────────────────────
+// ─── Nodes (11 nodes) ───────────────────────────────────────────────
 
 const DEMO_NODES: FlowNode[] = [
   // 1. Inicio
@@ -49,45 +49,56 @@ const DEMO_NODES: FlowNode[] = [
       trigger: "manual",
     },
   },
-  // 2. Bienvenida WhatsApp
+  // 2. WhatsApp recibido — captura el mensaje del cliente
   {
-    id: "whatsapp-initial",
+    id: "whatsapp-received",
     type: "whatsapp",
     position: { x: 300, y: 220 },
     data: {
-      label: "Bienvenida WhatsApp",
-      description: "Enviar un mensaje de bienvenida por WhatsApp.",
+      label: "WhatsApp recibido",
+      description: "Captura el mensaje que el cliente escribe en el simulador.",
       phoneNumber: "+593987654321",
-      message:
-        "¡Hola! 👋 Soy el asistente virtual. Puedo ayudarte con información y generar un link seguro de pago PayPhone.",
+      message: "Gracias por escribirnos. En un momento te atendemos. 🤝",
       outputVariable: "user_response",
-      defaultResponse: "sí",
+      defaultResponse: "hola",
     },
   },
-  // 3. Agente IA de pagos
+  // 3. Agente IA — analiza la intención del cliente y bifurca
   {
     id: "ai-agent",
     type: "ai_agent",
-    position: { x: 300, y: 420 },
+    position: { x: 560, y: 320 },
     data: {
-      label: "Agente IA de pagos",
-      description: "Agente IA procesa y guía el pago.",
+      label: "Agente IA",
+      description:
+        "Analiza el mensaje del cliente. Si quiere comprar → genera el link de pago. Si pregunta por platos/precios → responde con el catálogo.",
       systemPrompt:
-        "Eres un agente de cobros por WhatsApp. Confirmas la intención de pago del cliente de forma amable y breve. REGLA: nunca confirmas pagos exitosos, solo confirmas la intención del cliente.",
-      prompt:
-        "El cliente respondió: {{user_response}}\n\nConfirma si el cliente tiene intención de pagar.",
+        "Eres el asistente virtual de un restaurante. Analiza el mensaje del cliente. Si el cliente quiere comprar o pagar, confirma amablemente que generarás un link de pago. Si el cliente pregunta por el menú, platos, precios o información, responde con el catálogo. Nunca confirmes un pago exitoso: la confirmación solo proviene del procesador de pagos.",
+      prompt: "Mensaje del cliente: {{user_response}}",
       inputVariable: "user_response",
-      outputVariable: "ai_confirmation",
+      outputVariable: "ai_response",
     },
   },
-  // 4. Crear link de pago
+  // 4a. WhatsApp info (catálogo) — rama "info"
+  {
+    id: "whatsapp-info",
+    type: "whatsapp",
+    position: { x: 820, y: 180 },
+    data: {
+      label: "WhatsApp info / catálogo",
+      description: "Responde al cliente con la información del catálogo generada por la IA.",
+      phoneNumber: "+593987654321",
+      message: "{{ai_response}}",
+    },
+  },
+  // 4b. Crear link de pago — rama "comprar"
   {
     id: "create-payment",
     type: "create_payment",
-    position: { x: 560, y: 320 },
+    position: { x: 820, y: 420 },
     data: {
       label: "Crear link de pago",
-      description: "Genera una orden y solicita el pago.",
+      description: "Genera una orden y solicita el pago cuando el cliente confirma intención de compra.",
       paymentProvider: "mock",
       paymentProviderLabel: "Mock",
       provider: "Mock",
@@ -104,14 +115,14 @@ const DEMO_NODES: FlowNode[] = [
       paymentStatus: "pendiente hasta ejecutar",
       possibleResults: ["payment_success", "payment_failed", "payment_pending", "error"],
       message:
-        "Te comparto tu link seguro de pago PayPhone. Cuando completes el pago, confirmaremos tu transacción.",
+        "Te comparto tu link seguro de pago. Cuando completes el pago, confirmaremos tu transacción.",
     },
   },
   // 5. Estado del pago
   {
     id: "payment-status",
     type: "condition",
-    position: { x: 820, y: 320 },
+    position: { x: 1080, y: 420 },
     data: {
       label: "Estado del pago",
       description: "Evalúa el resultado del pago.",
@@ -126,7 +137,7 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-success",
     type: "whatsapp",
-    position: { x: 1080, y: 140 },
+    position: { x: 1340, y: 240 },
     data: {
       label: "WhatsApp éxito",
       description: "Mensaje cuando el pago fue confirmado.",
@@ -139,7 +150,7 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-failed",
     type: "whatsapp",
-    position: { x: 1080, y: 280 },
+    position: { x: 1340, y: 380 },
     data: {
       label: "WhatsApp pago fallido",
       description: "Mensaje cuando el pago falla.",
@@ -152,20 +163,20 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "whatsapp-pending",
     type: "whatsapp",
-    position: { x: 1080, y: 420 },
+    position: { x: 1340, y: 520 },
     data: {
       label: "WhatsApp pago pendiente",
       description: "Mensaje cuando el pago queda pendiente.",
       phoneNumber: "+593987654321",
       message:
-        "Tu pago está pendiente. Cuando PayPhone confirme la transacción, te avisaremos.",
+        "Tu pago está pendiente. Cuando confirmemos la transacción, te avisaremos.",
     },
   },
   // 9. WhatsApp error
   {
     id: "whatsapp-error",
     type: "whatsapp",
-    position: { x: 1080, y: 560 },
+    position: { x: 1340, y: 660 },
     data: {
       label: "WhatsApp error",
       description: "Mensaje cuando ocurre un error.",
@@ -178,7 +189,7 @@ const DEMO_NODES: FlowNode[] = [
   {
     id: "end",
     type: "end",
-    position: { x: 1340, y: 340 },
+    position: { x: 1600, y: 440 },
     data: {
       label: "Fin",
       description: "Finaliza el flujo.",
@@ -187,19 +198,22 @@ const DEMO_NODES: FlowNode[] = [
   },
 ];
 
-// ─── Edges (12 connections per spec) ──────────────────────────────────
+// ─── Edges ───────────────────────────────────────────────────────────
 
 const DEMO_EDGES: FlowEdge[] = [
-  { id: "e-start-whatsapp-initial", source: "start", target: "whatsapp-initial", sourceHandle: "out" },
-  { id: "e-whatsapp-initial-ai-agent", source: "whatsapp-initial", target: "ai-agent", sourceHandle: "out" },
-  { id: "e-ai-agent-create-payment", source: "ai-agent", target: "create-payment", sourceHandle: "out" },
+  { id: "e-start-whatsapp-received", source: "start", target: "whatsapp-received", sourceHandle: "out" },
+  { id: "e-whatsapp-received-ai-agent", source: "whatsapp-received", target: "ai-agent", sourceHandle: "out" },
+  // Agente IA bifurca: comprar (out) → crear pago, info (info) → whatsapp info
+  { id: "e-ai-agent-info", source: "ai-agent", target: "whatsapp-info", sourceHandle: "info" },
+  { id: "e-ai-agent-buy", source: "ai-agent", target: "create-payment", sourceHandle: "out" },
+  // WhatsApp info → Fin
+  { id: "e-whatsapp-info-end", source: "whatsapp-info", target: "end", sourceHandle: "out" },
+  // Rama de pago
   { id: "e-create-payment-payment-status", source: "create-payment", target: "payment-status", sourceHandle: "out" },
-  // Estado del pago → 4 salidas
   { id: "e-payment-status-success", source: "payment-status", target: "whatsapp-success", sourceHandle: "payment_success" },
   { id: "e-payment-status-failed", source: "payment-status", target: "whatsapp-failed", sourceHandle: "payment_failed" },
   { id: "e-payment-status-pending", source: "payment-status", target: "whatsapp-pending", sourceHandle: "payment_pending" },
   { id: "e-payment-status-error", source: "payment-status", target: "whatsapp-error", sourceHandle: "error" },
-  // WhatsApp → Fin
   { id: "e-whatsapp-success-end", source: "whatsapp-success", target: "end", sourceHandle: "out" },
   { id: "e-whatsapp-failed-end", source: "whatsapp-failed", target: "end", sourceHandle: "out" },
   { id: "e-whatsapp-pending-end", source: "whatsapp-pending", target: "end", sourceHandle: "out" },
