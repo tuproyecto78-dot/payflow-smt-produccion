@@ -735,12 +735,63 @@ export async function executeWorkflow(
             message: `Nodo ejecutado. Intención: "${intent}". Resultado: {{${outputVariable}}}="${aiContent.slice(0, 60)}${aiContent.length > 60 ? "…" : ""}" (${aiContent.length} caracteres)`,
             durationMs: Date.now() - startedAt,
           });
-          // Branch: "out" = buy intent, "info" = info/catalog only.
-          // Falls back to "out" if no "info" edge exists (backward compatible).
+          // ─── Branching by intent ─────────────────────────────────────
+          // The ai_agent has 3 handles: "out" (buy), "info" (catalog), "greeting".
+          //
+          // Routing rules:
+          //   - intent "buy"      → "out" (proceed to payment / order flow)
+          //   - intent "info"     → "info" edge if it exists, otherwise STOP
+          //                          (do NOT fall through to "out" — that would
+          //                           trigger payment/notice nodes incorrectly)
+          //   - intent "greeting" → "greeting" edge if it exists, otherwise STOP
+          //
+          // This prevents the classic bug where a client saying "Hola" or
+          // "¿Qué platos tienen?" triggers a payment or "new request" node
+          // that should only fire on real purchase intent.
           const hasInfoEdge = edges.some(
             (e) => e.source === node.id && (e.sourceHandle || null) === "info"
           );
-          nextHandle = intent === "buy" || !hasInfoEdge ? "out" : "info";
+          const hasGreetingEdge = edges.some(
+            (e) => e.source === node.id && (e.sourceHandle || null) === "greeting"
+          );
+          if (intent === "buy") {
+            nextHandle = "out";
+          } else if (intent === "info") {
+            if (hasInfoEdge) {
+              nextHandle = "info";
+            } else {
+              // No info branch configured — stop the flow so we don't
+              // accidentally trigger payment/notice nodes.
+              log(ctx, {
+                nodeId: node.id,
+                nodeType: node.type as NodeType,
+                nodeLabel: label,
+                status: "info",
+                message:
+                  "Intención de consulta detectada sin rama de catálogo configurada. El flujo se detiene para evitar disparar nodos de pago o aviso. Conecta el handle «Info / catálogo» del Agente IA a un nodo WhatsApp para responder consultas.",
+                durationMs: Date.now() - startedAt,
+              });
+              nextHandle = null;
+              shouldStop = true;
+            }
+          } else {
+            // greeting
+            if (hasGreetingEdge) {
+              nextHandle = "greeting";
+            } else {
+              log(ctx, {
+                nodeId: node.id,
+                nodeType: node.type as NodeType,
+                nodeLabel: label,
+                status: "info",
+                message:
+                  "Saludo detectado sin rama de saludo configurada. El flujo se detiene para evitar disparar nodos de pago o aviso. Conecta el handle «Saludo» del Agente IA a un nodo WhatsApp para responder saludos.",
+                durationMs: Date.now() - startedAt,
+              });
+              nextHandle = null;
+              shouldStop = true;
+            }
+          }
           break;
         }
 
