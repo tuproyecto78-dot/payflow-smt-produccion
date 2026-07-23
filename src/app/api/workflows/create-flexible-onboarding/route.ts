@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/auth/require-session";
 import { createServiceRoleClient } from "@/lib/supabase";
+import { withAuditClientId } from "@/lib/audit-metadata";
 import { getClientIP, sanitizeText, GENERIC_ERROR } from "@/lib/security";
 import { validateWorkflow } from "@/lib/workflow-validator";
 import { slugifyCatalog } from "@/lib/catalog-server";
@@ -126,12 +127,11 @@ async function insertAudit(input: {
 }) {
   const { error } = await input.supabase.from("audit_logs").insert({
     user_id: input.userId,
-    client_id: input.clientId,
     action: input.action,
     entity_type: input.entityType,
     entity_id: input.entityId,
     ip_address: input.ip,
-    metadata: input.metadata,
+    metadata: withAuditClientId(input.clientId, input.metadata),
   });
   if (error) console.error("[persistent-onboarding] audit", error.message);
 }
