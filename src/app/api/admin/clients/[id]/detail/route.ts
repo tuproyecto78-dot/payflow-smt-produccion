@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/auth/require-session";
 import { isInternalAccessRole } from "@/lib/auth/access-profile";
 import { createServiceRoleClient } from "@/lib/supabase";
+import { withAuditClientId } from "@/lib/audit-metadata";
 import { sanitizeText } from "@/lib/security";
 
 type Context = { params: Promise<{ id: string }> };
@@ -30,16 +31,28 @@ export async function GET(_request: Request, { params }: Context) {
     if (clientError) throw clientError;
     if (!client) return NextResponse.json({ error: "Cliente no encontrado." }, { status: 404 });
 
-    const [catalogResult, productsResult, historyResult] = await Promise.all([
+    const [catalogResult, productsResult, metadataHistory, entityHistory] = await Promise.all([
       supabase.from("catalogs").select("id,status,slug,description,currency").eq("client_id", id).maybeSingle(),
       supabase.from("catalog_products").select("id,name,description,sku,price,compare_at_price,currency,stock,track_inventory,active,updated_at").eq("client_id", id).order("updated_at", { ascending: false }).limit(500),
-      supabase.from("audit_logs").select("id,action,entity_type,entity_id,metadata,created_at").eq("client_id", id).order("created_at", { ascending: false }).limit(200),
+      supabase.from("audit_logs").select("id,action,entity_type,entity_id,metadata,created_at").contains("metadata", { client_id: id }).order("created_at", { ascending: false }).limit(200),
+      supabase.from("audit_logs").select("id,action,entity_type,entity_id,metadata,created_at").eq("entity_type", "client_account").eq("entity_id", id).order("created_at", { ascending: false }).limit(200),
     ]);
     if (catalogResult.error) throw catalogResult.error;
     if (productsResult.error) throw productsResult.error;
-    if (historyResult.error) throw historyResult.error;
+    if (metadataHistory.error) throw metadataHistory.error;
+    if (entityHistory.error) throw entityHistory.error;
 
-    const promotionEvent = (historyResult.data || []).find((entry) => entry.action === "catalog_promotions_updated" || entry.action === "onboarding_completed");
+    const historyById = new Map(
+      [...(metadataHistory.data || []), ...(entityHistory.data || [])]
+        .map((entry) => [String(entry.id), entry] as const)
+    );
+    const historyEntries = [...historyById.values()]
+      .sort((left, right) =>
+        String(right.created_at || "").localeCompare(String(left.created_at || ""))
+      )
+      .slice(0, 200);
+
+    const promotionEvent = historyEntries.find((entry) => entry.action === "catalog_promotions_updated" || entry.action === "onboarding_completed");
     const metadata = promotionEvent?.metadata && typeof promotionEvent.metadata === "object"
       ? promotionEvent.metadata as Record<string, unknown>
       : {};
@@ -85,7 +98,7 @@ export async function GET(_request: Request, { params }: Context) {
         updatedAt: String(product.updated_at || ""),
       })),
       promotions,
-      history: (historyResult.data || []).map((entry) => ({
+      history: historyEntries.map((entry) => ({
         id: String(entry.id),
         action: String(entry.action || ""),
         entityType: String(entry.entity_type || ""),
@@ -127,11 +140,12 @@ export async function PATCH(request: Request, { params }: Context) {
 
     await supabase.from("audit_logs").insert({
       user_id: auth.session.userId,
-      client_id: id,
       action: "client_profile_updated",
       entity_type: "client_account",
       entity_id: id,
-      metadata: { fields: Object.keys(patch).filter((field) => field !== "updated_at") },
+      metadata: withAuditClientId(id, {
+        fields: Object.keys(patch).filter((field) => field !== "updated_at"),
+      }),
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

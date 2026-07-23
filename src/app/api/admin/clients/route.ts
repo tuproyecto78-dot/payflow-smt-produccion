@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/auth/require-session";
 import { isInternalAccessRole } from "@/lib/auth/access-profile";
 import { createServiceRoleClient } from "@/lib/supabase";
+import { getAuditClientId, readAuditMetadata } from "@/lib/audit-metadata";
 import { rateLimit, getClientIP, RATE_LIMIT_ERROR } from "@/lib/security";
 
 export async function GET(req: Request) {
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
     const [catalogsResult, productsResult, auditResult] = await Promise.all([
       supabase.from("catalogs").select("id,client_id,status,slug").in("client_id", clientIds),
       supabase.from("catalog_products").select("id,client_id").in("client_id", clientIds),
-      supabase.from("audit_logs").select("id,client_id,action,created_at,metadata").in("client_id", clientIds).order("created_at", { ascending: false }).limit(1000),
+      supabase.from("audit_logs").select("id,action,entity_type,entity_id,created_at,metadata").order("created_at", { ascending: false }).limit(1000),
     ]);
     if (catalogsResult.error) throw catalogsResult.error;
     if (productsResult.error) throw productsResult.error;
@@ -45,14 +46,38 @@ export async function GET(req: Request) {
     }
     const lastActionByClient = new Map<string, { action: string; createdAt: string }>();
     const workflowCountByClient = new Map<string, number>();
+    const workflowClientById = new Map<string, string>();
+
     for (const entry of auditResult.data || []) {
-      const clientId = String(entry.client_id || "");
-      if (!clientId) continue;
+      const clientId = getAuditClientId(entry);
+      const metadata = readAuditMetadata(entry.metadata);
+      if (
+        clientId &&
+        entry.action === "onboarding_completed" &&
+        typeof metadata.workflow_id === "string"
+      ) {
+        workflowClientById.set(metadata.workflow_id, clientId);
+      }
+    }
+
+    for (const entry of auditResult.data || []) {
+      const clientId =
+        getAuditClientId(entry) ||
+        (entry.action === "workflow_created" && entry.entity_id
+          ? workflowClientById.get(String(entry.entity_id)) || null
+          : null);
+      if (!clientId || !clientIds.includes(clientId)) continue;
       if (!lastActionByClient.has(clientId)) {
-        lastActionByClient.set(clientId, { action: String(entry.action), createdAt: String(entry.created_at) });
+        lastActionByClient.set(clientId, {
+          action: String(entry.action),
+          createdAt: String(entry.created_at),
+        });
       }
       if (entry.action === "workflow_created") {
-        workflowCountByClient.set(clientId, (workflowCountByClient.get(clientId) || 0) + 1);
+        workflowCountByClient.set(
+          clientId,
+          (workflowCountByClient.get(clientId) || 0) + 1
+        );
       }
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/auth/require-session";
 import { isInternalAccessRole } from "@/lib/auth/access-profile";
 import { createServiceRoleClient } from "@/lib/supabase";
+import { withAuditClientId } from "@/lib/audit-metadata";
 import { sanitizeText } from "@/lib/security";
 
 type Context = { params: Promise<{ id: string }> };
@@ -67,17 +68,32 @@ export async function POST(request: Request, { params }: Context) {
     if (clientError) throw clientError;
     if (!client) return NextResponse.json({ error: "Cliente no encontrado." }, { status: 404 });
 
-    const { data: workflowEvents, error: eventError } = await supabase
-      .from("audit_logs")
-      .select("action,entity_id,metadata")
-      .eq("client_id", id)
-      .in("action", ["onboarding_completed", "workflow_created"])
-      .order("created_at", { ascending: false })
-      .limit(100);
-    if (eventError) throw eventError;
+    const [onboardingEvents, tenantEvents] = await Promise.all([
+      supabase
+        .from("audit_logs")
+        .select("action,entity_id,metadata")
+        .eq("action", "onboarding_completed")
+        .eq("entity_type", "client_account")
+        .eq("entity_id", id)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      supabase
+        .from("audit_logs")
+        .select("action,entity_id,metadata")
+        .eq("action", "workflow_created")
+        .contains("metadata", { client_id: id })
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ]);
+    if (onboardingEvents.error) throw onboardingEvents.error;
+    if (tenantEvents.error) throw tenantEvents.error;
+    const workflowEvents = [
+      ...(onboardingEvents.data || []),
+      ...(tenantEvents.data || []),
+    ];
 
     const workflowIds = new Set<string>();
-    for (const event of workflowEvents || []) {
+    for (const event of workflowEvents) {
       if (event.action === "workflow_created" && event.entity_id) {
         workflowIds.add(String(event.entity_id));
       }
@@ -111,15 +127,14 @@ export async function POST(request: Request, { params }: Context) {
 
     const { error: auditError } = await supabase.from("audit_logs").insert({
       user_id: session.userId,
-      client_id: id,
       action: "catalog_promotions_updated",
       entity_type: "client_account",
       entity_id: id,
-      metadata: {
+      metadata: withAuditClientId(id, {
         promotions,
         lines: promotions.split(/\r?\n/).filter((line) => line.trim()).length,
         workflows_updated: workflowsUpdated,
-      },
+      }),
     });
     if (auditError) throw auditError;
 
