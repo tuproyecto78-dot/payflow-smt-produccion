@@ -28,10 +28,10 @@
         "./src/components/dashboard/persistent-onboarding-wrapper"
       ],
       "@/components/editor/editor-view": [
-        "./src/components/editor/editor-view-openai"
+        "./src/components/editor/editor-view-gemini"
       ],
       "@/lib/engine": [
-        "./src/lib/engine-openai"
+        "./src/lib/engine-gemini"
       ],
       "@/lib/file-content-reader": [
         "./src/lib/file-content-reader-v2"
