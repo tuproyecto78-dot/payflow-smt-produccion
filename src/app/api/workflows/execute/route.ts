@@ -4,7 +4,8 @@ import {
   isDemoWorkflowId,
   getDemoWorkflowById,
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
-import { executeWorkflow } from "@/lib/engine";
+import { executeWorkflow, type AiDeliveryMode } from "@/lib/engine";
+import { createServiceRoleClient } from "@/lib/supabase";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
 import { validateWorkflow } from "@/lib/workflow-validator";
 
@@ -16,35 +17,89 @@ interface ExecuteBody {
   edges?: FlowEdge[];
   forcePaymentOutcome?: PaymentOutcome;
   questionResponses?: Record<string, string>;
-  // Message typed by the client in the WhatsApp simulator.
-  // When set, the first `whatsapp` node with an outputVariable uses it
-  // as the inbound client reply, so the AI agent receives it as input.
   clientMessage?: string;
+  aiMode?: AiDeliveryMode;
+}
+
+function normalizeAiMode(value: unknown): AiDeliveryMode {
+  if (value === "assisted" || value === "automatic") return value;
+  return "simulation";
+}
+
+async function resolveWorkflowClientId(input: {
+  workflowId: string;
+  sessionUserId: string;
+  sessionClientId: string | null;
+}): Promise<string | null> {
+  if (input.sessionClientId) return input.sessionClientId;
+  if (!input.workflowId || isDemoWorkflowId(input.workflowId)) return null;
+
+  const supabase = createServiceRoleClient();
+
+  // Primary link: workflow audit written by the persistent onboarding.
+  const { data: workflowAudit, error: auditError } = await supabase
+    .from("audit_logs")
+    .select("client_id")
+    .eq("entity_type", "workflow")
+    .eq("entity_id", input.workflowId)
+    .not("client_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (auditError) {
+    console.error("[workflow execute] audit client lookup failed", auditError.message);
+  }
+  if (workflowAudit?.client_id) return String(workflowAudit.client_id);
+
+  // Secondary link: onboarding_completed metadata contains the workflow id.
+  const { data: onboardingAudit, error: onboardingError } = await supabase
+    .from("audit_logs")
+    .select("client_id")
+    .eq("action", "onboarding_completed")
+    .contains("metadata", { workflow_id: input.workflowId })
+    .not("client_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (onboardingError) {
+    console.error("[workflow execute] onboarding client lookup failed", onboardingError.message);
+  }
+  if (onboardingAudit?.client_id) return String(onboardingAudit.client_id);
+
+  // Final safe fallback for older records: project name + owner must match a client.
+  const { data: workflow, error: workflowError } = await supabase
+    .from("workflows")
+    .select("project_id")
+    .eq("id", input.workflowId)
+    .maybeSingle();
+  if (workflowError || !workflow?.project_id) return null;
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("name, user_id")
+    .eq("id", workflow.project_id)
+    .eq("user_id", input.sessionUserId)
+    .maybeSingle();
+  if (projectError || !project?.name) return null;
+
+  const { data: client, error: clientError } = await supabase
+    .from("client_accounts")
+    .select("id")
+    .eq("owner_user_id", input.sessionUserId)
+    .ilike("business_name", String(project.name))
+    .limit(1)
+    .maybeSingle();
+  if (clientError) return null;
+  return client?.id ? String(client.id) : null;
 }
 
 /**
  * POST /api/workflows/execute
  *
- * Executes a workflow in Mock mode. Does NOT require DATABASE_URL or Prisma.
- *
- * Behavior:
- *   - If workflowId is the demo id, loads the demo flow from code.
- *   - If nodes/edges are provided in the body, uses those (unsaved changes).
- *   - Executes nodes in order following the edges.
- *   - Supports Mock payment outcomes (no real PayPhone call).
- *   - Does NOT require Z.ai API — AI agent uses mock fallback.
- *   - Returns execution logs + result.
- *
- * Response:
- *   {
- *     success: true,
- *     workflowId: string,
- *     status: "completed" | "failed",
- *     result: "payment_success" | "payment_failed" | "payment_pending" | "error",
- *     logs: Array<{ nodeId, nodeLabel, nodeType, status, message, durationMs }>,
- *     whatsappMessages: Array<{...}>,
- *     variables: Record<string, unknown>
- *   }
+ * - The regular Run button keeps the complete node-by-node simulator.
+ * - Messages typed in the WhatsApp simulator use OpenAI with the real catalog
+ *   scoped to the client linked to the workflow.
+ * - No real WhatsApp message is sent from this endpoint.
  */
 export async function POST(req: Request) {
   const session = await requireActiveSession();
@@ -62,18 +117,16 @@ export async function POST(req: Request) {
     // allow empty body
   }
 
-  const workflowId = body.workflowId || "";
+  const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
+  const aiMode = normalizeAiMode(body.aiMode);
 
-  // ─── Resolve nodes + edges ────────────────────────────────────────
   let nodes: FlowNode[] = [];
   let edges: FlowEdge[] = [];
 
-  // If body provides nodes/edges (unsaved editor state), use them.
   if (Array.isArray(body.nodes) && body.nodes.length > 0) {
     nodes = body.nodes;
     edges = Array.isArray(body.edges) ? body.edges : [];
   } else if (isDemoWorkflowId(workflowId)) {
-    // Load demo flow from code.
     const demo = getDemoWorkflowById(workflowId);
     if (demo) {
       nodes = demo.nodes;
@@ -100,16 +153,21 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Execute the workflow in Mock mode.
-    const result = await executeWorkflow(nodes, edges, {
-      clientId: session.clientId,
-      forcePaymentOutcome: body.forcePaymentOutcome,
-      questionResponses: body.questionResponses,
-      clientMessage: body.clientMessage,
+    const clientId = await resolveWorkflowClientId({
+      workflowId,
+      sessionUserId: session.userId,
+      sessionClientId: session.clientId,
     });
 
-    // Build a clean logs array for the UI (guard against undefined entries).
-    // Add timestamps if missing so the ExecutionLog component can format them.
+    const result = await executeWorkflow(nodes, edges, {
+      workflowId,
+      clientId,
+      aiMode,
+      forcePaymentOutcome: body.forcePaymentOutcome,
+      questionResponses: body.questionResponses,
+      clientMessage: typeof body.clientMessage === "string" ? body.clientMessage.slice(0, 4000) : undefined,
+    });
+
     const logs = Array.isArray(result?.entries)
       ? result.entries.map((entry) => ({
           nodeId: entry.nodeId,
@@ -122,15 +180,18 @@ export async function POST(req: Request) {
         }))
       : [];
 
-    // Determine the final payment result.
     const paymentOutcome =
       (result?.variables?.payment_outcome as string) ||
       (result?.variables?.payment_status as string) ||
       "unknown";
 
     return NextResponse.json({
-      success: true,
+      success: result?.status === "success",
       workflowId,
+      clientId,
+      aiMode,
+      requiresApproval: result?.variables?.ai_requires_approval === true,
+      suggestedResponse: result?.variables?.ai_response || null,
       status: result?.status === "success" ? "completed" : result?.status || "failed",
       result: paymentOutcome,
       logs,
@@ -138,7 +199,7 @@ export async function POST(req: Request) {
       variables: result?.variables || {},
       finalNode: result?.finalNode,
       error: result?.error,
-    });
+    }, { status: result?.status === "failed" ? 422 : 200 });
   } catch (err) {
     console.error("[/api/workflows/execute] error:", err);
     const message = err instanceof Error ? err.message : "Error interno al ejecutar el flujo.";
