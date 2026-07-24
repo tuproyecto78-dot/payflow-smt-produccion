@@ -16,6 +16,12 @@ import {
   type SimulatorCommerceResult,
   type SimulatorConversationState,
 } from "./simulator-commerce";
+import {
+  formatPaymentMethodAnswer,
+  isPaymentMethodMessage,
+  type SimulatorPaymentContext,
+} from "./simulator-payment";
+import { loadSimulatorPaymentContext } from "./simulator-payment-server";
 import type {
   ExecutionResult,
   FlowEdge,
@@ -53,6 +59,138 @@ function withoutInternalState(options: GeminiEngineOptions): GeminiEngineOptions
   return {
     ...options,
     questionResponses: Object.keys(responses).length ? responses : undefined,
+  };
+}
+
+function paymentResult(input: {
+  message: string;
+  mode: AiDeliveryMode;
+  context: SimulatorPaymentContext;
+}): ExecutionResult {
+  const started = nowIso();
+  const safeAnswer = sanitizeCustomerAnswer(
+    formatPaymentMethodAnswer(input.context),
+    input.context.businessName
+  );
+  const responseText =
+    input.mode === "assisted"
+      ? `📝 Sugerencia pendiente de aprobación:\n\n${safeAnswer}`
+      : safeAnswer;
+
+  const messages: WhatsAppSimMessage[] = [
+    {
+      id: `sim-in-${Date.now()}`,
+      direction: "inbound",
+      phone: "+593000000000",
+      text: input.message,
+      timestamp: started,
+      nodeId: "simulator-input",
+    },
+    {
+      id: `sim-out-${Date.now() + 1}`,
+      direction: "outbound",
+      phone: "+593000000000",
+      text: responseText,
+      timestamp: nowIso(),
+      nodeId: "simulator-response",
+    },
+  ];
+
+  const entries: LogEntry[] = [
+    entry({
+      nodeId: "payment-intent",
+      nodeType: "ai_agent",
+      nodeLabel: "Intención de pago",
+      status: "success",
+      message:
+        "Se priorizó la consulta de pago. No se consultó catálogo ni carrito.",
+    }),
+    entry({
+      nodeId: "payment-context",
+      nodeType: "ai_agent",
+      nodeLabel: "Configuración de pago",
+      status: "success",
+      message:
+        "Se consultó únicamente el método de pago configurado para el negocio.",
+    }),
+    entry({
+      nodeId: "simulator-response",
+      nodeType: "ai_agent",
+      nodeLabel: "Reglas de pago del negocio",
+      status: "success",
+      message: `Respuesta determinista · modo: ${input.mode}.`,
+    }),
+  ];
+
+  if (input.mode === "assisted") {
+    entries.push(
+      entry({
+        nodeId: "approval-gate",
+        nodeType: "end",
+        nodeLabel: "Aprobación requerida",
+        status: "info",
+        message:
+          "La respuesta quedó como sugerencia. No se envió por WhatsApp ni se ejecutó ningún cobro.",
+      })
+    );
+  }
+
+  return {
+    status: "success",
+    entries,
+    variables: {
+      user_response: input.message,
+      ai_response: safeAnswer,
+      ai_intent: "payment",
+      ai_provider: "business-rules",
+      ai_model: "simulator-payment-v1",
+      ai_mode: input.mode,
+      business_context_loaded: true,
+      payment_context_loaded: true,
+      business_name: input.context.businessName,
+      catalog_items_consulted: 0,
+      payments_executed: false,
+      whatsapp_sent: false,
+      ai_requires_approval: input.mode === "assisted",
+    },
+    whatsappMessages: messages,
+    finalNode: input.mode === "assisted" ? "approval-gate" : "simulator-response",
+  };
+}
+
+function paymentFailure(input: {
+  mode: AiDeliveryMode;
+  error: unknown;
+}): ExecutionResult {
+  const detail =
+    input.error instanceof Error
+      ? input.error.message
+      : "No se pudo cargar la configuración de pago.";
+  const safeMessage =
+    "No pudimos consultar la forma de pago en este momento. Inténtalo nuevamente.";
+
+  return {
+    status: "failed",
+    entries: [
+      entry({
+        nodeId: "payment-context",
+        nodeType: "ai_agent",
+        nodeLabel: "Configuración de pago",
+        status: "error",
+        message: detail,
+      }),
+    ],
+    variables: {
+      ai_mode: input.mode,
+      ai_intent: "payment",
+      payment_context_loaded: false,
+      catalog_items_consulted: 0,
+      payments_executed: false,
+      whatsapp_sent: false,
+    },
+    whatsappMessages: [],
+    finalNode: "payment-context",
+    error: safeMessage,
   };
 }
 
@@ -214,6 +352,20 @@ export async function executeWorkflow(
     !options.clientId
   ) {
     return executeGeminiWorkflow(nodes, edges, cleanOptions);
+  }
+
+  // Payment-method questions have absolute priority over product matching.
+  // This path reads only client_accounts payment configuration: no catalog,
+  // promotions, cart mutation, WhatsApp delivery or real payment execution.
+  if (isPaymentMethodMessage(message)) {
+    try {
+      const context = await loadSimulatorPaymentContext({
+        clientId: options.clientId,
+      });
+      return paymentResult({ message, mode, context });
+    } catch (error) {
+      return paymentFailure({ mode, error });
+    }
   }
 
   const rawState = readSimulatorState(options);
