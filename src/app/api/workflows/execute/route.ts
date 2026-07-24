@@ -6,6 +6,13 @@ import {
 } from "@/lib/workflows/demo-whatsapp-ai-payment-flow";
 import { executeWorkflow, type AiDeliveryMode } from "@/lib/engine";
 import { createServiceRoleClient } from "@/lib/supabase";
+import { getClientIP } from "@/lib/security";
+import {
+  loadSimulatorSessionState,
+  normalizeSimulatorSessionId,
+  recordSimulatorSessionTurn,
+  SIMULATOR_STATE_KEY,
+} from "@/lib/simulator-session-memory-server";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
 import { validateWorkflow } from "@/lib/workflow-validator";
 
@@ -19,6 +26,7 @@ interface ExecuteBody {
   questionResponses?: Record<string, string>;
   clientMessage?: string;
   aiMode?: AiDeliveryMode;
+  simulatorSessionId?: string;
 }
 
 function normalizeAiMode(value: unknown): AiDeliveryMode {
@@ -113,9 +121,9 @@ async function resolveWorkflowClientId(input: {
  * POST /api/workflows/execute
  *
  * - The regular Run button keeps the complete node-by-node simulator.
- * - Every typed simulator message resolves the business tenant first.
- * - The engine loads identity, business type, catalog, promotions and rules
- *   before producing a deterministic response or calling Gemini.
+ * - Typed simulator messages restore their tenant-scoped conversation memory.
+ * - The engine loads business context before classification and response.
+ * - Every successful simulator turn is recorded in audit_logs by session.
  * - No real WhatsApp message or payment is executed from this endpoint.
  */
 export async function POST(req: Request) {
@@ -127,6 +135,7 @@ export async function POST(req: Request) {
     );
   }
 
+  const ip = getClientIP(req);
   let body: ExecuteBody = {};
   try {
     body = await req.json();
@@ -136,6 +145,7 @@ export async function POST(req: Request) {
 
   const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
   const aiMode = normalizeAiMode(body.aiMode);
+  const simulatorSessionId = normalizeSimulatorSessionId(body.simulatorSessionId);
 
   let nodes: FlowNode[] = [];
   let edges: FlowEdge[] = [];
@@ -175,8 +185,6 @@ export async function POST(req: Request) {
         ? body.clientMessage.slice(0, 4000)
         : undefined;
 
-    // Structural rule: all real simulator conversations require a tenant.
-    // The regular node-run path keeps the previous session fallback behavior.
     const clientId =
       session.clientId ||
       (clientMessage || workflowId
@@ -187,14 +195,58 @@ export async function POST(req: Request) {
           })
         : null);
 
+    const questionResponses: Record<string, string> = {
+      ...(body.questionResponses || {}),
+    };
+    let memoryRestored = false;
+
+    if (
+      clientMessage &&
+      clientId &&
+      workflowId &&
+      simulatorSessionId
+    ) {
+      const persistedState = await loadSimulatorSessionState({
+        userId: session.userId,
+        clientId,
+        workflowId,
+        sessionId: simulatorSessionId,
+      });
+      if (persistedState) {
+        questionResponses[SIMULATOR_STATE_KEY] = JSON.stringify(persistedState);
+        memoryRestored = true;
+      }
+    }
+
     const result = await executeWorkflow(nodes, edges, {
       workflowId,
       clientId,
       aiMode,
       forcePaymentOutcome: body.forcePaymentOutcome,
-      questionResponses: body.questionResponses,
+      questionResponses,
       clientMessage,
     });
+
+    if (
+      clientMessage &&
+      clientId &&
+      workflowId &&
+      simulatorSessionId &&
+      result?.variables?.simulator_state &&
+      typeof result.variables.simulator_state === "object"
+    ) {
+      await recordSimulatorSessionTurn({
+        userId: session.userId,
+        clientId,
+        workflowId,
+        sessionId: simulatorSessionId,
+        customerMessage: clientMessage,
+        businessAnswer: String(result.variables.ai_response || ""),
+        intent: String(result.variables.ai_intent || "general_inquiry"),
+        state: result.variables.simulator_state,
+        ipAddress: ip,
+      });
+    }
 
     const logs = Array.isArray(result?.entries)
       ? result.entries.map((entry) => ({
@@ -219,6 +271,8 @@ export async function POST(req: Request) {
         workflowId,
         clientId,
         aiMode,
+        simulatorSessionId,
+        memoryRestored,
         requiresApproval: result?.variables?.ai_requires_approval === true,
         suggestedResponse: result?.variables?.ai_response || null,
         status:

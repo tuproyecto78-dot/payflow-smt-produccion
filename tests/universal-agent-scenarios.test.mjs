@@ -11,6 +11,12 @@ import {
   composeUniversalSafeAnswer,
   resolveUniversalPlannerDecision,
 } from "../src/lib/universal-intent-engine.ts";
+import {
+  classifyUniversalSessionIntent,
+  composeUniversalSessionAnswer,
+  normalizeUniversalSessionState,
+  transitionUniversalSessionMemory,
+} from "../src/lib/universal-session-memory.ts";
 
 const context = {
   clientId: "client-any-business",
@@ -240,4 +246,202 @@ test("unregistered promotions and payments are communicated without invention", 
   });
   assert.match(paymentText, /no tenemos formas de pago registradas/i);
   assert.doesNotMatch(paymentText, /sí aceptamos/i);
+});
+
+const memoryContext = {
+  ...context,
+  offerings: [
+    {
+      key: "product:hamburguesa-bbq",
+      kind: "product",
+      name: "Hamburguesa BBQ",
+      description: "Carne, queso y salsa BBQ",
+      price: 6.5,
+      currency: "USD",
+      category: "Hamburguesas",
+      available: true,
+    },
+    {
+      key: "product:hamburguesa-clasica",
+      kind: "product",
+      name: "Hamburguesa Clásica",
+      description: "Carne, queso y vegetales",
+      price: 5,
+      currency: "USD",
+      category: "Hamburguesas",
+      available: true,
+    },
+    {
+      key: "product:hamburguesa-doble",
+      kind: "product",
+      name: "Hamburguesa Doble",
+      description: "Doble carne y queso",
+      price: 7.5,
+      currency: "USD",
+      category: "Hamburguesas",
+      available: true,
+    },
+    {
+      key: "product:hamburguesa-vegana",
+      kind: "product",
+      name: "Hamburguesa Vegana",
+      description: "Proteína vegetal",
+      price: 6,
+      currency: "USD",
+      category: "Hamburguesas",
+      available: true,
+    },
+  ],
+};
+
+test("session memory preserves list order and resolves option 3", () => {
+  let state = normalizeUniversalSessionState(null, memoryContext);
+  const category = classifyUniversalSessionIntent({
+    message: "hamburguesas",
+    context: memoryContext,
+    state,
+  });
+
+  assert.equal(category.selection.offeringKeys.length, 4);
+  const list = composeUniversalSessionAnswer({
+    message: "hamburguesas",
+    decision: category,
+    context: memoryContext,
+    state,
+  });
+  assert.match(list, /1\. Hamburguesa BBQ/);
+  assert.match(list, /3\. Hamburguesa Doble/);
+
+  state = transitionUniversalSessionMemory({
+    state,
+    decision: category,
+    context: memoryContext,
+  });
+
+  const selection = classifyUniversalSessionIntent({
+    message: "3",
+    context: memoryContext,
+    state,
+  });
+  assert.equal(selection.intent, "select_presented_option");
+  assert.deepEqual(selection.selection.offeringKeys, [
+    "product:hamburguesa-doble",
+  ]);
+
+  state = transitionUniversalSessionMemory({
+    state,
+    decision: selection,
+    context: memoryContext,
+  });
+  assert.equal(
+    state.sessionMemory.pendingOfferingKey,
+    "product:hamburguesa-doble"
+  );
+});
+
+test("the next number becomes quantity and totals are accumulated", () => {
+  let state = normalizeUniversalSessionState(
+    {
+      sessionMemory: {
+        lastPresentedOfferingKeys: [
+          "product:hamburguesa-bbq",
+          "product:hamburguesa-clasica",
+          "product:hamburguesa-doble",
+          "product:hamburguesa-vegana",
+        ],
+        pendingOfferingKey: "product:hamburguesa-doble",
+        intentCounts: {},
+        lastSelectionIndex: 3,
+      },
+    },
+    memoryContext
+  );
+
+  const quantity = classifyUniversalSessionIntent({
+    message: "2",
+    context: memoryContext,
+    state,
+  });
+  assert.equal(quantity.intent, "add_to_cart");
+  assert.deepEqual(quantity.cartActions, [
+    {
+      type: "add",
+      offeringKey: "product:hamburguesa-doble",
+      quantity: 2,
+    },
+  ]);
+
+  const applied = applyUniversalCartActions({
+    state,
+    decision: quantity,
+    context: memoryContext,
+  });
+  state = transitionUniversalSessionMemory({
+    state: applied.state,
+    decision: quantity,
+    context: memoryContext,
+  });
+
+  const addAnswer = composeUniversalSessionAnswer({
+    message: "2",
+    decision: quantity,
+    context: memoryContext,
+    state,
+  });
+  assert.match(addAnswer, /Subtotal: 15\.00 USD/);
+  assert.match(addAnswer, /Total temporal: 15\.00 USD/);
+
+  const total = classifyUniversalSessionIntent({
+    message: "cuánto pago",
+    context: memoryContext,
+    state,
+  });
+  const totalAnswer = composeUniversalSessionAnswer({
+    message: "cuánto pago",
+    decision: total,
+    context: memoryContext,
+    state,
+  });
+  assert.match(totalAnswer, /15\.00 USD/);
+
+  const reset = classifyUniversalSessionIntent({
+    message: "nuevo pedido",
+    context: memoryContext,
+    state,
+  });
+  const cleared = applyUniversalCartActions({
+    state,
+    decision: reset,
+    context: memoryContext,
+  });
+  state = transitionUniversalSessionMemory({
+    state: cleared.state,
+    decision: reset,
+    context: memoryContext,
+  });
+  assert.equal(state.cart.length, 0);
+  assert.equal(state.sessionMemory.pendingOfferingKey, null);
+  assert.deepEqual(state.sessionMemory.lastPresentedOfferingKeys, []);
+});
+
+test("an out-of-range number never adds a random product", () => {
+  const state = normalizeUniversalSessionState(
+    {
+      sessionMemory: {
+        lastPresentedOfferingKeys: [
+          "product:hamburguesa-bbq",
+          "product:hamburguesa-clasica",
+        ],
+      },
+    },
+    memoryContext
+  );
+  const selection = classifyUniversalSessionIntent({
+    message: "3",
+    context: memoryContext,
+    state,
+  });
+  assert.equal(selection.intent, "clarification");
+  assert.equal(selection.cartActions.length, 0);
+  assert.match(selection.clarificationQuestion, /del 1 al 2/);
 });

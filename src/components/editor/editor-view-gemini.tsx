@@ -6,6 +6,8 @@ import type { WorkflowSummary } from "@/stores/app-store";
 
 type AiDeliveryMode = "simulation" | "assisted" | "automatic";
 const STATE_KEY = "__payflow_simulator_state";
+const SESSION_PREFIX = "payflow-simulator-session:";
+const STATE_PREFIX = "payflow-simulator-state:";
 
 function safeObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -13,12 +15,39 @@ function safeObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function createSessionId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `sim_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+}
+
 export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
   const [mode, setMode] = useState<AiDeliveryMode>("simulation");
   const simulatorStateRef = useRef<unknown>(null);
+  const simulatorSessionIdRef = useRef<string>("");
 
   useEffect(() => {
-    simulatorStateRef.current = null;
+    const sessionKey = `${SESSION_PREFIX}${workflow.id}`;
+    const stateKey = `${STATE_PREFIX}${workflow.id}`;
+    const storedSession = window.localStorage.getItem(sessionKey)?.trim();
+    const sessionId = storedSession || createSessionId();
+
+    simulatorSessionIdRef.current = sessionId;
+    if (!storedSession) window.localStorage.setItem(sessionKey, sessionId);
+
+    const storedState = window.localStorage.getItem(stateKey);
+    if (!storedState) {
+      simulatorStateRef.current = null;
+      return;
+    }
+
+    try {
+      simulatorStateRef.current = JSON.parse(storedState);
+    } catch {
+      simulatorStateRef.current = null;
+      window.localStorage.removeItem(stateKey);
+    }
   }, [workflow.id]);
 
   useEffect(() => {
@@ -42,7 +71,16 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
 
         body.aiMode = mode;
         if (typeof body.clientMessage === "string") {
+          if (!simulatorSessionIdRef.current) {
+            simulatorSessionIdRef.current = createSessionId();
+            window.localStorage.setItem(
+              `${SESSION_PREFIX}${workflow.id}`,
+              simulatorSessionIdRef.current
+            );
+          }
+
           const questionResponses = safeObject(body.questionResponses);
+          body.simulatorSessionId = simulatorSessionIdRef.current;
           body.questionResponses = {
             ...questionResponses,
             [STATE_KEY]: JSON.stringify(simulatorStateRef.current),
@@ -59,9 +97,13 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
           const variables = safeObject(payload.variables);
           if (Object.prototype.hasOwnProperty.call(variables, "simulator_state")) {
             simulatorStateRef.current = variables.simulator_state;
+            window.localStorage.setItem(
+              `${STATE_PREFIX}${workflow.id}`,
+              JSON.stringify(variables.simulator_state)
+            );
           }
         } catch {
-          // Keep the last valid temporary state if the response has no JSON body.
+          // Keep the last valid session state if the response has no JSON body.
         }
 
         return response;
@@ -74,7 +116,7 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
     return () => {
       if (window.fetch === patchedFetch) window.fetch = originalFetch;
     };
-  }, [mode]);
+  }, [mode, workflow.id]);
 
   return (
     <div className="relative h-full min-h-0">
