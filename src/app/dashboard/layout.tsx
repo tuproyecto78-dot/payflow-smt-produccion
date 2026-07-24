@@ -23,6 +23,7 @@ import {
   Package,
   ShoppingBag,
   PhoneCall,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FlowAssistantPanel, type AISuggestion } from "@/components/dashboard/flow-assistant-panel";
@@ -37,6 +38,7 @@ const NAV_ITEMS = [
   { key: "flujos", label: "Flujos", href: "/dashboard/flujos", icon: Workflow, adminOnly: false },
   { key: "ejecuciones", label: "Ejecuciones", href: "/dashboard/ejecuciones", icon: History, adminOnly: false },
   { key: "catalogo", label: "Catálogo", href: "/dashboard/catalogo", icon: Package, adminOnly: false },
+  { key: "conocimiento", label: "Conocimiento", href: "/dashboard/conocimiento", icon: BookOpen, adminOnly: false },
   { key: "pedidos", label: "Pedidos", href: "/dashboard/pedidos", icon: ShoppingBag, adminOnly: false },
   { key: "llamadas", label: "Llamadas y WhatsApp", href: "/dashboard/llamadas", icon: PhoneCall, adminOnly: false },
   { key: "nuevos-clientes", label: "Nuevos clientes", href: "/dashboard/nuevos-clientes", icon: UserPlus, adminOnly: true },

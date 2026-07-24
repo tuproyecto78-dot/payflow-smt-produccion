@@ -254,3 +254,78 @@ model AuditLog {
   @@index([createdAt])
   @@index([entityType, entityId])
 }
+
+// ─── Knowledge Center (por negocio) ───────────────────────────────────
+// Centro de conocimiento por negocio: FAQs manuales + archivos + extracción
+// estructurada. Usado por el Agente IA Universal para responder consultas
+// con datos reales del negocio. Prioriza datos estructurados sobre documentos.
+
+model KnowledgeBase {
+  id          String   @id @default(cuid())
+  // "Negocio" = clientId (cada negocio tiene su base). Para el demo sin DB,
+  // se usa "demo-business" como businessId.
+  businessId  String   @default("demo-business")
+  name        String   @default("Base de conocimiento")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  faqs        KnowledgeFaq[]
+  documents   KnowledgeDocument[]
+  products    KnowledgeProduct[]
+
+  @@unique([businessId])
+  @@index([businessId])
+}
+
+model KnowledgeFaq {
+  id              String   @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  question        String
+  answer          String
+  category        String   @default("general")
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([knowledgeBaseId])
+  @@index([active])
+}
+
+model KnowledgeDocument {
+  id              String   @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  name            String
+  type            String   @default("text") // text | file
+  content         String   @default("")   // texto extraído o pegado manualmente
+  originalFileName String?
+  mimeType        String?
+  // Extracción estructurada (JSON): { products: [...], hours: {...}, policies: [...] }
+  structuredData  String   @default("{}")
+  extractionStatus String  @default("pending") // pending | extracted | failed
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([knowledgeBaseId])
+  @@index([active])
+}
+
+model KnowledgeProduct {
+  id              String   @id @default(cuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  name            String
+  description     String   @default("")
+  price           Float    @default(0)
+  currency        String   @default("USD")
+  category        String   @default("general")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([knowledgeBaseId])
+  @@index([active])
+}

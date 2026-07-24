@@ -10,7 +10,11 @@ import type {
   WhatsAppSimMessage,
 } from "@/lib/workflow-types";
 import { compareValues, resolveTemplate } from "@/lib/workflow-types";
-import { createServiceRoleClient } from "@/lib/supabase";
+import {
+  getKnowledgeContext,
+  findRelevantKnowledge,
+  type KnowledgeContext,
+} from "@/lib/knowledge-center";
 
 interface EngineOptions {
   // Tenant scope for catalog/order actions. Never take this from node data.
@@ -597,27 +601,39 @@ export async function executeWorkflow(
           const clientText = String(inputText ?? "").toLowerCase();
           const intent = detectIntent(clientText);
 
-          // Build a system prompt that includes the demo catalog so the IA
-          // (real or mock) can answer questions about products and prices.
-          const catalogContext = buildCatalogContext();
-          const fullSystemPrompt = `${systemPrompt}\n\n${catalogContext}`;
+          // ─── Knowledge Center integration ────────────────────────────
+          // Load the knowledge base for the business (products, FAQs, docs).
+          // Priority: structured data (products, FAQs) over documents.
+          // The Agente IA Universal uses this to answer with REAL data and
+          // NEVER invents — if no knowledge matches, it says so.
+          const knowledge = await getKnowledgeContext("demo-business");
+          const fullSystemPrompt = `${systemPrompt}\n\n${knowledge.systemPromptSection}`;
 
           if (providerName === "mock") {
-            // Mock provider — produce a contextual response based on intent
-            // and the demo catalog (no external call, works offline).
-            aiContent = buildMockResponse(intent, clientText);
+            // Mock provider — use the Knowledge Center to answer.
+            // 1. Try to find a relevant FAQ or catalog match.
+            const relevant = findRelevantKnowledge(
+              knowledge,
+              String(inputText ?? "")
+            );
+            if (relevant && relevant.type !== "none") {
+              aiContent = relevant.content;
+            } else {
+              // 2. No structured match — respond based on intent with knowledge.
+              aiContent = buildMockResponse(intent, clientText, knowledge);
+            }
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "info",
-              message: `AI_PROVIDER=mock. Intención detectada: "${intent}". Respuesta contextual generada con catálogo demo (sin IA real).`,
+              message: `Knowledge Center: ${knowledge.products.length} productos, ${knowledge.faqs.length} FAQs, ${knowledge.documents.length} documentos. Intención: "${intent}". Respuesta con datos del negocio.`,
               durationMs: Date.now() - startedAt,
             });
           } else if (!apiKey) {
             // Missing API key for the selected provider.
             const keyName = providerName === "openrouter" ? "OPENROUTER_API_KEY" : "ZAI_API_KEY";
-            aiContent = buildMockResponse(intent, clientText);
+            aiContent = buildMockResponse(intent, clientText, knowledge);
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
@@ -677,7 +693,7 @@ export async function executeWorkflow(
                   shortMsg = `Falló ${providerName} (HTTP ${res.status}).`;
                 }
 
-                aiContent = buildMockResponse(intent, clientText);
+                aiContent = buildMockResponse(intent, clientText, knowledge);
                 log(ctx, {
                   nodeId: node.id,
                   nodeType: node.type as NodeType,
@@ -688,7 +704,7 @@ export async function executeWorkflow(
                 });
               } else {
                 const data = await res.json();
-                aiContent = data?.choices?.[0]?.message?.content || buildMockResponse(intent, clientText);
+                aiContent = data?.choices?.[0]?.message?.content || buildMockResponse(intent, clientText, knowledge);
 
                 console.log(`[engine] ${providerName} success:`, {
                   provider: providerName,
@@ -701,7 +717,7 @@ export async function executeWorkflow(
             } catch (err) {
               console.error(`[engine] ${providerName} fetch failed:`, err instanceof Error ? err.message : String(err));
               // Network error — use mock fallback so the flow continues.
-              aiContent = buildMockResponse(intent, clientText);
+              aiContent = buildMockResponse(intent, clientText, knowledge);
               log(ctx, {
                 nodeId: node.id,
                 nodeType: node.type as NodeType,
@@ -968,21 +984,6 @@ export async function executeWorkflow(
 export type AiIntent = "buy" | "info" | "greeting";
 
 /**
- * Demo catalog embedded in code so the simulator can answer product/pricing
- * questions without a database. Real deployments can override this by
- * configuring a real AI provider (the catalog context is injected into the
- * system prompt so the IA can use the business's actual catalog).
- */
-const DEMO_CATALOG = [
-  { name: "Almuerzo del día", description: "Sopa, segundo y jugo natural.", price: 3.5, currency: "USD" },
-  { name: "Hamburguesa clásica", description: "Carne 150g, queso, lechuga, tomate y papas.", price: 5.0, currency: "USD" },
-  { name: "Pollo a la plancha", description: "Pechuga a la plancha con ensalada y arroz.", price: 6.5, currency: "USD" },
-  { name: "Ensalada César", description: "Lechuga, pollo, crutones, parmesano y aderezo César.", price: 4.5, currency: "USD" },
-  { name: "Lasaña de carne", description: "Capas de pasta, carne boloñesa y queso gratinado.", price: 5.5, currency: "USD" },
-  { name: "Jugo natural", description: "Naranja, maracuyá o mora. 350ml.", price: 1.5, currency: "USD" },
-];
-
-/**
  * Detect the client's intent from their message.
  * - "buy": explicit purchase intent (quiero comprar, pagar, llevar, pedir, cuánto cuesta + producto)
  * - "info": questions about products, prices, menu, hours, location
@@ -1028,14 +1029,6 @@ function detectIntent(text: string): AiIntent {
   return "info";
 }
 
-/** Build a catalog context string to inject into the system prompt. */
-function buildCatalogContext(): string {
-  const lines = DEMO_CATALOG.map(
-    (p) => `- ${p.name}: ${p.description} · ${p.price.toFixed(2)} ${p.currency}`
-  ).join("\n");
-  return `Catálogo del negocio (usa esta información para responder):\n${lines}`;
-}
-
 /**
  * Build a contextual mock response based on the detected intent.
  * This replaces the old "Confirmo que deseas continuar con el pago."
@@ -1043,19 +1036,39 @@ function buildCatalogContext(): string {
  *
  * For "info" intent, ALWAYS responds with the full catalog (products +
  * prices + descriptions) so the client gets a real answer.
+ *
+ * Uses the KnowledgeContext to answer with REAL business data. NUNCA inventa.
  */
-function buildMockResponse(intent: AiIntent, clientText: string): string {
+function buildMockResponse(
+  intent: AiIntent,
+  clientText: string,
+  knowledge: KnowledgeContext
+): string {
+  const businessName = knowledge.businessName || "el negocio";
   if (intent === "greeting") {
-    return "¡Hola! 👋 Bienvenido. Puedo ayudarte con nuestro menú, precios o tomar tu pedido. ¿Qué deseas saber?";
+    return `¡Hola! 👋 Bienvenido a ${businessName}. Puedo ayudarte con nuestro menú, precios o tomar tu pedido. ¿Qué deseas saber?`;
   }
   if (intent === "info") {
-    // Always respond with the full catalog when the client asks for info.
-    const catalogLines = DEMO_CATALOG.map(
-      (p) => `• ${p.name} — ${p.price.toFixed(2)} ${p.currency}\n   ${p.description}`
-    ).join("\n");
-    return `📋 *Nuestro menú de hoy:*\n\n${catalogLines}\n\n¿Te gustaría realizar un pedido? Dime "quiero pedir" y lo gestiono enseguida. 🛒`;
+    // Respond with the REAL catalog from the knowledge base.
+    if (knowledge.products.length === 0) {
+      return `Por el momento no tengo productos cargados en el catálogo. Contáctanos directamente para más información. 📞`;
+    }
+    const byCategory = new Map<string, typeof knowledge.products>();
+    for (const p of knowledge.products) {
+      if (!byCategory.has(p.category)) byCategory.set(p.category, []);
+      byCategory.get(p.category)!.push(p);
+    }
+    const lines: string[] = [`📋 *Menú de ${businessName}:*`];
+    for (const [cat, items] of byCategory) {
+      lines.push(`\n*${cat}*`);
+      for (const p of items) {
+        lines.push(`• ${p.name} — ${p.price.toFixed(2)} ${p.currency}`);
+      }
+    }
+    lines.push(`\n¿Te gustaría realizar un pedido? Dime "quiero pedir" y lo gestiono enseguida. 🛒`);
+    return lines.join("\n");
   }
   // buy intent — confirm the purchase intent and hand off to payment.
-  return `¡Perfecto! 🛒 Para procesar tu pedido, te generaré un link seguro de pago. Cuando lo completes, confirmaremos tu transacción.`;
+  return `¡Perfecto! 🛒 Para procesar tu pedido en ${businessName}, te generaré un link seguro de pago. Cuando lo completes, confirmaremos tu transacción.`;
 }
 
