@@ -133,7 +133,8 @@ export function sanitizeCustomerAnswer(
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  return truncateWhatsAppText(safeLines, maxChars);
+  const effectiveLimit = /^CATÁLOGO COMPLETO:/i.test(safeLines) ? null : maxChars;
+  return truncateWhatsAppText(safeLines, effectiveLimit);
 }
 
 function formatProductLine(product: BusinessProduct): string {
@@ -180,7 +181,7 @@ export function formatBusinessCatalog(
   const complete = options.complete === true;
   const selected = complete ? products : products.slice(0, PRODUCT_PREVIEW_LIMIT);
   const title = complete
-    ? `Catálogo completo de ${context.businessName}:`
+    ? `CATÁLOGO COMPLETO: ${context.businessName}`
     : `Estas son algunas opciones de ${context.businessName}:`;
   const closing = complete
     ? "¿Cuál te interesa?"
@@ -247,6 +248,16 @@ function paymentRuleForInstructions(context: BusinessContext): string {
   return "El negocio no tiene pagos en línea habilitados. No ofrezcas ni simules cobros.";
 }
 
+function intentRuleForInstructions(intent: BusinessIntent): string {
+  if (intent === "catalog_full") {
+    return 'Comienza exactamente con "CATÁLOGO COMPLETO:" y muestra todos los productos autorizados, sin omitir ni inventar.';
+  }
+  if (intent === "recommendation") {
+    return "Selecciona entre tres y cinco productos reales del catálogo y termina con una pregunta sobre preferencia o presupuesto.";
+  }
+  return "Termina con una sola pregunta útil cuando ayude a continuar la venta.";
+}
+
 export function buildBusinessSystemInstructions(
   context: BusinessContext,
   intent: BusinessIntent,
@@ -271,6 +282,7 @@ export function buildBusinessSystemInstructions(
     "No envíes mensajes reales, no ejecutes cobros y no confirmes pagos en el simulador.",
     paymentRuleForInstructions(context),
     `Intención detectada: ${intent}.`,
+    intentRuleForInstructions(intent),
     `Modo actual: ${mode}. En modo asistido la respuesta queda pendiente de aprobación.`,
     "IDENTIDAD DEL NEGOCIO",
     `Nombre: ${context.businessName}`,
