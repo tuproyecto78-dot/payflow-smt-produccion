@@ -1,6 +1,8 @@
 export type SimulatorIntent =
   | "greeting"
   | "catalog"
+  | "catalog_full"
+  | "recommendation"
   | "promotion"
   | "payment"
   | "buy"
@@ -21,8 +23,35 @@ export type SimulatorCatalogItem = {
   category?: string;
 };
 
+const FULL_CATALOG_TERMS = [
+  "catalogo completo",
+  "menu completo",
+  "carta completa",
+  "todos los productos",
+  "todas las opciones",
+  "todo el catalogo",
+  "todo el menu",
+  "toda la carta",
+  "muestrame todo",
+  "ver todo",
+];
+
+const RECOMMENDATION_TERMS = [
+  "recomienda",
+  "recomendacion",
+  "recomendaciones",
+  "que me recomiendas",
+  "que recomiendan",
+  "sugerencia",
+  "sugerencias",
+  "que me sugieres",
+  "mejor opcion",
+  "opciones recomendadas",
+  "que deberia elegir",
+  "que puedo pedir",
+];
+
 const PROMOTION_TERMS = [
-  "promoción",
   "promocion",
   "promociones",
   "descuento",
@@ -31,38 +60,17 @@ const PROMOTION_TERMS = [
   "ofertas",
 ];
 
-const CATALOG_TERMS = [
-  "menú",
-  "menu",
-  "carta",
-  "plato",
-  "platos",
-  "producto",
-  "productos",
-  "precio",
-  "precios",
-  "qué tienen",
-  "que tienen",
-  "qué hay",
-  "que hay",
-  "disponible",
-  "disponibles",
-];
-
 const PAYMENT_TERMS = [
   "pago",
   "pagos",
   "formas de pago",
   "forma de pago",
-  "método de pago",
   "metodo de pago",
-  "métodos de pago",
   "metodos de pago",
   "aceptan tarjeta",
   "tarjeta",
   "transferencia",
   "link de pago",
-  "cómo pago",
   "como pago",
 ];
 
@@ -76,26 +84,55 @@ const BUY_TERMS = [
   "deseo comprar",
 ];
 
+const CATALOG_TERMS = [
+  "catalogo",
+  "menu",
+  "carta",
+  "plato",
+  "platos",
+  "producto",
+  "productos",
+  "precio",
+  "precios",
+  "que tienen",
+  "que hay",
+  "disponible",
+  "disponibles",
+];
+
 const GREETINGS = [
   "hola",
   "buenas",
-  "buenos días",
   "buenos dias",
   "buenas tardes",
   "buenas noches",
   "saludos",
 ];
 
+function normalizeIntentText(value: string): string {
+  return value
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[¿?¡!.,;:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function detectSimulatorIntent(message: string): SimulatorIntent {
-  const text = message.toLocaleLowerCase("es").trim();
+  const text = normalizeIntentText(message);
   if (!text) return "greeting";
 
-  // Specific business-data intents take precedence so a mixed message such as
-  // “Hola, ¿qué platos tienen?” still uses the real catalog.
+  // The most specific commercial intents must win over generic words such as
+  // “producto” or “plato”.
+  if (FULL_CATALOG_TERMS.some((term) => text.includes(term))) return "catalog_full";
+  if (RECOMMENDATION_TERMS.some((term) => text.includes(term))) {
+    return "recommendation";
+  }
   if (PROMOTION_TERMS.some((term) => text.includes(term))) return "promotion";
-  if (CATALOG_TERMS.some((term) => text.includes(term))) return "catalog";
   if (PAYMENT_TERMS.some((term) => text.includes(term))) return "payment";
   if (BUY_TERMS.some((term) => text.includes(term))) return "buy";
+  if (CATALOG_TERMS.some((term) => text.includes(term))) return "catalog";
   if (GREETINGS.some((term) => text === term || text.startsWith(`${term} `))) {
     return "greeting";
   }
@@ -106,7 +143,10 @@ export function getSimulatorDataNeeds(
   intent: SimulatorIntent
 ): SimulatorDataNeeds {
   return {
-    catalog: intent === "catalog",
+    catalog:
+      intent === "catalog" ||
+      intent === "catalog_full" ||
+      intent === "recommendation",
     promotions: intent === "promotion",
   };
 }
@@ -114,30 +154,27 @@ export function getSimulatorDataNeeds(
 export function formatSimulatorCatalog(
   products: SimulatorCatalogItem[]
 ): string {
-  if (products.length === 0) {
-    return "No hay productos activos cargados en el catálogo.";
+  const visible = products
+    .filter((product) => product.price > 0)
+    .filter((product) => !product.trackInventory || product.stock > 0)
+    .slice(0, 5);
+
+  if (visible.length === 0) {
+    return "No hay productos con precio disponibles en este momento.";
   }
 
-  const lines = products.map((product) => {
-    const stock = product.trackInventory
-      ? product.stock > 0
-        ? `stock ${product.stock}`
-        : "sin stock"
-      : "stock no controlado";
-    const detail = [product.category, product.description]
-      .filter(Boolean)
-      .join(" · ");
-    return `- ${product.name}: ${product.price.toFixed(2)} ${
-      product.currency
-    } · ${stock}${detail ? ` · ${detail}` : ""}`;
-  });
+  const lines = visible.map(
+    (product) => `• ${product.name} — ${product.price.toFixed(2)} ${product.currency}`
+  );
 
-  return `Estos son los productos disponibles:\n${lines.join("\n")}`;
+  return `Estas son algunas opciones:\n${lines.join(
+    "\n"
+  )}\n¿Buscas algo específico o te muestro el catálogo completo?`;
 }
 
 export function formatSimulatorPromotions(promotions: string): string {
   const value = promotions.trim();
   return value
-    ? `Estas son las promociones vigentes:\n${value}`
-    : "No hay promociones vigentes cargadas.";
+    ? `Promociones vigentes:\n${value}\n¿Te interesa alguna?`
+    : "Hoy no hay promociones registradas, pero puedo sugerirte opciones según tu presupuesto. ¿Qué buscas?";
 }
