@@ -3,6 +3,7 @@ import "server-only";
 import { createServiceRoleClient } from "@/lib/supabase";
 import {
   extractBusinessRules,
+  isVisibleBusinessProduct,
   normalizePaymentProvider,
   type BusinessContext,
   type BusinessProduct,
@@ -90,18 +91,22 @@ export async function loadBusinessContext(input: {
   }
 
   const businessName = String(businessResult.data.business_name).trim();
-  const products: BusinessProduct[] = (productsResult.data || []).map((row) => {
-    const metadata = safeMetadata(row.metadata);
-    return {
-      name: String(row.name || "Producto"),
-      description: String(row.description || ""),
-      price: Number(row.price || 0),
-      currency: String(row.currency || "USD"),
-      stock: Number(row.stock || 0),
-      trackInventory: row.track_inventory !== false,
-      category: typeof metadata.category === "string" ? metadata.category : "",
-    };
-  });
+  const products: BusinessProduct[] = (productsResult.data || [])
+    .map((row) => {
+      const metadata = safeMetadata(row.metadata);
+      return {
+        name: String(row.name || "Producto").trim(),
+        description: String(row.description || "").trim(),
+        price: Number(row.price || 0),
+        currency: String(row.currency || "USD").trim() || "USD",
+        stock: Number(row.stock || 0),
+        trackInventory: row.track_inventory !== false,
+        category: typeof metadata.category === "string" ? metadata.category.trim() : "",
+      };
+    })
+    // Products without a real price or without availability must not reach
+    // Gemini or any customer-facing formatter.
+    .filter(isVisibleBusinessProduct);
 
   return {
     clientId: input.clientId,
