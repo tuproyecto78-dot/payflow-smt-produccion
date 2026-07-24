@@ -42,6 +42,23 @@ test("catalog wording requests catalog only and formats real prices", () => {
   ]);
   assert.match(answer, /Ceviche/);
   assert.match(answer, /8\.50 USD/);
+  assert.match(answer, /catálogo completo\?$/i);
+});
+
+test("full catalog and recommendation wording receive their own intents", () => {
+  assert.equal(detectSimulatorIntent("Quiero ver el menú completo"), "catalog_full");
+  assert.equal(
+    detectSimulatorIntent("¿Qué productos me recomiendas?"),
+    "recommendation"
+  );
+  assert.deepEqual(getSimulatorDataNeeds("catalog_full"), {
+    catalog: true,
+    promotions: false,
+  });
+  assert.deepEqual(getSimulatorDataNeeds("recommendation"), {
+    catalog: true,
+    promotions: false,
+  });
 });
 
 test("promotion wording requests promotions only", () => {
@@ -51,9 +68,9 @@ test("promotion wording requests promotions only", () => {
     catalog: false,
     promotions: true,
   });
-  assert.equal(
+  assert.match(
     formatSimulatorPromotions(""),
-    "No hay promociones vigentes cargadas."
+    /no hay promociones registradas.*presupuesto/i
   );
   assert.match(
     formatSimulatorPromotions("2x1 los martes"),
