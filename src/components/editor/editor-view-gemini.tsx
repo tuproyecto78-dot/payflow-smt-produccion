@@ -1,13 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorView as BaseEditorView } from "./editor-view";
 import type { WorkflowSummary } from "@/stores/app-store";
 
 type AiDeliveryMode = "simulation" | "assisted" | "automatic";
+const STATE_KEY = "__payflow_simulator_state";
+
+function safeObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
   const [mode, setMode] = useState<AiDeliveryMode>("simulation");
+  const simulatorStateRef = useRef<unknown>(null);
+
+  useEffect(() => {
+    simulatorStateRef.current = null;
+  }, [workflow.id]);
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
@@ -21,16 +33,38 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
           : input.url;
 
       if (url.includes("/api/workflows/execute") && init?.body) {
+        let body: Record<string, unknown>;
         try {
-          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-          body.aiMode = mode;
-          return originalFetch(input, {
-            ...init,
-            body: JSON.stringify(body),
-          });
+          body = JSON.parse(String(init.body)) as Record<string, unknown>;
         } catch {
           return originalFetch(input, init);
         }
+
+        body.aiMode = mode;
+        if (typeof body.clientMessage === "string") {
+          const questionResponses = safeObject(body.questionResponses);
+          body.questionResponses = {
+            ...questionResponses,
+            [STATE_KEY]: JSON.stringify(simulatorStateRef.current),
+          };
+        }
+
+        const response = await originalFetch(input, {
+          ...init,
+          body: JSON.stringify(body),
+        });
+
+        try {
+          const payload = safeObject(await response.clone().json());
+          const variables = safeObject(payload.variables);
+          if (Object.prototype.hasOwnProperty.call(variables, "simulator_state")) {
+            simulatorStateRef.current = variables.simulator_state;
+          }
+        } catch {
+          // Keep the last valid temporary state if the response has no JSON body.
+        }
+
+        return response;
       }
 
       return originalFetch(input, init);
