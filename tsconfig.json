@@ -31,7 +31,7 @@
         "./src/components/editor/editor-view-gemini"
       ],
       "@/lib/engine": [
-        "./src/lib/engine-cart"
+        "./src/lib/engine-universal"
       ],
       "@/lib/file-content-reader": [
         "./src/lib/file-content-reader-v2"
