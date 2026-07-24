@@ -1973,3 +1973,92 @@ Files modified: 2
 - src/lib/engine.ts (bifurcación: buy→out, info→info o stop, greeting→greeting o stop)
 
 `bun run lint` → 0 errors.
+
+---
+Task ID: knowledge-center-agente-ia-universal
+Agent: main agent (Z.ai Code)
+Task: Implementar centro de conocimiento por negocio integrado con el Agente IA Universal. Cargar FAQs manuales y archivos, guardar por negocio. Extraer conocimiento estructurado y usarlo en el Agente IA. Priorizar datos estructurados sobre documentos. Nunca inventar. Respuestas cortas y comerciales siempre como el negocio activo. Pruebas en simulador. No tocar WhatsApp ni pagos reales.
+
+Work Log:
+- Exploración: ya existía src/lib/knowledge-db.ts con helpers para Prisma (KnowledgeSource/Chunk/Extraction/Embedding) pero los modelos NO estaban en schema.prisma. Decidí crear modelos nuevos limpios enfocados en "negocio" en lugar de usar los viejos.
+- Schema (prisma/schema.prisma): añadí 4 modelos nuevos:
+  - KnowledgeBase (businessId único, name, timestamps)
+  - KnowledgeFaq (question, answer, category, sortOrder, active)
+  - KnowledgeDocument (name, type, content, structuredData JSON, extractionStatus, active)
+  - KnowledgeProduct (name, description, price, currency, category, active)
+  - Ejecuté `bun run db:push` → DB sincronizada, Prisma Client generado.
+- src/lib/knowledge-center.ts (NUEVO, módulo central):
+  - getKnowledgeContext(businessId): carga products + faqs + documents de la DB por businessId. Fallback a catálogo demo embebido si no hay DB.
+  - buildSystemPromptSection(): construye la sección del system prompt con: REGLAS (respuestas cortas, comerciales, nunca inventar), PRODUCTOS (agrupados por categoría), FAQs (P/R), DOCUMENTOS (texto truncado). PRIORIZA datos estructurados.
+  - findRelevantKnowledge(ctx, clientMessage): busca match exacto de FAQ (>=2 keywords de la pregunta) → si no, si pregunta por platos/precios → devuelve catálogo agrupado. Retorna null si no hay match.
+  - getDemoKnowledgeContext(): catálogo demo (6 productos + 3 FAQs) para modo sin DB.
+- src/lib/engine.ts (ai_agent integrado con Knowledge Center):
+  - Importé getKnowledgeContext, findRelevantKnowledge, KnowledgeContext de knowledge-center.
+  - Eliminé DEMO_CATALOG y buildCatalogContext (deprecated).
+  - En modo mock: primero llama findRelevantKnowledge(knowledge, inputText). Si hay match (FAQ o catálogo), usa esa respuesta. Si no, usa buildMockResponse(intent, clientText, knowledge).
+  - buildMockResponse ahora usa knowledge.products (REAL) en lugar de DEMO_CATALOG. Respuestas con businessName real. Si no hay productos, responde "Por el momento no tengo productos cargados".
+  - fullSystemPrompt ahora usa knowledge.systemPromptSection (productos + FAQs + documentos reales del negocio).
+  - Log explica: "Knowledge Center: X productos, Y FAQs, Z documentos. Intención: ...".
+- APIs (4 nuevas rutas):
+  - GET /api/knowledge-center — devuelve todo el conocimiento del negocio (lazy create de KnowledgeBase)
+  - POST/DELETE/PATCH /api/knowledge-center/faqs — CRUD de FAQs
+  - POST/DELETE/PATCH /api/knowledge-center/products — CRUD de productos
+  - POST/DELETE /api/knowledge-center/documents — CRUD de documentos con extracción estructurada automática (detecta productos con precios, horarios, políticas via regex)
+- UI (src/app/dashboard/conocimiento/page.tsx + src/components/dashboard/knowledge-center-view.tsx):
+  - Página nueva en /dashboard/conocimiento accesible desde el sidebar (icono BookOpen, "Conocimiento")
+  - Header con título + descripción + botón actualizar
+  - Info banner explicando cómo funciona (prioriza datos estructurados, nunca inventa)
+  - Tabs: Productos / FAQs / Documentos (con contador)
+  - Cada tab: formulario para agregar (izquierda) + lista de items (derecha) con delete
+  - Productos: nombre, descripción, precio, moneda, categoría
+  - FAQs: pregunta, respuesta, categoría
+  - Documentos: nombre, contenido (textarea), extracción automática con feedback
+  - Estados: loading, error con retry, empty states
+
+Verification (pruebas con curl contra API + simulador):
+- POST /api/knowledge-center/faqs: creó FAQ "¿Hacen entregas a domicilio?" con ID ✓
+- POST /api/knowledge-center/products: creó "Pizza margarita" $8.50 USD ✓
+- POST /api/knowledge-center/documents: creó "Politicas" con extracción estructurada (detectó productos/horario) ✓
+- GET /api/knowledge-center: devuelve { businessId, products:[1], faqs:[1], documents:[1] } ✓
+
+PRUEBA SIMULADOR (la clave):
+- clientMessage: "¿Qué platos tienen?"
+- Resultado:
+  - ai_intent: info ✓
+  - Log: "Knowledge Center: 1 productos, 1 FAQs, 1 documentos. Intención: info. Respuesta con datos del negocio." ✓
+  - ai_response: "📋 *Nuestro menú:* *Pizzas* • Pizza margarita — 8.50 USD ¿Te gustaría realizar un pedido?..." ✓
+  - El Agente IA usó el producto REAL cargado (Pizza margarita $8.50), NO el catálogo demo viejo ✓
+  - Respuesta corta y comercial, como el negocio ✓
+  - No inventó (solo listing lo que está en la DB) ✓
+  - No tocó WhatsApp real ni pagos reales ✓
+
+- bun run lint: 0 errores (2 warnings preexistentes en otros archivos)
+- Commit bc212a5 pusheado a GitHub (tras rebase) — Vercel desplegará automáticamente
+
+Stage Summary:
+- Arquitectura unificada del Agente IA Universal con Knowledge Center por negocio:
+  1. Cada negocio tiene una KnowledgeBase (FAQs + Documentos + Productos) en la DB.
+  2. El Agente IA consulta getKnowledgeContext(businessId) en cada ejecución.
+  3. PRIORIZA datos estructurados (productos, FAQs) sobre documentos de texto.
+  4. NUNCA inventa: si no hay conocimiento, responde que no tiene la info.
+  5. Respuestas cortas y comerciales, siempre como el negocio activo (businessName).
+  6. Extracción estructurada automática de documentos (detecta productos con precios, horarios, políticas).
+- UI completa en /dashboard/conocimiento con 3 tabs (Productos, FAQs, Documentos) para gestionar el conocimiento sin tocar código.
+- El simulador usa el conocimiento real cargado: al preguntar "¿Qué platos tienen?" responde con los productos REALES del negocio (no el demo).
+- No se conectó WhatsApp real ni pagos reales (todo en modo Mock para pruebas internas).
+
+Files created: 6
+- src/lib/knowledge-center.ts (módulo central)
+- src/app/api/knowledge-center/route.ts (GET)
+- src/app/api/knowledge-center/faqs/route.ts (POST/DELETE/PATCH)
+- src/app/api/knowledge-center/products/route.ts (POST/DELETE/PATCH)
+- src/app/api/knowledge-center/documents/route.ts (POST/DELETE con extracción)
+- src/app/dashboard/conocimiento/page.tsx
+- src/components/dashboard/knowledge-center-view.tsx (UI completa)
+
+Files modified: 3
+- prisma/schema.prisma (4 modelos nuevos: KnowledgeBase, KnowledgeFaq, KnowledgeDocument, KnowledgeProduct)
+- src/lib/engine.ts (ai_agent integrado con Knowledge Center, eliminado DEMO_CATALOG)
+- src/app/dashboard/layout.tsx (añadido item "Conocimiento" al sidebar con icon BookOpen)
+
+`bun run lint` → 0 errors.
