@@ -85,6 +85,85 @@ function assertCustomerSafe(answer) {
   );
 }
 
+function restaurantConversationContext(overrides = {}) {
+  return businessContext({
+    offerings: [
+      {
+        key: "product:hamburguesa-clasica-estancia",
+        kind: "product",
+        name: "Hamburguesa Clásica Estancia",
+        description: "Carne, queso y vegetales",
+        price: 1.2,
+        currency: "USD",
+        category: "Hamburguesas",
+        available: true,
+        source: "catalog",
+      },
+      {
+        key: "product:hamburguesa-bbq-tocino",
+        kind: "product",
+        name: "Hamburguesa BBQ Tocino",
+        description: "Carne, queso, BBQ y tocino",
+        price: 1.55,
+        currency: "USD",
+        category: "Hamburguesas",
+        available: true,
+        source: "catalog",
+      },
+      {
+        key: "product:hamburguesa-doble",
+        kind: "product",
+        name: "Hamburguesa Doble Queso y Carne",
+        description: "Doble carne y doble queso",
+        price: 1.95,
+        currency: "USD",
+        category: "Hamburguesas",
+        available: true,
+        source: "catalog",
+      },
+      {
+        key: "product:papas-estancia-cintas",
+        kind: "product",
+        name: "Papas Estancia Cintas",
+        description: "Papas en corte cinta",
+        price: 0.95,
+        currency: "USD",
+        category: "Papas",
+        available: true,
+        source: "catalog",
+      },
+      {
+        key: "product:papas-fritas-clasicas",
+        kind: "product",
+        name: "Papas Fritas Clásicas",
+        description: "Papas fritas",
+        price: 0.55,
+        currency: "USD",
+        category: "Papas",
+        available: true,
+        source: "catalog",
+      },
+      {
+        key: "product:nachos-carne",
+        kind: "product",
+        name: "Nachos Supremos con Carne",
+        description: "Nachos con carne y queso",
+        price: 1.3,
+        currency: "USD",
+        category: "Papas y acompañamientos",
+        available: true,
+        source: "catalog",
+      },
+    ],
+    payment: {
+      provider: "external",
+      summary: "Aceptamos transferencia bancaria o efectivo.",
+      conditions: ["El medio de pago se confirma al finalizar."],
+    },
+    ...overrides,
+  });
+}
+
 test("the v3 pipeline keeps a generic menu informational", async () => {
   const result = await runUniversalConversation({
     message: "Menú",
@@ -161,7 +240,8 @@ test("only an explicit order creates a temporary-cart action", async () => {
       quantity: 2,
     },
   ]);
-  assert.match(result.answer, /Total temporal: 10\.00 USD/);
+  assert.match(result.answer, /Total: 10\.00 USD/);
+  assert.match(result.answer, /cómo prefieres pagar/i);
 });
 
 test("Gemini cannot upgrade information into a transaction", async () => {
@@ -224,7 +304,8 @@ test("memory preserves list purpose through selection and quantity", async () =>
   assert.deepEqual(quantity.state.cart, [
     { offeringKey: "product:porcion-de-papas", quantity: 3 },
   ]);
-  assert.match(quantity.answer, /Total temporal: 7\.50 USD/);
+  assert.match(quantity.answer, /Total: 7\.50 USD/);
+  assert.match(quantity.answer, /cómo prefieres pagar/i);
 });
 
 test("an informational numbered selection remains informational", async () => {
@@ -391,5 +472,173 @@ test("the result never executes WhatsApp or real payments", async () => {
   assert.equal(result.decision.intent, "add_to_cart");
   assert.equal(result.state.cart.length, 1);
   assert.equal(result.diagnostics.architectureVersion, 3);
+  assertCustomerSafe(result.answer);
+});
+
+test("commercial shorthand resolves a unique product and a correction does not duplicate it", async () => {
+  const context = restaurantConversationContext();
+  const first = await runUniversalConversation({
+    message: "3 hamburguesas Estancia",
+    context,
+  });
+
+  assert.equal(first.decision.intent, "add_to_cart");
+  assert.deepEqual(first.state.cart, [
+    {
+      offeringKey: "product:hamburguesa-clasica-estancia",
+      quantity: 3,
+    },
+  ]);
+  assert.match(first.answer, /Total: 3\.60 USD/);
+  assert.match(first.answer, /cómo prefieres pagar/i);
+
+  const correction = await runUniversalConversation({
+    message: "Te pedí 3 hamburguesas Estancia",
+    context,
+    rawState: first.state,
+  });
+  assert.equal(correction.decision.intent, "add_to_cart");
+  assert.equal(correction.decision.cartActions[0].type, "set");
+  assert.deepEqual(correction.state.cart, first.state.cart);
+  assert.match(correction.answer, /Total: 3\.60 USD/);
+});
+
+test("a multi-item order calculates the complete total and then collects payment preference", async () => {
+  const context = restaurantConversationContext();
+  const order = await runUniversalConversation({
+    message:
+      "Quiero dos Papas Estancia Cintas y 3 Hamburguesas Clásica Estancia, ¿cuánto es?",
+    context,
+  });
+
+  assert.equal(order.decision.intent, "add_to_cart");
+  assert.equal(order.decision.cartActions.length, 2);
+  assert.deepEqual(order.state.cart, [
+    {
+      offeringKey: "product:papas-estancia-cintas",
+      quantity: 2,
+    },
+    {
+      offeringKey: "product:hamburguesa-clasica-estancia",
+      quantity: 3,
+    },
+  ]);
+  assert.match(order.answer, /2 × Papas Estancia Cintas/);
+  assert.match(order.answer, /3 × Hamburguesa Clásica Estancia/);
+  assert.match(order.answer, /Total: 5\.50 USD/);
+  assert.match(order.answer, /Cómo deseas pagar/i);
+  assert.equal(order.state.sessionMemory.checkoutStage, "awaiting_payment");
+
+  const payment = await runUniversalConversation({
+    message: "Transferencia",
+    context,
+    rawState: order.state,
+  });
+  assert.equal(payment.decision.intent, "select_payment_method");
+  assert.equal(payment.decision.cartActions.length, 0);
+  assert.equal(
+    payment.state.sessionMemory.selectedPaymentMethod,
+    "transferencia bancaria"
+  );
+  assert.equal(payment.state.sessionMemory.checkoutStage, "payment_selected");
+  assert.match(payment.answer, /elegiste transferencia bancaria/i);
+  assert.match(payment.answer, /¿Confirmas el resumen\?/);
+  assert.deepEqual(payment.state.cart, order.state.cart);
+});
+
+test("an ambiguous multi-item order is preserved until each variety is selected", async () => {
+  const context = restaurantConversationContext();
+  const draft = await runUniversalConversation({
+    message: "Quiero dos papas y 3 hamburguesas, ¿cuánto es?",
+    context,
+  });
+
+  assert.equal(draft.decision.intent, "clarification");
+  assert.equal(draft.state.cart.length, 0);
+  assert.equal(draft.state.sessionMemory.pendingOrderDraft.items.length, 2);
+  assert.match(draft.answer, /Para completar tu pedido/i);
+
+  const papas = await runUniversalConversation({
+    message: "1",
+    context,
+    rawState: draft.state,
+  });
+  assert.equal(papas.decision.intent, "clarification");
+  assert.equal(papas.state.cart.length, 0);
+  assert.equal(
+    papas.state.sessionMemory.pendingOrderDraft.items.filter(
+      (item) => !item.offeringKey
+    ).length,
+    1
+  );
+
+  const hamburger = await runUniversalConversation({
+    message: "1",
+    context,
+    rawState: papas.state,
+  });
+  assert.equal(hamburger.decision.intent, "add_to_cart");
+  assert.equal(hamburger.state.cart.length, 2);
+  assert.deepEqual(
+    hamburger.state.cart.map((item) => item.quantity),
+    [2, 3]
+  );
+  assert.match(hamburger.answer, /Total:/);
+  assert.match(hamburger.answer, /Cómo deseas pagar/i);
+});
+
+test("no promotions uses a configured featured dish and accepts the suggestion", async () => {
+  const context = restaurantConversationContext({
+    promotions: [],
+    knowledge: [
+      {
+        key: "knowledge-document:plato-dia",
+        title: "Plato del día",
+        content:
+          "El plato del día es Hamburguesa Clásica Estancia.",
+        category: "plato del día",
+      },
+    ],
+  });
+  const promotions = await runUniversalConversation({
+    message: "¿Hay promociones?",
+    context,
+  });
+
+  assert.equal(promotions.decision.intent, "query_promotion");
+  assert.equal(promotions.state.cart.length, 0);
+  assert.match(promotions.answer, /no hay promociones activas/i);
+  assert.match(
+    promotions.answer,
+    /plato del día es Hamburguesa Clásica Estancia/i
+  );
+
+  const accepted = await runUniversalConversation({
+    message: "Sí",
+    context,
+    rawState: promotions.state,
+  });
+  assert.equal(accepted.decision.intent, "add_to_cart");
+  assert.deepEqual(accepted.state.cart, [
+    {
+      offeringKey: "product:hamburguesa-clasica-estancia",
+      quantity: 1,
+    },
+  ]);
+});
+
+test("without configured featured knowledge the agent recommends a real offering without inventing a dish of the day", async () => {
+  const result = await runUniversalConversation({
+    message: "¿Tienen promociones?",
+    context: restaurantConversationContext({
+      promotions: [],
+      knowledge: [],
+    }),
+  });
+
+  assert.equal(result.decision.intent, "query_promotion");
+  assert.match(result.answer, /no hay promociones activas/i);
+  assert.match(result.answer, /Te sugerimos/);
+  assert.doesNotMatch(result.answer, /plato del día/i);
   assertCustomerSafe(result.answer);
 });

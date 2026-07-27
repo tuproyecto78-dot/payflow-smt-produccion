@@ -133,6 +133,9 @@ function semanticInput(input: {
       ),
       lastPresentedListPurpose: memory.lastPresentedListPurpose,
       pendingOffering: memory.pendingOffering,
+      checkoutStage: memory.checkoutStage,
+      selectedPaymentMethod: memory.selectedPaymentMethod,
+      pendingOrderItemCount: memory.pendingOrderItemCount,
       recentTurns: input.state.recentTurns,
     },
   };
@@ -155,6 +158,8 @@ export async function runUniversalConversation(input: {
   const localCandidate = classifyLocalUniversalIntent({
     message,
     state,
+    context: input.context,
+    index,
     retrieval: initialRetrieval,
   });
 
@@ -221,6 +226,7 @@ export async function runUniversalConversation(input: {
     state: cartResult.state as UniversalSessionState,
     decision,
     context: input.context,
+    candidate: resolvedCandidate,
   });
   const validatedFacts = buildUniversalValidatedFacts({
     context: input.context,

@@ -12,12 +12,33 @@ import {
   classifyUniversalIntent,
   composeUniversalSafeAnswer,
 } from "./universal-intent-engine";
+import type {
+  UniversalIntentCandidate,
+  UniversalOrderItemCandidate,
+  UniversalOrderOperation,
+} from "./universal-conversation-contract";
+
+export type UniversalCheckoutStage =
+  | "browsing"
+  | "building_order"
+  | "awaiting_payment"
+  | "payment_selected";
+
+export type UniversalPendingOrderDraft = {
+  operation: UniversalOrderOperation;
+  checkoutRequested: boolean;
+  items: UniversalOrderItemCandidate[];
+};
 
 export type UniversalSessionMemory = {
-  version: 2;
+  version: 3;
   lastPresentedOfferingKeys: string[];
   lastPresentedListPurpose: "information" | "purchase";
   pendingOfferingKey: string | null;
+  pendingOrderDraft: UniversalPendingOrderDraft | null;
+  checkoutStage: UniversalCheckoutStage;
+  selectedPaymentMethod: string | null;
+  lastSuggestedOfferingKey: string | null;
   intentCounts: Record<string, number>;
   lastSelectionIndex: number | null;
 };
@@ -80,10 +101,14 @@ function validOfferingMap(context: UniversalBusinessContext) {
 
 function emptySessionMemory(): UniversalSessionMemory {
   return {
-    version: 2,
+    version: 3,
     lastPresentedOfferingKeys: [],
     lastPresentedListPurpose: "information",
     pendingOfferingKey: null,
+    pendingOrderDraft: null,
+    checkoutStage: "browsing",
+    selectedPaymentMethod: null,
+    lastSuggestedOfferingKey: null,
     intentCounts: {},
     lastSelectionIndex: null,
   };
@@ -97,7 +122,7 @@ export function normalizeUniversalSessionState(
   const input = safeRecord(value);
   const rawMemory = safeRecord(input.sessionMemory);
   const offerings = validOfferingMap(context);
-  const memoryVersion = finiteInteger(rawMemory.version, 1, 2);
+  const memoryVersion = finiteInteger(rawMemory.version, 1, 3);
 
   const lastPresentedOfferingKeys = Array.isArray(rawMemory.lastPresentedOfferingKeys)
     ? Array.from(
@@ -112,13 +137,88 @@ export function normalizeUniversalSessionState(
   const pendingCandidate = String(rawMemory.pendingOfferingKey || "").trim();
   // Version 1 armed quantity collection after a bare informational selection.
   // Do not restore that ambiguous state after deploying the strict purchase gate.
-  const pendingOfferingKey = memoryVersion === 2 && offerings.has(pendingCandidate)
+  const pendingOfferingKey =
+    Boolean(memoryVersion && memoryVersion >= 2) &&
+    offerings.has(pendingCandidate)
     ? pendingCandidate
     : null;
   const lastPresentedListPurpose =
-    memoryVersion === 2 && rawMemory.lastPresentedListPurpose === "purchase"
+    Boolean(memoryVersion && memoryVersion >= 2) &&
+    rawMemory.lastPresentedListPurpose === "purchase"
       ? "purchase"
       : "information";
+  const validCheckoutStages = new Set<UniversalCheckoutStage>([
+    "browsing",
+    "building_order",
+    "awaiting_payment",
+    "payment_selected",
+  ]);
+  const checkoutStage =
+    memoryVersion === 3 &&
+    validCheckoutStages.has(
+      rawMemory.checkoutStage as UniversalCheckoutStage
+    )
+      ? (rawMemory.checkoutStage as UniversalCheckoutStage)
+      : base.cart.length
+        ? "building_order"
+        : "browsing";
+  const selectedPaymentMethod =
+    memoryVersion === 3
+      ? String(rawMemory.selectedPaymentMethod || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 80) || null
+      : null;
+  const suggestedCandidate = String(
+    rawMemory.lastSuggestedOfferingKey || ""
+  ).trim();
+  const lastSuggestedOfferingKey =
+    memoryVersion === 3 && offerings.has(suggestedCandidate)
+      ? suggestedCandidate
+      : null;
+  const rawDraft = safeRecord(rawMemory.pendingOrderDraft);
+  const pendingItems: UniversalOrderItemCandidate[] = [];
+  if (memoryVersion === 3 && Array.isArray(rawDraft.items)) {
+    for (const rawItem of rawDraft.items.slice(0, 12)) {
+      const item = safeRecord(rawItem);
+      const directKey = String(item.offeringKey || "").trim();
+      const candidateOfferingKeys = Array.isArray(item.candidateOfferingKeys)
+        ? Array.from(
+            new Set(
+              item.candidateOfferingKeys
+                .map((key) => String(key || "").trim())
+                .filter((key) => offerings.has(key))
+            )
+          ).slice(0, 5)
+        : [];
+      const offeringKey = offerings.has(directKey) ? directKey : null;
+      const phrase = String(item.phrase || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+      const quantity = finiteInteger(item.quantity, 1, 99);
+      if (!phrase || (!offeringKey && !candidateOfferingKeys.length)) continue;
+      pendingItems.push({
+        phrase,
+        quantity,
+        offeringKey,
+        candidateOfferingKeys: offeringKey
+          ? [offeringKey]
+          : candidateOfferingKeys,
+      });
+    }
+  }
+  const pendingOrderDraft =
+    pendingItems.length > 0
+      ? {
+          operation:
+            rawDraft.operation === "add"
+              ? ("add" as const)
+              : ("set" as const),
+          checkoutRequested: rawDraft.checkoutRequested === true,
+          items: pendingItems,
+        }
+      : null;
 
   const intentCounts: Record<string, number> = {};
   const rawCounts = safeRecord(rawMemory.intentCounts);
@@ -131,10 +231,14 @@ export function normalizeUniversalSessionState(
   return {
     ...base,
     sessionMemory: {
-      version: 2,
+      version: 3,
       lastPresentedOfferingKeys,
       lastPresentedListPurpose,
       pendingOfferingKey,
+      pendingOrderDraft,
+      checkoutStage,
+      selectedPaymentMethod,
+      lastSuggestedOfferingKey,
       intentCounts,
       lastSelectionIndex: finiteInteger(rawMemory.lastSelectionIndex, 1, 100),
     },
@@ -495,6 +599,7 @@ export function transitionUniversalSessionMemory(input: {
   state: UniversalSessionState;
   decision: UniversalPlannerDecision;
   context: UniversalBusinessContext;
+  candidate?: UniversalIntentCandidate;
 }): UniversalSessionState {
   const current = input.state.sessionMemory || emptySessionMemory();
   const intentCounts = { ...current.intentCounts };
@@ -506,12 +611,20 @@ export function transitionUniversalSessionMemory(input: {
   let lastPresentedOfferingKeys = current.lastPresentedOfferingKeys;
   let lastPresentedListPurpose = current.lastPresentedListPurpose;
   let pendingOfferingKey = current.pendingOfferingKey;
+  let pendingOrderDraft = current.pendingOrderDraft;
+  let checkoutStage = current.checkoutStage;
+  let selectedPaymentMethod = current.selectedPaymentMethod;
+  let lastSuggestedOfferingKey = current.lastSuggestedOfferingKey;
   let lastSelectionIndex = current.lastSelectionIndex;
 
   if (input.decision.intent === "reset_cart") {
     lastPresentedOfferingKeys = [];
     lastPresentedListPurpose = "information";
     pendingOfferingKey = null;
+    pendingOrderDraft = null;
+    checkoutStage = "browsing";
+    selectedPaymentMethod = null;
+    lastSuggestedOfferingKey = null;
     lastSelectionIndex = null;
   } else {
     const presented = presentedKeysForDecision(input.decision, input.context);
@@ -541,16 +654,54 @@ export function transitionUniversalSessionMemory(input: {
       pendingOfferingKey = input.decision.selection.offeringKeys[0];
     } else if (input.decision.intent === "add_to_cart") {
       pendingOfferingKey = null;
+      pendingOrderDraft = null;
+      checkoutStage = "awaiting_payment";
+      selectedPaymentMethod = null;
+      lastSuggestedOfferingKey = null;
+    }
+
+    if (
+      input.decision.intent === "clarification" &&
+      input.decision.scopes.includes("cart") &&
+      input.candidate?.orderItems.length
+    ) {
+      pendingOrderDraft = {
+        operation: input.candidate.orderOperation,
+        checkoutRequested: input.candidate.checkoutRequested,
+        items: input.candidate.orderItems,
+      };
+      checkoutStage = "building_order";
+      selectedPaymentMethod = null;
+    }
+
+    if (
+      input.decision.intent === "select_payment_method" &&
+      input.candidate?.paymentMethod
+    ) {
+      checkoutStage = "payment_selected";
+      selectedPaymentMethod = input.candidate.paymentMethod;
+    }
+
+    if (
+      input.decision.intent === "query_promotion" &&
+      input.decision.selection.offeringKeys.length === 1
+    ) {
+      lastSuggestedOfferingKey =
+        input.decision.selection.offeringKeys[0] || null;
     }
   }
 
   return {
     ...input.state,
     sessionMemory: {
-      version: 2,
+      version: 3,
       lastPresentedOfferingKeys,
       lastPresentedListPurpose,
       pendingOfferingKey,
+      pendingOrderDraft,
+      checkoutStage,
+      selectedPaymentMethod,
+      lastSuggestedOfferingKey,
       intentCounts,
       lastSelectionIndex,
     },
@@ -589,6 +740,10 @@ export function buildUniversalSessionPlannerMemory(
     pendingOffering: state.sessionMemory.pendingOfferingKey
       ? byKey.get(state.sessionMemory.pendingOfferingKey)?.name || null
       : null,
+    checkoutStage: state.sessionMemory.checkoutStage,
+    selectedPaymentMethod: state.sessionMemory.selectedPaymentMethod,
+    pendingOrderItemCount:
+      state.sessionMemory.pendingOrderDraft?.items.length || 0,
     intentCounts: state.sessionMemory.intentCounts,
     lastSelectionIndex: state.sessionMemory.lastSelectionIndex,
   };
