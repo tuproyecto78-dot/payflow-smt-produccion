@@ -195,6 +195,16 @@ export function planUniversalDecision(input: {
     });
   }
 
+  if (intent.act === "cart_management" && intent.mode === "finish") {
+    return decision({
+      intent: "finish_order_selection",
+      confidence: intent.confidence,
+      scopes: ["identity", "cart"],
+      responseGoal:
+        "Confirmar que no se agregarán más artículos y ofrecer finalizar o ver el total.",
+    });
+  }
+
   if (intent.act === "social" && intent.topic === "greeting") {
     return decision({
       intent: "greeting",
@@ -224,8 +234,8 @@ export function planUniversalDecision(input: {
     return decision({
       intent: "query_payment",
       confidence: intent.confidence,
-      scopes: ["identity", "payment", "faqs"],
-      responseGoal: "Responder solo con formas de pago registradas.",
+      scopes: ["identity", "payment"],
+      responseGoal: "Responder exclusivamente sobre formas de pago.",
     });
   }
 

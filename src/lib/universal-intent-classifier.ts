@@ -70,6 +70,7 @@ const VALID_MODES = new Set<UniversalIntentMode>([
   "select",
   "quantity",
   "total",
+  "finish",
   "reset",
   "ask",
 ]);
@@ -312,6 +313,17 @@ function hasOperationalPurchaseVerb(tokens: string[]): boolean {
   );
 }
 
+function isOrderCompletionReply(message: string): boolean {
+  const text = normalizeUniversalText(message);
+  return (
+    /^(?:no(?: gracias)?|ya no|nada mas|solo eso|eso es todo)$/.test(text) ||
+    /^(?:ya )?no (?:quiero|deseo) mas(?: solo lo que(?: le)? pedi)?$/.test(
+      text
+    ) ||
+    /^solo lo que(?: le)? pedi$/.test(text)
+  );
+}
+
 function inferredTopic(tokens: string[], state: UniversalSessionState): UniversalIntentTopic {
   if (hasConcept(tokens, CONCEPTS.promotions) || /\b\d+\s*x\s*\d+\b/.test(tokens.join(" "))) {
     return "promotions";
@@ -364,6 +376,17 @@ export function classifyLocalUniversalIntent(input: {
     combinedSelection?.quantity ||
     (memory.pendingOfferingKey && number ? number : null) ||
     explicitQuantity(input.message, selectionIndex);
+
+  if (isOrderCompletionReply(input.message)) {
+    return candidate({
+      act: "cart_management",
+      topic: "cart",
+      mode: "finish",
+      confidence: 1,
+      source: "local",
+      evidence: ["order_selection_complete"],
+    });
+  }
 
   const configuredPaymentMethod = selectedConfiguredPaymentMethod({
     message: input.message,

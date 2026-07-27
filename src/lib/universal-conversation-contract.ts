@@ -34,6 +34,7 @@ export type UniversalIntentMode =
   | "select"
   | "quantity"
   | "total"
+  | "finish"
   | "reset"
   | "ask";
 

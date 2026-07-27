@@ -642,3 +642,125 @@ test("without configured featured knowledge the agent recommends a real offering
   assert.doesNotMatch(result.answer, /plato del día/i);
   assertCustomerSafe(result.answer);
 });
+
+test("negative completion replies never reopen the catalog and keep the order unchanged", async () => {
+  const context = businessContext();
+  const order = await runUniversalConversation({
+    message: "Quiero dos hamburguesas clásicas",
+    context,
+  });
+
+  for (const message of [
+    "No",
+    "Ya no",
+    "Nada más",
+    "Solo eso",
+    "Ya no deseo más, solo lo que le pedí",
+  ]) {
+    const result = await runUniversalConversation({
+      message,
+      context,
+      rawState: order.state,
+    });
+    assert.equal(result.decision.intent, "finish_order_selection");
+    assert.equal(result.decision.cartActions.length, 0);
+    assert.deepEqual(result.state.cart, order.state.cart);
+    assert.match(result.answer, /pedido queda como está/i);
+    assert.match(result.answer, /finalizar o ver el total/i);
+    assert.doesNotMatch(
+      result.answer,
+      /Estas son las opciones|Hamburguesa Clásica|Porción de Papas|Jugo Natural/
+    );
+    assert.equal(
+      result.state.sessionMemory.lastPresentedOfferingKeys.length,
+      0
+    );
+    assert.equal(result.state.sessionMemory.pendingOrderDraft, null);
+    assertCustomerSafe(result.answer);
+  }
+});
+
+test("a negative reply without cart closes the offer without inventing an order", async () => {
+  const context = businessContext();
+  const menu = await runUniversalConversation({
+    message: "Menú",
+    context,
+  });
+  const result = await runUniversalConversation({
+    message: "No",
+    context,
+    rawState: menu.state,
+  });
+
+  assert.equal(result.decision.intent, "finish_order_selection");
+  assert.equal(result.state.cart.length, 0);
+  assert.equal(
+    result.answer,
+    "Entendido, no agregaré productos. ¿Deseas finalizar?"
+  );
+  assert.doesNotMatch(result.answer, /opciones|Hamburguesa|Papas|Jugo/i);
+});
+
+test("payment questions contain only configured payment information", async () => {
+  const result = await runUniversalConversation({
+    message: "¿Qué formas de pago tienen?",
+    context: businessContext(),
+  });
+
+  assert.equal(result.decision.intent, "query_payment");
+  assert.equal(
+    result.answer,
+    "Puedes pagar por transferencia bancaria."
+  );
+  assert.doesNotMatch(
+    result.answer,
+    /Hamburguesa|Papas|Jugo|producto|catálogo|PayFlow/i
+  );
+  assert.ok(result.answer.length < 120);
+});
+
+test("missing payment methods are explained commercially without technical wording", async () => {
+  const result = await runUniversalConversation({
+    message: "¿Cuál forma de pago tienen?",
+    context: businessContext({
+      payment: {
+        provider: "none",
+        summary: "No hay una forma de pago registrada.",
+        conditions: [],
+      },
+    }),
+  });
+
+  assert.equal(result.decision.intent, "query_payment");
+  assert.equal(
+    result.answer,
+    "Por el momento no contamos con formas de pago habilitadas."
+  );
+  assert.doesNotMatch(
+    result.answer,
+    /registrad|configur|proveedor|producto|PayFlow/i
+  );
+});
+
+test("asking for the total returns only the order summary and total", async () => {
+  const context = businessContext();
+  const order = await runUniversalConversation({
+    message: "Quiero dos hamburguesas clásicas",
+    context,
+  });
+  const result = await runUniversalConversation({
+    message: "Quiero el total del pedido",
+    context,
+    rawState: order.state,
+  });
+
+  assert.equal(result.decision.intent, "cart_total");
+  assert.match(result.answer, /^Tu pedido:/);
+  assert.match(result.answer, /2 × Hamburguesa Clásica — 10\.00 USD/);
+  assert.match(result.answer, /Total: 10\.00 USD\.$/);
+  assert.doesNotMatch(
+    result.answer,
+    /¿|pagar|pago|agregar|algo más|PayFlow/i
+  );
+  assert.ok(result.answer.length < 180);
+});
