@@ -96,7 +96,7 @@ function answerFor(message, decision, state) {
   });
 }
 
-test("remembers a category list and resolves option 3 without a new search", () => {
+test("an informational list remembers order without arming a purchase", () => {
   let state = normalizeUniversalSessionState(null, context);
 
   const categoryDecision = classifyUniversalSessionIntent({
@@ -131,32 +131,84 @@ test("remembers a category list and resolves option 3 without a new search", () 
     "product:hamburguesa-doble",
     "product:hamburguesa-vegana",
   ]);
+  assert.equal(state.sessionMemory.lastPresentedListPurpose, "information");
 
   const selectionDecision = classifyUniversalSessionIntent({
     message: "3",
     context,
     state,
   });
-  assert.equal(selectionDecision.intent, "select_presented_option");
+  assert.equal(selectionDecision.intent, "query_offering");
   assert.deepEqual(selectionDecision.selection.offeringKeys, [
     "product:hamburguesa-doble",
   ]);
+  assert.deepEqual(selectionDecision.scopes, ["identity", "offerings"]);
+  assert.equal(selectionDecision.cartActions.length, 0);
 
   const selectionAnswer = answerFor("3", selectionDecision, state);
-  assert.equal(
-    selectionAnswer,
-    "Elegiste Hamburguesa Doble. ¿Cuántas unidades deseas?"
-  );
+  assert.match(selectionAnswer, /Hamburguesa Doble/);
+  assert.doesNotMatch(selectionAnswer, /cuántas unidades|subtotal|total temporal/i);
 
   state = transitionUniversalSessionMemory({
     state,
     decision: selectionDecision,
     context,
   });
+  assert.equal(state.sessionMemory.pendingOfferingKey, null);
+  assert.deepEqual(state.sessionMemory.lastPresentedOfferingKeys, [
+    "product:hamburguesa-bbq",
+    "product:hamburguesa-clasica",
+    "product:hamburguesa-doble",
+    "product:hamburguesa-vegana",
+  ]);
+
+  const purchaseDecision = classifyUniversalSessionIntent({
+    message: "quiero la opción 3",
+    context,
+    state,
+  });
+  assert.equal(purchaseDecision.intent, "clarification");
+  assert.ok(purchaseDecision.scopes.includes("cart"));
+  assert.equal(purchaseDecision.cartActions.length, 0);
+
+  state = transitionUniversalSessionMemory({
+    state,
+    decision: purchaseDecision,
+    context,
+  });
   assert.equal(
     state.sessionMemory.pendingOfferingKey,
     "product:hamburguesa-doble"
   );
+});
+
+test("an explicit order marks the list as purchase before asking quantity", () => {
+  let state = normalizeUniversalSessionState(null, context);
+  const order = classifyUniversalSessionIntent({
+    message: "quiero pedir del menú",
+    context,
+    state,
+  });
+
+  assert.equal(order.intent, "clarification");
+  assert.ok(order.scopes.includes("cart"));
+  assert.equal(order.cartActions.length, 0);
+
+  state = transitionUniversalSessionMemory({
+    state,
+    decision: order,
+    context,
+  });
+  assert.equal(state.sessionMemory.lastPresentedListPurpose, "purchase");
+
+  const selection = classifyUniversalSessionIntent({
+    message: "3",
+    context,
+    state,
+  });
+  assert.equal(selection.intent, "select_presented_option");
+  assert.equal(selection.cartActions.length, 0);
+  assert.match(selection.clarificationQuestion, /cuántas unidades/i);
 });
 
 test("uses the next number as quantity, calculates subtotal and total, then resets", () => {
@@ -167,13 +219,14 @@ test("uses the next number as quantity, calculates subtotal and total, then rese
       lastIntent: "select_presented_option",
       pendingQuestion: "¿Cuántas unidades deseas?",
       sessionMemory: {
-        version: 1,
+        version: 2,
         lastPresentedOfferingKeys: [
           "product:hamburguesa-bbq",
           "product:hamburguesa-clasica",
           "product:hamburguesa-doble",
           "product:hamburguesa-vegana",
         ],
+        lastPresentedListPurpose: "purchase",
         pendingOfferingKey: "product:hamburguesa-doble",
         intentCounts: { clarification: 1 },
         lastSelectionIndex: 3,
@@ -253,6 +306,7 @@ test("rejects a numbered option outside the remembered list", () => {
   const state = normalizeUniversalSessionState(
     {
       sessionMemory: {
+        version: 1,
         lastPresentedOfferingKeys: [
           "product:hamburguesa-bbq",
           "product:hamburguesa-clasica",
@@ -302,6 +356,8 @@ test("revalidates persisted session memory against the active business", () => {
     "product:hamburguesa-doble",
   ]);
   assert.equal(state.sessionMemory.pendingOfferingKey, null);
+  assert.equal(state.sessionMemory.lastPresentedListPurpose, "information");
+  assert.equal(state.sessionMemory.version, 2);
   assert.equal(state.sessionMemory.intentCounts.discover_offerings, 3);
 });
 
@@ -309,11 +365,13 @@ test("supports option and quantity in one message", () => {
   const state = normalizeUniversalSessionState(
     {
       sessionMemory: {
+        version: 2,
         lastPresentedOfferingKeys: [
           "product:hamburguesa-bbq",
           "product:hamburguesa-clasica",
           "product:hamburguesa-doble",
         ],
+        lastPresentedListPurpose: "information",
       },
     },
     context
