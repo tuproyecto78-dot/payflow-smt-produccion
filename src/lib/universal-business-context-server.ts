@@ -11,6 +11,7 @@ import {
   type UniversalFaq,
   type UniversalOffering,
 } from "./universal-agent-contract";
+import { loadUniversalKnowledgeCenter } from "./universal-knowledge-center-server";
 import type { FlowNode } from "./workflow-types";
 
 function safeRecord(value: unknown): Record<string, unknown> {
@@ -197,6 +198,22 @@ function paymentSummary(provider: UniversalBusinessContext["payment"]["provider"
   return "La forma de pago no está confirmada en la configuración.";
 }
 
+function makeUniqueFaqs(...groups: UniversalFaq[][]): UniversalFaq[] {
+  const seen = new Set<string>();
+  const result: UniversalFaq[] = [];
+  for (const faq of groups.flat()) {
+    const key = compactText(faq.question, 400).toLocaleLowerCase("es");
+    if (!key || !faq.answer || seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      question: compactText(faq.question, 400),
+      answer: compactText(faq.answer, 1000),
+    });
+    if (result.length >= 100) break;
+  }
+  return result;
+}
+
 function makeUniqueOfferings(
   products: UniversalOffering[],
   services: UniversalOffering[]
@@ -233,6 +250,7 @@ export async function loadUniversalBusinessContext(input: {
     catalogResult,
     onboardingResult,
     promotionsResult,
+    knowledgeCenter,
   ] = await Promise.all([
     supabase
       .from("client_accounts")
@@ -269,6 +287,7 @@ export async function loadUniversalBusinessContext(input: {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    loadUniversalKnowledgeCenter(input.clientId),
   ]);
 
   if (businessResult.error) {
@@ -286,6 +305,7 @@ export async function loadUniversalBusinessContext(input: {
   if (catalogResult.error) warnings.push("Resumen del catálogo no disponible.");
   if (onboardingResult.error) warnings.push("Configuración inicial no disponible.");
   if (promotionsResult.error) warnings.push("Promociones no disponibles temporalmente.");
+  warnings.push(...knowledgeCenter.warnings);
 
   const onboarding = safeRecord(onboardingResult.data?.metadata);
   const updatedPromotions = safeRecord(promotionsResult.data?.metadata);
@@ -310,6 +330,7 @@ export async function loadUniversalBusinessContext(input: {
           Boolean(name) &&
           price !== null &&
           (!trackInventory || (Number.isFinite(stock) && stock > 0)),
+        source: "catalog" as const,
       };
     })
     .filter((offering) => offering.name && offering.available);
@@ -325,6 +346,7 @@ export async function loadUniversalBusinessContext(input: {
     currency: service.currency,
     category: service.category,
     available: true,
+    source: "onboarding" as const,
   }));
 
   const paymentProvider = normalizePaymentProvider(
@@ -342,6 +364,7 @@ export async function loadUniversalBusinessContext(input: {
       ...hoursFrom(onboarding.business_hours),
       ...hoursFrom(onboarding.detected_business_hours),
       ...nodes.hours,
+      ...knowledgeCenter.hours,
     ],
     50
   );
@@ -365,7 +388,10 @@ export async function loadUniversalBusinessContext(input: {
     businessType: compactText(businessResult.data?.business_type, 120),
     tone,
     hours,
-    offerings: makeUniqueOfferings(productOfferings, serviceOfferings),
+    offerings: makeUniqueOfferings(productOfferings, [
+      ...serviceOfferings,
+      ...knowledgeCenter.offerings,
+    ]),
     promotions,
     payment: {
       provider: paymentProvider,
@@ -375,8 +401,14 @@ export async function loadUniversalBusinessContext(input: {
         50
       ),
     },
-    faqs: faqsFrom(onboarding.faqs),
-    policies: uniqueStrings(stringsFrom(onboarding.policies, 80), 80),
+    faqs: makeUniqueFaqs(knowledgeCenter.faqs, faqsFrom(onboarding.faqs)),
+    policies: uniqueStrings(
+      [
+        ...knowledgeCenter.policies,
+        ...stringsFrom(onboarding.policies, 80),
+      ],
+      80
+    ),
     address: compactText(onboarding.address, 500),
     humanHandoffRules: uniqueStrings(
       stringsFrom(onboarding.human_handoff_rules, 50),
@@ -393,6 +425,7 @@ export async function loadUniversalBusinessContext(input: {
       ],
       50
     ),
+    knowledge: knowledgeCenter.documents,
     summary,
     warnings,
   };
