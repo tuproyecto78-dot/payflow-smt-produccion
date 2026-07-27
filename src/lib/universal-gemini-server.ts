@@ -131,7 +131,7 @@ Devuelve exclusivamente JSON:
 {
   "act":"social|informational|transactional|cart_management|unknown",
   "topic":"greeting|offerings|promotions|payment|hours|location|policies|appointments|recommendation|cart|general",
-  "mode":"greet|browse|detail|recommend|select|quantity|total|reset|ask",
+  "mode":"greet|browse|detail|recommend|select|quantity|total|finish|reset|ask",
   "confidence":0.0,
   "offeringKeys":[],
   "knowledgeKeys":[],
@@ -148,6 +148,7 @@ Reglas:
 - Una pregunta sobre menú, precios, detalles, promociones o pagos es informational.
 - Mencionar una cantidad no convierte una consulta informativa en compra.
 - transactional exige una orden explícita e inequívoca de comprar, pedir o agregar.
+- "no", "ya no", "nada más" o "solo eso" después de una oferta o pedido es cart_management/finish.
 - Separa pedidos con varios artículos en orderItems, sin calcular ni ejecutar nada.
 - Si un artículo es ambiguo, deja offeringKey en null y conserva solo claves candidatas válidas.
 - Un número continúa la última lista respetando su orden y propósito.

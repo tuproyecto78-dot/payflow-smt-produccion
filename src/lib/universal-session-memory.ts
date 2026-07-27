@@ -660,6 +660,19 @@ export function transitionUniversalSessionMemory(input: {
       lastSuggestedOfferingKey = null;
     }
 
+    if (input.decision.intent === "finish_order_selection") {
+      lastPresentedOfferingKeys = [];
+      lastPresentedListPurpose = "information";
+      pendingOfferingKey = null;
+      pendingOrderDraft = null;
+      checkoutStage = input.state.cart.length
+        ? "awaiting_payment"
+        : "browsing";
+      selectedPaymentMethod = null;
+      lastSuggestedOfferingKey = null;
+      lastSelectionIndex = null;
+    }
+
     if (
       input.decision.intent === "clarification" &&
       input.decision.scopes.includes("cart") &&

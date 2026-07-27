@@ -97,11 +97,17 @@ rutas actuales y no forman parte de esta ejecución.
 - Todo estado restaurado se revalida contra el catálogo actual.
 - Una lista informativa mantiene su orden, pero no arma una compra.
 - Una lista de compra puede continuar con selección y cantidad.
+- Una negativa o “nada más” cierra la selección y nunca vuelve a mostrar el
+  catálogo.
 - Un pedido con varios artículos se aplica de forma atómica; si una variedad es
   ambigua, se conserva el borrador y no se elige al azar.
 - Repetir o corregir una cantidad reemplaza esa línea en vez de duplicarla.
 - Después de actualizar el pedido se muestra el resumen completo, el total y la
   pregunta de pago, pero solo se guarda una preferencia informativa.
+- Una consulta de pagos usa exclusivamente la configuración de pagos; si no hay
+  opciones habilitadas, se comunica sin lenguaje técnico.
+- Una solicitud de total devuelve únicamente el resumen y la suma, sin ofertas
+  ni preguntas adicionales.
 - Si no hay promociones, solo se anuncia un plato destacado cuando está
   configurado; de lo contrario se recomienda un producto real sin llamarlo
   “plato del día”.
