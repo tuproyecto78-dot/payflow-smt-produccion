@@ -8,6 +8,7 @@ import type {
   UniversalKnowledgeIndex,
   UniversalKnowledgeRetrieval,
 } from "./universal-conversation-contract";
+import { normalizeUniversalText } from "./universal-knowledge-engine";
 import type { UniversalSessionState } from "./universal-session-memory";
 
 function decision(input: Partial<UniversalPlannerDecision> & {
@@ -71,6 +72,28 @@ function diverseOfferingKeys(
     if (selected.length >= max) break;
   }
   return selected.map((item) => item.key);
+}
+
+function promotionSuggestionKey(
+  context: UniversalBusinessContext
+): string | null {
+  const featuredKnowledge = context.knowledge.filter((entry) =>
+    /\b(?:plato del dia|especialidad|recomendad|destacad|favorit)\b/.test(
+      normalizeUniversalText(
+        `${entry.title} ${entry.category} ${entry.content}`
+      )
+    )
+  );
+  for (const entry of featuredKnowledge) {
+    const content = normalizeUniversalText(
+      `${entry.title} ${entry.content}`
+    );
+    const offering = visibleOfferings(context).find((item) =>
+      content.includes(normalizeUniversalText(item.name))
+    );
+    if (offering) return offering.key;
+  }
+  return diverseOfferingKeys(context, 1)[0] || null;
 }
 
 function browseKeys(input: {
@@ -181,6 +204,22 @@ export function planUniversalDecision(input: {
     });
   }
 
+  if (
+    intent.topic === "payment" &&
+    intent.act === "transactional" &&
+    intent.mode === "select" &&
+    intent.paymentMethod &&
+    input.state.cart.length > 0
+  ) {
+    return decision({
+      intent: "select_payment_method",
+      confidence: intent.confidence,
+      scopes: ["identity", "payment", "cart"],
+      responseGoal:
+        "Registrar la preferencia informativa de pago sin ejecutar el cobro.",
+    });
+  }
+
   if (intent.topic === "payment") {
     return decision({
       intent: "query_payment",
@@ -191,11 +230,25 @@ export function planUniversalDecision(input: {
   }
 
   if (intent.topic === "promotions") {
+    const suggestionKey =
+      input.context.promotions.length === 0
+        ? promotionSuggestionKey(input.context)
+        : null;
     return decision({
       intent: "query_promotion",
       confidence: intent.confidence,
-      scopes: ["identity", "promotions", "faqs"],
-      responseGoal: "Responder solo con promociones vigentes registradas.",
+      scopes: suggestionKey
+        ? ["identity", "promotions", "faqs", "offerings"]
+        : ["identity", "promotions", "faqs"],
+      selection: suggestionKey
+        ? {
+            mode: "selected",
+            offeringKeys: [suggestionKey],
+            maxItems: 1,
+          }
+        : undefined,
+      responseGoal:
+        "Responder con promociones reales o una sugerencia validada del negocio.",
     });
   }
 
@@ -255,6 +308,101 @@ export function planUniversalDecision(input: {
   }
 
   if (intent.topic === "offerings") {
+    if (intent.act === "transactional" && intent.orderItems.length > 0) {
+      const unresolved = intent.orderItems.find(
+        (item) => !item.offeringKey
+      );
+      if (unresolved) {
+        const keys = uniqueOfferingKeys(
+          unresolved.candidateOfferingKeys,
+          input.context
+        );
+        const quantityLabel = unresolved.quantity
+          ? `${unresolved.quantity} × `
+          : "";
+        return decision({
+          intent: "clarification",
+          confidence: intent.confidence,
+          scopes: ["identity", "offerings", "cart"],
+          selection: {
+            mode: "preview",
+            offeringKeys: keys,
+            maxItems: keys.length || 5,
+          },
+          needsClarification: true,
+          clarificationQuestion: keys.length
+            ? `¿Cuál opción prefieres para ${quantityLabel}${unresolved.phrase}?`
+            : `¿Qué producto deseas para ${quantityLabel}${unresolved.phrase}?`,
+          responseGoal:
+            "Resolver un artículo ambiguo sin modificar parcialmente el pedido.",
+        });
+      }
+
+      const missingQuantity = intent.orderItems.find(
+        (item) => item.offeringKey && !item.quantity
+      );
+      if (missingQuantity?.offeringKey) {
+        const offering = input.context.offerings.find(
+          (item) => item.key === missingQuantity.offeringKey
+        );
+        if (offering) {
+          return decision({
+            intent: "clarification",
+            confidence: intent.confidence,
+            scopes: ["identity", "offerings", "cart"],
+            selection: {
+              mode: "selected",
+              offeringKeys: [offering.key],
+              maxItems: 1,
+            },
+            needsClarification: true,
+            clarificationQuestion: `¿Cuántas unidades de ${offering.name} deseas?`,
+            responseGoal: "Pedir únicamente la cantidad faltante.",
+          });
+        }
+      }
+
+      const validItems = intent.orderItems.filter(
+        (
+          item
+        ): item is typeof item & {
+          offeringKey: string;
+          quantity: number;
+        } => Boolean(item.offeringKey && item.quantity)
+      );
+      if (validItems.length === intent.orderItems.length) {
+        const cartByKey = new Map(
+          input.state.cart.map((item) => [
+            item.offeringKey,
+            item.quantity,
+          ])
+        );
+        const cartActions = validItems.map((item) => ({
+          type:
+            intent.orderOperation === "add" ||
+            !cartByKey.has(item.offeringKey)
+              ? ("add" as const)
+              : ("set" as const),
+          offeringKey: item.offeringKey,
+          quantity: item.quantity,
+        }));
+        const offeringKeys = validItems.map((item) => item.offeringKey);
+        return decision({
+          intent: "add_to_cart",
+          confidence: intent.confidence,
+          scopes: ["identity", "offerings", "cart", "payment"],
+          selection: {
+            mode: "selected",
+            offeringKeys,
+            maxItems: Math.min(offeringKeys.length, 5),
+          },
+          cartActions,
+          responseGoal:
+            "Actualizar todos los artículos, mostrar el resumen y avanzar al medio de pago.",
+        });
+      }
+    }
+
     const offering = selectedOffering({
       candidate: intent,
       context: input.context,

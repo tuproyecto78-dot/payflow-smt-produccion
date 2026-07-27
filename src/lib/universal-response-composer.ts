@@ -9,6 +9,10 @@ import type {
   UniversalIntentCandidate,
   UniversalKnowledgeRetrieval,
 } from "./universal-conversation-contract";
+import {
+  configuredPaymentMethods,
+} from "./universal-order-parser";
+import { normalizeUniversalText } from "./universal-knowledge-engine";
 import type { UniversalSessionState } from "./universal-session-memory";
 
 function money(value: number, currency: string): string {
@@ -61,6 +65,51 @@ function cartTotals(
     .join(" + ");
 }
 
+function cartSummary(
+  state: UniversalSessionState,
+  context: UniversalBusinessContext
+): string {
+  const cart = getUniversalCartSnapshot(state, context);
+  if (!cart.items.length) return "";
+  return cart.items
+    .map(
+      (item) =>
+        `• ${item.quantity} × ${item.name} — ${money(
+          item.subtotal,
+          item.currency
+        )}`
+    )
+    .join("\n");
+}
+
+function paymentInvitation(context: UniversalBusinessContext): string {
+  const methods = configuredPaymentMethods(context.payment);
+  if (methods.length) {
+    return `Opciones: ${methods.join(" o ")}.`;
+  }
+  if (
+    context.payment.provider !== "none" &&
+    context.payment.provider !== "unknown" &&
+    context.payment.summary
+  ) {
+    return context.payment.summary;
+  }
+  return "La forma de pago se confirma antes de finalizar.";
+}
+
+function featuredBusinessKnowledge(
+  context: UniversalBusinessContext
+): string | null {
+  const featured = context.knowledge.find((entry) =>
+    /\b(?:plato del dia|especialidad|recomendad|destacad|favorit)\b/.test(
+      normalizeUniversalText(
+        `${entry.title} ${entry.category} ${entry.content}`
+      )
+    )
+  );
+  return featured?.content.trim() || null;
+}
+
 export function composeUniversalCommercialAnswer(input: {
   message: string;
   candidate: UniversalIntentCandidate;
@@ -81,7 +130,11 @@ export function composeUniversalCommercialAnswer(input: {
     (intent === "clarification" && chosen.length > 1)
   ) {
     const title =
-      intent === "recommendation" ? "Te recomendamos:" : "Estas son las opciones:";
+      intent === "recommendation"
+        ? "Te recomendamos:"
+        : intent === "clarification" && input.candidate.orderItems.length
+          ? "Para completar tu pedido, elige una opción:"
+          : "Claro, estas son las opciones:";
     const purchaseFlow = input.decision.scopes.includes("cart");
     const closing = purchaseFlow
       ? input.decision.clarificationQuestion ||
@@ -111,19 +164,34 @@ export function composeUniversalCommercialAnswer(input: {
     const available = promotions.length
       ? promotions
       : input.context.promotions.slice(0, 3);
-    answer = available.length
-      ? `Promociones vigentes:\n${available
-          .map((promotion) => `• ${promotion}`)
-          .join("\n")}\n¿Cuál te interesa?`
-      : "Hoy no tenemos promociones registradas. ¿Deseas ver las opciones disponibles?";
+    if (available.length) {
+      answer = `Promociones vigentes:\n${available
+        .map((promotion) => `• ${promotion}`)
+        .join("\n")}\n¿Cuál te interesa?`;
+    } else {
+      const featured = featuredBusinessKnowledge(input.context);
+      const suggestion = chosen[0];
+      answer = featured
+        ? `Hoy no hay promociones activas. ${featured} ¿Te interesa?`
+        : suggestion
+          ? `Hoy no hay promociones activas. Te sugerimos ${offeringLine(
+              suggestion
+            ).replace(/^•\s*/, "")}. ¿Deseas agregarlo?`
+          : "Hoy no hay promociones activas. ¿Deseas ver nuestras opciones?";
+    }
   } else if (intent === "query_payment") {
     const paymentAnswers = relevantKnowledgeAnswers(input.retrieval, [
       "payment",
       "faq",
       "document",
     ]);
+    const choosing =
+      input.state.cart.length > 0 &&
+      input.state.sessionMemory.checkoutStage === "awaiting_payment";
     if (paymentAnswers.length) {
-      answer = `${paymentAnswers.slice(0, 2).join(" ")} ¿Deseas consultar algo más?`;
+      answer = choosing
+        ? `${paymentAnswers.slice(0, 2).join(" ")} ¿Cuál prefieres?`
+        : `${paymentAnswers.slice(0, 2).join(" ")} ¿Deseas consultar algo más?`;
     } else if (
       input.context.payment.provider === "none" ||
       input.context.payment.provider === "unknown"
@@ -180,27 +248,33 @@ export function composeUniversalCommercialAnswer(input: {
       ? `${Array.from(new Set(available)).slice(0, 3).join(" ")} ¿Qué día te interesa?`
       : "Podemos revisar una cita, pero aún no hay condiciones de agenda registradas. ¿Qué día te interesa?";
   } else if (intent === "add_to_cart") {
-    const action = input.decision.cartActions.find(
-      (item) => item.type === "add" || item.type === "set"
-    );
-    const offering = action?.offeringKey
-      ? input.context.offerings.find((item) => item.key === action.offeringKey)
-      : null;
-    const quantity = action?.quantity || 0;
-    const subtotal =
-      offering?.price && quantity
-        ? money(offering.price * quantity, offering.currency)
-        : "por calcular";
-    answer = offering
-      ? `Agregamos ${quantity} × ${offering.name}. Subtotal: ${subtotal}. Total temporal: ${
-          cartTotals(input.state, input.context) || "por calcular"
-        }. ¿Deseas algo más?`
+    const summary = cartSummary(input.state, input.context);
+    const totals = cartTotals(input.state, input.context);
+    const payment = paymentInvitation(input.context);
+    answer = summary
+      ? `Perfecto, tu pedido hasta ahora:\n${summary}\nTotal: ${
+          totals || "por calcular"
+        }.\n${
+          input.candidate.checkoutRequested
+            ? "¿Cómo deseas pagar?"
+            : "¿Deseas agregar algo más o cómo prefieres pagar?"
+        } ${payment}`
       : "No pudimos validar esa opción. ¿Cuál deseas agregar?";
   } else if (intent === "cart_total") {
     const cart = getUniversalCartSnapshot(input.state, input.context);
     answer = cart.unitCount
-      ? `Tu total temporal es ${cartTotals(input.state, input.context)}. ¿Deseas algo más?`
+      ? `Tu pedido:\n${cartSummary(input.state, input.context)}\nTotal: ${cartTotals(
+          input.state,
+          input.context
+        )}.\n¿Cómo deseas pagar? ${paymentInvitation(input.context)}`
       : "Tu pedido temporal está vacío. ¿Qué deseas agregar?";
+  } else if (intent === "select_payment_method") {
+    const summary = cartSummary(input.state, input.context);
+    answer = `Perfecto, elegiste ${
+      input.candidate.paymentMethod || "la forma de pago indicada"
+    }.\n${summary}\nTotal: ${
+      cartTotals(input.state, input.context) || "por calcular"
+    }.\n¿Confirmas el resumen?`;
   } else if (intent === "reset_cart") {
     answer = "Listo, iniciamos un pedido nuevo. ¿Qué deseas agregar?";
   } else if (intent === "clarification") {

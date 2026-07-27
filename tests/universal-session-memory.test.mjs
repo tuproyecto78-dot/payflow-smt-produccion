@@ -357,7 +357,7 @@ test("revalidates persisted session memory against the active business", () => {
   ]);
   assert.equal(state.sessionMemory.pendingOfferingKey, null);
   assert.equal(state.sessionMemory.lastPresentedListPurpose, "information");
-  assert.equal(state.sessionMemory.version, 2);
+  assert.equal(state.sessionMemory.version, 3);
   assert.equal(state.sessionMemory.intentCounts.discover_offerings, 3);
 });
 

@@ -39,6 +39,19 @@ export type UniversalIntentMode =
 
 export type UniversalIntentSource = "local" | "model" | "memory" | "policy";
 
+export type UniversalOrderOperation = "add" | "set";
+
+/**
+ * A semantic line item. Ambiguous items keep their validated candidate keys
+ * instead of guessing a catalog entry.
+ */
+export type UniversalOrderItemCandidate = {
+  phrase: string;
+  quantity: number | null;
+  offeringKey: string | null;
+  candidateOfferingKeys: string[];
+};
+
 /**
  * Semantic interpretation only. It deliberately has no cart actions.
  * Mutations are created later by the deterministic policy layer.
@@ -52,6 +65,10 @@ export type UniversalIntentCandidate = {
   knowledgeKeys: string[];
   quantity: number | null;
   selectionIndex: number | null;
+  orderItems: UniversalOrderItemCandidate[];
+  orderOperation: UniversalOrderOperation;
+  checkoutRequested: boolean;
+  paymentMethod: string | null;
   source: UniversalIntentSource;
   evidence: string[];
 };
@@ -118,6 +135,13 @@ export type UniversalSemanticClassifierInput = {
     }>;
     lastPresentedListPurpose: "information" | "purchase";
     pendingOffering: string | null;
+    checkoutStage:
+      | "browsing"
+      | "building_order"
+      | "awaiting_payment"
+      | "payment_selected";
+    selectedPaymentMethod: string | null;
+    pendingOrderItemCount: number;
     recentTurns: Array<{ role: "customer" | "business"; text: string }>;
   };
 };

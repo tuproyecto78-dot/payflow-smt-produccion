@@ -137,6 +137,10 @@ Devuelve exclusivamente JSON:
   "knowledgeKeys":[],
   "quantity":null,
   "selectionIndex":null,
+  "orderItems":[{"phrase":"","quantity":null,"offeringKey":null,"candidateOfferingKeys":[]}],
+  "orderOperation":"add|set",
+  "checkoutRequested":false,
+  "paymentMethod":null,
   "evidence":[]
 }
 Reglas:
@@ -144,6 +148,8 @@ Reglas:
 - Una pregunta sobre menú, precios, detalles, promociones o pagos es informational.
 - Mencionar una cantidad no convierte una consulta informativa en compra.
 - transactional exige una orden explícita e inequívoca de comprar, pedir o agregar.
+- Separa pedidos con varios artículos en orderItems, sin calcular ni ejecutar nada.
+- Si un artículo es ambiguo, deja offeringKey en null y conserva solo claves candidatas válidas.
 - Un número continúa la última lista respetando su orden y propósito.
 - No incluyas cartActions, respuestas, IDs nuevos ni datos no proporcionados.`;
 
@@ -170,6 +176,33 @@ function modelCandidate(data: Record<string, unknown>): UniversalIntentCandidate
     quantity: data.quantity === null ? null : Number(data.quantity),
     selectionIndex:
       data.selectionIndex === null ? null : Number(data.selectionIndex),
+    orderItems: Array.isArray(data.orderItems)
+      ? data.orderItems.map((rawItem) => {
+          const item = safeRecord(rawItem);
+          return {
+            phrase: String(item.phrase || ""),
+            quantity:
+              item.quantity === null ? null : Number(item.quantity),
+            offeringKey:
+              item.offeringKey === null
+                ? null
+                : String(item.offeringKey || ""),
+            candidateOfferingKeys: Array.isArray(
+              item.candidateOfferingKeys
+            )
+              ? item.candidateOfferingKeys.map((key) =>
+                  String(key || "")
+                )
+              : [],
+          };
+        })
+      : [],
+    orderOperation: data.orderOperation === "add" ? "add" : "set",
+    checkoutRequested: data.checkoutRequested === true,
+    paymentMethod:
+      data.paymentMethod === null
+        ? null
+        : String(data.paymentMethod || ""),
     source: "model",
     evidence: Array.isArray(data.evidence)
       ? data.evidence.map((entry) => String(entry || ""))

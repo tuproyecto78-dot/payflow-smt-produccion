@@ -1,8 +1,15 @@
+import type { UniversalBusinessContext } from "./universal-agent-contract";
 import type { UniversalSessionState } from "./universal-session-memory";
 import {
   normalizeUniversalText,
   universalTokens,
 } from "./universal-knowledge-engine";
+import {
+  continueUniversalOrderDraft,
+  isAffirmativeCommercialReply,
+  parseUniversalOrderRequest,
+  selectedConfiguredPaymentMethod,
+} from "./universal-order-parser";
 import type {
   UniversalConversationAct,
   UniversalIntentCandidate,
@@ -265,9 +272,44 @@ function candidate(
     knowledgeKeys: input.knowledgeKeys || [],
     quantity: input.quantity ?? null,
     selectionIndex: input.selectionIndex ?? null,
+    orderItems: input.orderItems || [],
+    orderOperation: input.orderOperation || "set",
+    checkoutRequested: input.checkoutRequested === true,
+    paymentMethod: input.paymentMethod || null,
     source: input.source || "local",
     evidence: input.evidence || [],
   };
+}
+
+function hasPurchaseVerb(tokens: string[]): boolean {
+  const roots = [
+    "agreg",
+    "anad",
+    "compr",
+    "encarg",
+    "llev",
+    "orden",
+    "ped",
+    "pon",
+    "solicit",
+  ];
+  return tokens.some(
+    (token) =>
+      ["dame", "deme"].includes(token) ||
+      roots.some((root) => token.startsWith(root))
+  );
+}
+
+function hasOperationalPurchaseVerb(tokens: string[]): boolean {
+  return tokens.some(
+    (token) =>
+      ["dame", "deme", "compro", "pido", "pedi", "llevo"].includes(
+        token
+      ) ||
+      ["agreg", "anad", "encarg", "ponme", "solicit"].some((root) =>
+        token.startsWith(root)
+      )
+  );
 }
 
 function inferredTopic(tokens: string[], state: UniversalSessionState): UniversalIntentTopic {
@@ -300,12 +342,18 @@ function inferredTopic(tokens: string[], state: UniversalSessionState): Universa
 export function classifyLocalUniversalIntent(input: {
   message: string;
   state: UniversalSessionState;
+  context: UniversalBusinessContext;
+  index: UniversalKnowledgeIndex;
   retrieval: UniversalKnowledgeRetrieval;
 }): UniversalIntentCandidate {
   const text = normalizeUniversalText(input.message);
   const tokens = text.split(" ").filter(Boolean);
   const semanticTokens = universalTokens(text);
   const memory = input.state.sessionMemory;
+  const parsedOrder = parseUniversalOrderRequest({
+    message: input.message,
+    index: input.index,
+  });
   const combinedSelection = selectionAndQuantity(input.message);
   const number = bareNumber(input.message);
   const selectionIndex =
@@ -316,6 +364,88 @@ export function classifyLocalUniversalIntent(input: {
     combinedSelection?.quantity ||
     (memory.pendingOfferingKey && number ? number : null) ||
     explicitQuantity(input.message, selectionIndex);
+
+  const configuredPaymentMethod = selectedConfiguredPaymentMethod({
+    message: input.message,
+    payment: input.context.payment,
+  });
+  const paymentSelection =
+    configuredPaymentMethod &&
+    input.state.cart.length > 0 &&
+    ["awaiting_payment", "payment_selected"].includes(memory.checkoutStage) &&
+    !input.message.includes("?") &&
+    !hasConcept(tokens, CONCEPTS.interrogative);
+  if (paymentSelection) {
+    return candidate({
+      act: "transactional",
+      topic: "payment",
+      mode: "select",
+      confidence: 0.99,
+      paymentMethod: configuredPaymentMethod,
+      knowledgeKeys: input.retrieval.knowledgeKeys,
+      source: "memory",
+      evidence: ["configured_payment_selection"],
+    });
+  }
+
+  if (memory.pendingOrderDraft) {
+    const continued = continueUniversalOrderDraft({
+      message: input.message,
+      items: memory.pendingOrderDraft.items,
+      index: input.index,
+    });
+    if (continued.changed) {
+      return candidate({
+        act: "transactional",
+        topic: "offerings",
+        mode: continued.items.every((item) => item.offeringKey)
+          ? "quantity"
+          : "select",
+        confidence: 1,
+        offeringKeys: continued.items
+          .map((item) => item.offeringKey)
+          .filter((key): key is string => Boolean(key)),
+        knowledgeKeys: input.retrieval.knowledgeKeys,
+        quantity:
+          continued.items.length === 1
+            ? continued.items[0].quantity
+            : null,
+        orderItems: continued.items,
+        orderOperation: memory.pendingOrderDraft.operation,
+        checkoutRequested:
+          memory.pendingOrderDraft.checkoutRequested ||
+          parsedOrder.checkoutRequested,
+        source: "memory",
+        evidence: ["memory_order_draft_continuation"],
+      });
+    }
+  }
+
+  if (
+    memory.lastSuggestedOfferingKey &&
+    isAffirmativeCommercialReply(input.message)
+  ) {
+    return candidate({
+      act: "transactional",
+      topic: "offerings",
+      mode: "quantity",
+      confidence: 1,
+      offeringKeys: [memory.lastSuggestedOfferingKey],
+      knowledgeKeys: input.retrieval.knowledgeKeys,
+      quantity: 1,
+      orderItems: [
+        {
+          phrase: "sugerencia aceptada",
+          quantity: 1,
+          offeringKey: memory.lastSuggestedOfferingKey,
+          candidateOfferingKeys: [memory.lastSuggestedOfferingKey],
+        },
+      ],
+      orderOperation: "add",
+      source: "memory",
+      evidence: ["memory_suggestion_acceptance"],
+    });
+  }
 
   if (
     memory.pendingOfferingKey &&
@@ -386,18 +516,13 @@ export function classifyLocalUniversalIntent(input: {
     input.message.includes("?") ||
     hasConcept(tokens, CONCEPTS.information) ||
     hasConcept(tokens, CONCEPTS.interrogative);
-  const strongPurchaseCue = hasConcept(tokens, CONCEPTS.purchase);
-  const operationalPurchaseCue = hasConcept(tokens, [
-    "agrega",
-    "anade",
-    "ponme",
-    "dame",
-    "deme",
-    "compro",
-    "pido",
-    "llevo",
-  ]);
+  const strongPurchaseCue = hasPurchaseVerb(tokens);
+  const operationalPurchaseCue = hasOperationalPurchaseVerb(tokens);
   const desireCue = hasConcept(tokens, CONCEPTS.desire);
+  const informationQualifier =
+    hasConcept(tokens, CONCEPTS.information) ||
+    (hasConcept(tokens, ["precio", "precios", "cuesta", "costar"]) &&
+      !strongPurchaseCue);
   const resetCue =
     hasConcept(tokens, CONCEPTS.reset) &&
     hasConcept(tokens, CONCEPTS.cart);
@@ -415,7 +540,46 @@ export function classifyLocalUniversalIntent(input: {
     });
   }
 
-  if (totalCue && (input.state.cart.length > 0 || hasConcept(tokens, CONCEPTS.cart))) {
+  const completeOrderItems =
+    parsedOrder.items.length > 0 &&
+    parsedOrder.items.every((item) => item.quantity !== null);
+  const explicitOrderItems =
+    parsedOrder.items.length > 0 &&
+    !informationQualifier &&
+    (strongPurchaseCue || desireCue || completeOrderItems);
+
+  if (explicitOrderItems) {
+    const offeringKeys = parsedOrder.items
+      .map((item) => item.offeringKey)
+      .filter((key): key is string => Boolean(key));
+    return candidate({
+      act: "transactional",
+      topic: "offerings",
+      mode: parsedOrder.items.every(
+        (item) => item.offeringKey && item.quantity
+      )
+        ? "quantity"
+        : "select",
+      confidence: strongPurchaseCue || completeOrderItems ? 0.98 : 0.92,
+      offeringKeys,
+      knowledgeKeys: input.retrieval.knowledgeKeys,
+      quantity:
+        parsedOrder.items.length === 1
+          ? parsedOrder.items[0].quantity
+          : null,
+      selectionIndex,
+      orderItems: parsedOrder.items,
+      orderOperation: parsedOrder.operation,
+      checkoutRequested: parsedOrder.checkoutRequested || totalCue,
+      evidence: ["explicit_order_items"],
+    });
+  }
+
+  if (
+    totalCue &&
+    parsedOrder.items.length === 0 &&
+    (input.state.cart.length > 0 || hasConcept(tokens, CONCEPTS.cart))
+  ) {
     return candidate({
       act: "cart_management",
       topic: "cart",
@@ -427,7 +591,7 @@ export function classifyLocalUniversalIntent(input: {
 
   const hasOfferingReference = input.retrieval.offeringKeys.length > 0;
   const transactional =
-    !hasConcept(tokens, CONCEPTS.information) &&
+    !informationQualifier &&
     (!informationCue || operationalPurchaseCue) &&
     (strongPurchaseCue ||
       (desireCue &&
@@ -452,6 +616,8 @@ export function classifyLocalUniversalIntent(input: {
       knowledgeKeys: input.retrieval.knowledgeKeys,
       quantity,
       selectionIndex,
+      orderOperation: parsedOrder.operation,
+      checkoutRequested: parsedOrder.checkoutRequested,
       evidence: ["explicit_purchase"],
     });
   }
@@ -520,6 +686,47 @@ export function normalizeUniversalIntentCandidate(input: {
     ? (value.mode as UniversalIntentMode)
     : "ask";
   const numericConfidence = Number(value.confidence);
+  const orderItems = Array.isArray(value.orderItems)
+    ? value.orderItems
+        .slice(0, 12)
+        .map((rawItem) => {
+          const item = safeRecord(rawItem);
+          const directKey = String(item.offeringKey || "").trim();
+          const offeringKey = validOfferingKeys.has(directKey)
+            ? directKey
+            : null;
+          const candidateOfferingKeys = uniqueValidKeys(
+            item.candidateOfferingKeys,
+            validOfferingKeys,
+            5
+          );
+          const phrase = String(item.phrase || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 120);
+          if (!phrase || (!offeringKey && !candidateOfferingKeys.length)) {
+            return null;
+          }
+          return {
+            phrase,
+            quantity: finiteInteger(item.quantity),
+            offeringKey,
+            candidateOfferingKeys: offeringKey
+              ? [offeringKey]
+              : candidateOfferingKeys,
+          };
+        })
+        .filter(
+          (
+            item
+          ): item is {
+            phrase: string;
+            quantity: number | null;
+            offeringKey: string | null;
+            candidateOfferingKeys: string[];
+          } => Boolean(item)
+        )
+    : [];
 
   return candidate({
     act,
@@ -530,6 +737,13 @@ export function normalizeUniversalIntentCandidate(input: {
     knowledgeKeys: uniqueValidKeys(value.knowledgeKeys, validKnowledgeKeys),
     quantity: finiteInteger(value.quantity),
     selectionIndex: finiteInteger(value.selectionIndex, 1, 100),
+    orderItems,
+    orderOperation: value.orderOperation === "add" ? "add" : "set",
+    checkoutRequested: value.checkoutRequested === true,
+    paymentMethod:
+      typeof value.paymentMethod === "string"
+        ? value.paymentMethod.replace(/\s+/g, " ").trim().slice(0, 80) || null
+        : null,
     source: input.source || "model",
     evidence: Array.isArray(value.evidence)
       ? value.evidence
@@ -549,6 +763,10 @@ function transactionIsLocallyAuthorized(local: UniversalIntentCandidate): boolea
         "explicit_selection_quantity",
         "purchase_selection",
         "memory_pending_quantity",
+        "explicit_order_items",
+        "memory_order_draft_continuation",
+        "memory_suggestion_acceptance",
+        "configured_payment_selection",
       ].includes(entry)
     )
   );
@@ -598,6 +816,12 @@ export function resolveUniversalIntentCandidate(input: {
         new Set([...local.knowledgeKeys, ...model.knowledgeKeys])
       ).slice(0, 12),
       quantity: local.quantity ?? model.quantity,
+      orderItems:
+        local.orderItems.length > 0 ? local.orderItems : model.orderItems,
+      orderOperation: local.orderOperation,
+      checkoutRequested:
+        local.checkoutRequested || model.checkoutRequested,
+      paymentMethod: local.paymentMethod,
       confidence: Math.max(local.confidence, Math.min(model.confidence, 0.96)),
       source: "policy",
       evidence: [...local.evidence, "model_entity_resolution"],
