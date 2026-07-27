@@ -237,6 +237,8 @@ export function classifyUniversalIntent(input: {
       "deposito",
       "forma de pago",
       "formas de pago",
+      "medio de pago",
+      "medios de pago",
       "metodo de pago",
       "metodos de pago",
       "tipo de pago",
@@ -293,17 +295,58 @@ export function classifyUniversalIntent(input: {
       "opciones disponibles",
     ]) && matches.length === 0;
 
-  const addOperation = includesAny(text, [
-    "quiero",
+  const informationalRequest = includesAny(text, [
+    "quiero saber",
+    "quisiera saber",
+    "deseo saber",
+    "necesito saber",
+    "informacion",
+    "detalle",
+    "detalles",
+    "precio",
+    "precios",
+    "cuanto cuesta",
+    "que incluye",
+    "cual es",
+    "cuales son",
+    "quiero ver",
+    "quisiera ver",
+    "deseo ver",
+    "muestrame",
+    "mostrar",
+    "como hacer",
+    "como puedo pedir",
+    "como puedo comprar",
+    "proceso para pedir",
+    "proceso de compra",
+  ]);
+  const directPurchase = includesAny(text, [
+    "quiero pedir",
+    "quiero comprar",
+    "deseo pedir",
+    "deseo comprar",
+    "hacer un pedido",
+    "realizar un pedido",
+    "voy a pedir",
+    "me llevo",
+    "compro",
+    "pido",
     "dame",
     "deme",
     "agrega",
     "anade",
     "ponme",
-    "necesito",
-    "me llevo",
-    "voy a pedir",
   ]);
+  const explicitPurchase =
+    !informationalRequest &&
+    (directPurchase ||
+      ((selected !== null || matches.length > 0) &&
+        includesAny(text, [
+          "quiero",
+          "quisiera",
+          "deseo",
+          "necesito",
+        ])));
 
   if (resetCart) {
     return decision({
@@ -394,15 +437,29 @@ export function classifyUniversalIntent(input: {
 
   if (discover) {
     return decision({
-      intent: "discover_offerings",
+      intent: explicitPurchase ? "clarification" : "discover_offerings",
       confidence: 0.96,
-      scopes: ["identity", "offerings"],
-      selection: { mode: "preview", offeringKeys: [], maxItems: 5 },
-      responseGoal: "Mostrar máximo cinco productos o servicios reales y cerrar con una pregunta.",
+      scopes: explicitPurchase
+        ? ["identity", "offerings", "cart"]
+        : ["identity", "offerings"],
+      selection: {
+        mode: "preview",
+        offeringKeys: visibleOfferings(input.context)
+          .slice(0, 5)
+          .map((item) => item.key),
+        maxItems: 5,
+      },
+      needsClarification: explicitPurchase,
+      clarificationQuestion: explicitPurchase
+        ? "¿Cuál opción deseas agregar?"
+        : "",
+      responseGoal: explicitPurchase
+        ? "Mostrar opciones reales para resolver una compra explícita sin agregar nada todavía."
+        : "Mostrar máximo cinco opciones reales sin activar carrito ni pedir cantidades.",
     });
   }
 
-  if (selected && (addOperation || quantity !== null)) {
+  if (selected && explicitPurchase) {
     if (!quantity) {
       return decision({
         intent: "clarification",
@@ -451,19 +508,25 @@ export function classifyUniversalIntent(input: {
     return decision({
       intent: "clarification",
       confidence: 0.82,
-      scopes: ["identity", "offerings"],
+      scopes: explicitPurchase
+        ? ["identity", "offerings", "cart"]
+        : ["identity", "offerings"],
       selection: {
         mode: "selected",
         offeringKeys: candidates.map((item) => item.key),
         maxItems: candidates.length,
       },
       needsClarification: true,
-      clarificationQuestion: "¿Cuál de estas opciones deseas?",
-      responseGoal: "Mostrar las coincidencias reales y pedir una sola aclaración.",
+      clarificationQuestion: explicitPurchase
+        ? "¿Cuál opción deseas agregar?"
+        : "¿De cuál opción deseas información?",
+      responseGoal: explicitPurchase
+        ? "Resolver el producto de una compra explícita sin agregar nada todavía."
+        : "Mostrar coincidencias reales sin activar carrito ni pedir cantidades.",
     });
   }
 
-  if (addOperation || quantity !== null) {
+  if (explicitPurchase) {
     return decision({
       intent: "clarification",
       confidence: 0.78,
@@ -515,6 +578,21 @@ export function resolveUniversalPlannerDecision(input: {
   const baseline = input.baseline;
   if (!input.model) return baseline;
   const model = canonicalizeModelDecision(input.model);
+  const baselineAuthorizesCart =
+    baseline.intent === "add_to_cart" ||
+    baseline.intent === "reset_cart" ||
+    baseline.intent === "cart_total" ||
+    (baseline.intent === "clarification" && baseline.scopes.includes("cart"));
+  const modelTouchesCart =
+    model.cartActions.length > 0 ||
+    model.scopes.includes("cart") ||
+    model.intent === "add_to_cart" ||
+    model.intent === "reset_cart" ||
+    model.intent === "cart_total";
+
+  // Gemini may enrich semantics, but it cannot convert an informational
+  // baseline into a purchase or mutate the cart.
+  if (modelTouchesCart && !baselineAuthorizesCart) return baseline;
 
   // High-signal universal capabilities are authoritative. Gemini may enrich
   // ambiguous/general requests but cannot reroute clear payment, promotion,
@@ -593,7 +671,15 @@ export function composeUniversalSafeAnswer(input: {
       : "Por ahora no tenemos productos o servicios disponibles registrados. ¿Qué estás buscando?";
   } else if (intent === "query_offering") {
     answer = chosen.length
-      ? `${chosen.slice(0, 5).map(offeringLine).join("\n")}\n¿Cuántas unidades deseas o qué detalle necesitas?`
+      ? `${chosen
+          .slice(0, 5)
+          .map((offering) => {
+            const detail = offering.description
+              ? ` · ${offering.description}`
+              : "";
+            return `${offeringLine(offering)}${detail}`;
+          })
+          .join("\n")}\n¿Deseas agregarlo a tu pedido?`
       : "No encuentro esa opción registrada. ¿Puedes indicarme el nombre o tipo que buscas?";
   } else if (intent === "query_promotion") {
     const matches = promotionMatches(input.message, input.context.promotions);

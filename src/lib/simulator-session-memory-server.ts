@@ -89,9 +89,13 @@ export async function recordSimulatorSessionTurn(input: {
       last_presented_count: Array.isArray(sessionMemory.lastPresentedOfferingKeys)
         ? sessionMemory.lastPresentedOfferingKeys.length
         : 0,
+      last_presented_list_purpose:
+        sessionMemory.lastPresentedListPurpose === "purchase"
+          ? "purchase"
+          : "information",
       intent_counts: safeRecord(sessionMemory.intentCounts),
       state,
-      memory_version: 1,
+      memory_version: 2,
       channel: "simulator",
       whatsapp_sent: false,
       payments_executed: false,

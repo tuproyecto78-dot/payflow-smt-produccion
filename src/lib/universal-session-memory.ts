@@ -14,8 +14,9 @@ import {
 } from "./universal-intent-engine";
 
 export type UniversalSessionMemory = {
-  version: 1;
+  version: 2;
   lastPresentedOfferingKeys: string[];
+  lastPresentedListPurpose: "information" | "purchase";
   pendingOfferingKey: string | null;
   intentCounts: Record<string, number>;
   lastSelectionIndex: number | null;
@@ -79,8 +80,9 @@ function validOfferingMap(context: UniversalBusinessContext) {
 
 function emptySessionMemory(): UniversalSessionMemory {
   return {
-    version: 1,
+    version: 2,
     lastPresentedOfferingKeys: [],
+    lastPresentedListPurpose: "information",
     pendingOfferingKey: null,
     intentCounts: {},
     lastSelectionIndex: null,
@@ -95,6 +97,7 @@ export function normalizeUniversalSessionState(
   const input = safeRecord(value);
   const rawMemory = safeRecord(input.sessionMemory);
   const offerings = validOfferingMap(context);
+  const memoryVersion = finiteInteger(rawMemory.version, 1, 2);
 
   const lastPresentedOfferingKeys = Array.isArray(rawMemory.lastPresentedOfferingKeys)
     ? Array.from(
@@ -107,9 +110,15 @@ export function normalizeUniversalSessionState(
     : [];
 
   const pendingCandidate = String(rawMemory.pendingOfferingKey || "").trim();
-  const pendingOfferingKey = offerings.has(pendingCandidate)
+  // Version 1 armed quantity collection after a bare informational selection.
+  // Do not restore that ambiguous state after deploying the strict purchase gate.
+  const pendingOfferingKey = memoryVersion === 2 && offerings.has(pendingCandidate)
     ? pendingCandidate
     : null;
+  const lastPresentedListPurpose =
+    memoryVersion === 2 && rawMemory.lastPresentedListPurpose === "purchase"
+      ? "purchase"
+      : "information";
 
   const intentCounts: Record<string, number> = {};
   const rawCounts = safeRecord(rawMemory.intentCounts);
@@ -122,8 +131,9 @@ export function normalizeUniversalSessionState(
   return {
     ...base,
     sessionMemory: {
-      version: 1,
+      version: 2,
       lastPresentedOfferingKeys,
+      lastPresentedListPurpose,
       pendingOfferingKey,
       intentCounts,
       lastSelectionIndex: finiteInteger(rawMemory.lastSelectionIndex, 1, 100),
@@ -153,6 +163,41 @@ function selectionWithQuantity(message: string): { index: number; quantity: numb
   return index && quantity ? { index, quantity } : null;
 }
 
+function explicitPurchaseSelection(
+  message: string
+): { index: number; quantity: number | null } | null {
+  const text = normalizeText(message);
+  const purchaseVerb =
+    /\b(?:agrega|anade|dame|deme|ponme|compro|comprar|pido|pedir|quiero|deseo|me llevo)\b/.test(
+      text
+    );
+  if (!purchaseVerb) return null;
+
+  const quantityAndOption = text.match(
+    /\b(\d{1,2})\s+unidades?\s+(?:de\s+)?(?:la\s+|el\s+)?(?:opcion|numero)\s+(\d{1,2})\b/
+  );
+  if (quantityAndOption) {
+    const quantity = finiteInteger(quantityAndOption[1], 1, 99);
+    const index = finiteInteger(quantityAndOption[2], 1, 100);
+    return index && quantity ? { index, quantity } : null;
+  }
+
+  const option = text.match(
+    /\b(?:opcion|numero)\s+(\d{1,2})(?:\s+(?:cantidad\s+)?(\d{1,2})\s+unidades?)?\b/
+  );
+  if (option) {
+    const index = finiteInteger(option[1], 1, 100);
+    const quantity = option[2] ? finiteInteger(option[2], 1, 99) : null;
+    return index ? { index, quantity } : null;
+  }
+
+  const direct = text.match(
+    /\b(?:agrega|anade|dame|deme|ponme|compro|pido|quiero|deseo|me llevo)(?:\s+(?:el|la))?\s+(\d{1,2})\b/
+  );
+  const index = direct ? finiteInteger(direct[1], 1, 100) : null;
+  return index ? { index, quantity: null } : null;
+}
+
 function plannerDecision(input: Partial<UniversalPlannerDecision> & {
   intent: string;
 }): UniversalPlannerDecision {
@@ -179,6 +224,7 @@ export function classifyUniversalSessionIntent(input: {
 }): UniversalPlannerDecision {
   const number = numberFromSingleExpression(input.message);
   const withQuantity = selectionWithQuantity(input.message);
+  const purchaseSelection = explicitPurchaseSelection(input.message);
   const offerings = validOfferingMap(input.context);
   const memory = input.state.sessionMemory || emptySessionMemory();
 
@@ -236,7 +282,57 @@ export function classifyUniversalSessionIntent(input: {
     });
   }
 
-  // A bare number after a numbered list selects that exact position.
+  if (purchaseSelection && memory.lastPresentedOfferingKeys.length) {
+    const key = memory.lastPresentedOfferingKeys[purchaseSelection.index - 1];
+    const offering = key ? offerings.get(key) : null;
+    if (!offering) {
+      return plannerDecision({
+        intent: "clarification",
+        scopes: ["identity", "offerings"],
+        needsClarification: true,
+        clarificationQuestion: `Elige una opción del 1 al ${memory.lastPresentedOfferingKeys.length}.`,
+        responseGoal: "Pedir una selección válida de la última lista mostrada.",
+      });
+    }
+
+    if (purchaseSelection.quantity) {
+      return plannerDecision({
+        intent: "add_to_cart",
+        scopes: ["identity", "offerings", "cart"],
+        selection: {
+          mode: "selected",
+          offeringKeys: [offering.key],
+          maxItems: 1,
+        },
+        cartActions: [
+          {
+            type: "add",
+            offeringKey: offering.key,
+            quantity: purchaseSelection.quantity,
+          },
+        ],
+        responseGoal:
+          "Agregar la opción solicitada explícitamente y mostrar subtotal y total.",
+      });
+    }
+
+    return plannerDecision({
+      intent: "clarification",
+      scopes: ["identity", "offerings", "cart"],
+      selection: {
+        mode: "selected",
+        offeringKeys: [offering.key],
+        maxItems: 1,
+      },
+      needsClarification: true,
+      clarificationQuestion: `¿Cuántas unidades de ${offering.name} deseas?`,
+      responseGoal:
+        "La compra fue explícita; pedir únicamente la cantidad faltante.",
+    });
+  }
+
+  // A bare number only continues a purchase when the remembered list was
+  // presented to resolve an explicit order. Otherwise it requests details.
   if (number && memory.lastPresentedOfferingKeys.length) {
     const key = memory.lastPresentedOfferingKeys[number - 1];
     const offering = key ? offerings.get(key) : null;
@@ -249,6 +345,21 @@ export function classifyUniversalSessionIntent(input: {
         responseGoal: "Pedir una selección válida de la última lista mostrada.",
       });
     }
+
+    if (memory.lastPresentedListPurpose !== "purchase") {
+      return plannerDecision({
+        intent: "query_offering",
+        scopes: ["identity", "offerings"],
+        selection: {
+          mode: "selected",
+          offeringKeys: [offering.key],
+          maxItems: 1,
+        },
+        responseGoal:
+          "Informar sobre la opción seleccionada sin pedir cantidad ni activar carrito.",
+      });
+    }
+
     return plannerDecision({
       intent: "select_presented_option",
       scopes: ["identity", "offerings", "cart"],
@@ -315,10 +426,10 @@ export function composeUniversalSessionAnswer(input: {
     (intent === "query_offering" && chosen.length > 1)
   ) {
     const title = intent === "recommendation" ? "Te recomendamos:" : "Estas son las opciones:";
-    const closing =
-      intent === "clarification"
-        ? input.decision.clarificationQuestion || "¿Cuál opción deseas?"
-        : "Responde con el número de la opción que deseas.";
+    const closing = input.decision.scopes.includes("cart")
+      ? input.decision.clarificationQuestion ||
+        "Responde con el número de la opción que deseas agregar."
+      : "Responde con un número para ver los detalles.";
     const answer = chosen.length
       ? `${title}\n${numberedOfferingLines(chosen)}\n${closing}`
       : "No encontramos opciones registradas. ¿Qué estás buscando?";
@@ -393,22 +504,30 @@ export function transitionUniversalSessionMemory(input: {
   );
 
   let lastPresentedOfferingKeys = current.lastPresentedOfferingKeys;
+  let lastPresentedListPurpose = current.lastPresentedListPurpose;
   let pendingOfferingKey = current.pendingOfferingKey;
   let lastSelectionIndex = current.lastSelectionIndex;
 
   if (input.decision.intent === "reset_cart") {
     lastPresentedOfferingKeys = [];
+    lastPresentedListPurpose = "information";
     pendingOfferingKey = null;
     lastSelectionIndex = null;
   } else {
     const presented = presentedKeysForDecision(input.decision, input.context);
     if (presented.length) {
       lastPresentedOfferingKeys = presented;
+      lastPresentedListPurpose = input.decision.scopes.includes("cart")
+        ? "purchase"
+        : "information";
       pendingOfferingKey = null;
       lastSelectionIndex = null;
     }
 
-    if (input.decision.intent === "select_presented_option") {
+    if (
+      input.decision.intent === "select_presented_option" &&
+      lastPresentedListPurpose === "purchase"
+    ) {
       pendingOfferingKey = input.decision.selection.offeringKeys[0] || null;
       const selectedIndex = pendingOfferingKey
         ? lastPresentedOfferingKeys.indexOf(pendingOfferingKey)
@@ -428,8 +547,9 @@ export function transitionUniversalSessionMemory(input: {
   return {
     ...input.state,
     sessionMemory: {
-      version: 1,
+      version: 2,
       lastPresentedOfferingKeys,
+      lastPresentedListPurpose,
       pendingOfferingKey,
       intentCounts,
       lastSelectionIndex,
@@ -465,6 +585,7 @@ export function buildUniversalSessionPlannerMemory(
           : null;
       })
       .filter(Boolean),
+    lastPresentedListPurpose: state.sessionMemory.lastPresentedListPurpose,
     pendingOffering: state.sessionMemory.pendingOfferingKey
       ? byKey.get(state.sessionMemory.pendingOfferingKey)?.name || null
       : null,

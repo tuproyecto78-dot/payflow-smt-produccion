@@ -109,6 +109,38 @@ test('"qué venden" discovers at most five real offerings', () => {
   assertCommercialSafe(text);
 });
 
+test('"cuál es el menú" stays informational and remembers the displayed list', () => {
+  let state = normalizeUniversalSessionState(null, context);
+  const result = classifyUniversalSessionIntent({
+    message: "¿Cuál es el menú?",
+    context,
+    state,
+  });
+
+  assert.equal(result.intent, "discover_offerings");
+  assert.deepEqual(result.scopes, ["identity", "offerings"]);
+  assert.equal(result.cartActions.length, 0);
+
+  const text = composeUniversalSessionAnswer({
+    message: "¿Cuál es el menú?",
+    decision: result,
+    context,
+    state,
+  });
+  assert.match(text, /Responde con un número para ver los detalles/i);
+  assert.doesNotMatch(text, /cuántas unidades|subtotal|total temporal/i);
+  assertCommercialSafe(text);
+
+  state = transitionUniversalSessionMemory({
+    state,
+    decision: result,
+    context,
+  });
+  assert.ok(state.sessionMemory.lastPresentedOfferingKeys.length > 0);
+  assert.equal(state.sessionMemory.lastPresentedListPurpose, "information");
+  assert.equal(state.sessionMemory.pendingOfferingKey, null);
+});
+
 test('"2x1 en viernes" queries only real promotions', () => {
   const result = classify("¿Tienen 2x1 en viernes?");
   assert.equal(result.intent, "query_promotion");
@@ -183,6 +215,65 @@ test('"aceptan transferencia" uses payment only and never catalog', () => {
   const text = answer("¿aceptan transferencia?", result);
   assert.match(text, /Aceptamos transferencia bancaria/);
   assert.doesNotMatch(text, /Papas|Hamburguesa|Bebida/);
+  assertCommercialSafe(text);
+});
+
+test('"medios de pagos" is informational and never activates cart', () => {
+  const result = classify("¿Cuáles son los medios de pagos?");
+  assert.equal(result.intent, "query_payment");
+  assert.deepEqual(result.scopes, ["identity", "payment"]);
+  assert.equal(result.selection.offeringKeys.length, 0);
+  assert.equal(result.cartActions.length, 0);
+
+  const text = answer("¿Cuáles son los medios de pagos?", result);
+  assert.doesNotMatch(text, /unidades|subtotal|total temporal|Hamburguesa|Papas/i);
+  assertCommercialSafe(text);
+});
+
+test("Gemini cannot turn an informational baseline into a cart action", () => {
+  const baseline = classify("Quiero saber el precio de la Hamburguesa Clásica");
+  assert.equal(baseline.intent, "query_offering");
+
+  const resolved = resolveUniversalPlannerDecision({
+    baseline,
+    model: {
+      intent: "add_to_cart",
+      confidence: 0.99,
+      scopes: ["identity", "offerings", "cart"],
+      selection: {
+        mode: "selected",
+        offeringKeys: ["product:hamburguesa-clasica"],
+        maxItems: 1,
+      },
+      cartActions: [
+        {
+          type: "add",
+          offeringKey: "product:hamburguesa-clasica",
+          quantity: 1,
+        },
+      ],
+      needsClarification: false,
+      clarificationQuestion: "",
+      responseGoal: "Agregar al carrito.",
+    },
+  });
+
+  assert.equal(resolved.intent, "query_offering");
+  assert.equal(resolved.cartActions.length, 0);
+  assert.ok(!resolved.scopes.includes("cart"));
+});
+
+test("price and quantity wording remains informational without a buy command", () => {
+  const result = classify("Quiero saber el precio de dos porciones de papas");
+  assert.equal(result.intent, "query_offering");
+  assert.equal(result.cartActions.length, 0);
+  assert.ok(!result.scopes.includes("cart"));
+
+  const text = answer(
+    "Quiero saber el precio de dos porciones de papas",
+    result
+  );
+  assert.doesNotMatch(text, /agregamos|subtotal|total temporal|cuántas unidades/i);
   assertCommercialSafe(text);
 });
 
@@ -294,7 +385,7 @@ const memoryContext = {
   ],
 };
 
-test("session memory preserves list order and resolves option 3", () => {
+test("session memory preserves an informational list without arming option 3", () => {
   let state = normalizeUniversalSessionState(null, memoryContext);
   const category = classifyUniversalSessionIntent({
     message: "hamburguesas",
@@ -323,7 +414,7 @@ test("session memory preserves list order and resolves option 3", () => {
     context: memoryContext,
     state,
   });
-  assert.equal(selection.intent, "select_presented_option");
+  assert.equal(selection.intent, "query_offering");
   assert.deepEqual(selection.selection.offeringKeys, [
     "product:hamburguesa-doble",
   ]);
@@ -333,22 +424,22 @@ test("session memory preserves list order and resolves option 3", () => {
     decision: selection,
     context: memoryContext,
   });
-  assert.equal(
-    state.sessionMemory.pendingOfferingKey,
-    "product:hamburguesa-doble"
-  );
+  assert.equal(state.sessionMemory.pendingOfferingKey, null);
+  assert.equal(state.sessionMemory.lastPresentedListPurpose, "information");
 });
 
 test("the next number becomes quantity and totals are accumulated", () => {
   let state = normalizeUniversalSessionState(
     {
       sessionMemory: {
+        version: 2,
         lastPresentedOfferingKeys: [
           "product:hamburguesa-bbq",
           "product:hamburguesa-clasica",
           "product:hamburguesa-doble",
           "product:hamburguesa-vegana",
         ],
+        lastPresentedListPurpose: "purchase",
         pendingOfferingKey: "product:hamburguesa-doble",
         intentCounts: {},
         lastSelectionIndex: 3,
@@ -428,10 +519,12 @@ test("an out-of-range number never adds a random product", () => {
   const state = normalizeUniversalSessionState(
     {
       sessionMemory: {
+        version: 2,
         lastPresentedOfferingKeys: [
           "product:hamburguesa-bbq",
           "product:hamburguesa-clasica",
         ],
+        lastPresentedListPurpose: "information",
       },
     },
     memoryContext
