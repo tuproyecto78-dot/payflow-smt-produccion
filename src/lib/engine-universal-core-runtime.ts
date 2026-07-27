@@ -67,6 +67,7 @@ function resultForConversation(input: {
   architectureVersion: number;
   act: string;
   topic: string;
+  requestedTopics: string[];
   classifierModel: string;
   responseModel: string;
   knowledgeCount: number;
@@ -177,6 +178,7 @@ function resultForConversation(input: {
       ai_architecture_version: input.architectureVersion,
       ai_conversation_act: input.act,
       ai_topic: input.topic,
+      ai_topics: input.requestedTopics,
       business_context_loaded: true,
       business_name: input.businessName,
       business_type: input.businessType,
@@ -201,10 +203,14 @@ function emptySessionState(): UniversalSessionState {
   return {
     ...emptyUniversalAgentState(),
     sessionMemory: {
-      version: 2,
+      version: 3,
       lastPresentedOfferingKeys: [],
       lastPresentedListPurpose: "information",
       pendingOfferingKey: null,
+      pendingOrderDraft: null,
+      checkoutStage: "browsing",
+      selectedPaymentMethod: null,
+      lastSuggestedOfferingKey: null,
       intentCounts: {},
       lastSelectionIndex: null,
     },
@@ -298,6 +304,8 @@ export async function executeWorkflow(
       architectureVersion: conversation.diagnostics.architectureVersion,
       act: conversation.diagnostics.resolvedCandidate.act,
       topic: conversation.diagnostics.resolvedCandidate.topic,
+      requestedTopics:
+        conversation.diagnostics.resolvedCandidate.requestedTopics,
       classifierModel: conversation.diagnostics.classifierModel,
       responseModel: conversation.diagnostics.responseModel,
       knowledgeCount: conversation.diagnostics.retrievedKnowledgeCount,

@@ -183,6 +183,17 @@ function uniqueValidKeys(values: unknown, valid: Set<string>, max = 12): string[
   ).slice(0, max);
 }
 
+function uniqueValidTopics(values: unknown): UniversalIntentTopic[] {
+  if (!Array.isArray(values)) return [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim() as UniversalIntentTopic)
+        .filter((value) => VALID_TOPICS.has(value))
+    )
+  ).slice(0, VALID_TOPICS.size);
+}
+
 function bareNumber(message: string): number | null {
   const text = normalizeUniversalText(message);
   const match = text.match(
@@ -264,9 +275,17 @@ function candidate(
     mode: UniversalIntentMode;
   }
 ): UniversalIntentCandidate {
+  const allRequestedTopics = Array.from(
+    new Set([input.topic, ...(input.requestedTopics || [])])
+  ).filter((topic) => VALID_TOPICS.has(topic));
+  const requestedTopics =
+    allRequestedTopics.length > 1
+      ? allRequestedTopics.filter((topic) => topic !== "general")
+      : allRequestedTopics;
   return {
     act: input.act,
     topic: input.topic,
+    requestedTopics,
     mode: input.mode,
     confidence: Math.max(0, Math.min(1, input.confidence ?? 0.8)),
     offeringKeys: input.offeringKeys || [],
@@ -322,6 +341,60 @@ function isOrderCompletionReply(message: string): boolean {
     ) ||
     /^solo lo que(?: le)? pedi$/.test(text)
   );
+}
+
+function requestsPaymentInformation(
+  message: string,
+  tokens: string[]
+): boolean {
+  if (!hasConcept(tokens, CONCEPTS.payment)) return false;
+  const text = normalizeUniversalText(message);
+  return (
+    /\b(?:forma|formas|medio|medios|metodo|metodos|opcion|opciones)(?:\s+de)?\s+(?:pago|pagos|pagar)\b/.test(
+      text
+    ) ||
+    /\bcomo\s+(?:(?:puedo|podemos|se|debo|debemos|prefiero|prefieres)\s+)?pagar\b/.test(
+      text
+    ) ||
+    /\b(?:aceptan|reciben|tienen)\s+(?:pagos?|tarjeta|efectivo|transferencia|deposito)\b/.test(
+      text
+    ) ||
+    (message.includes("?") &&
+      !/\b(?:cuanto|total|suma|debo)\b/.test(text))
+  );
+}
+
+function detectedRequestedTopics(input: {
+  message: string;
+  tokens: string[];
+  state: UniversalSessionState;
+  primary: UniversalIntentTopic;
+}): UniversalIntentTopic[] {
+  const { message, tokens, state, primary } = input;
+  const topics: UniversalIntentTopic[] = [primary];
+  const text = normalizeUniversalText(message);
+  const totalRequest =
+    hasConcept(tokens, CONCEPTS.total) ||
+    /\b(?:cuanto es|cuanto debo)\b/.test(text);
+
+  if (
+    totalRequest &&
+    (state.cart.length > 0 || hasConcept(tokens, CONCEPTS.cart))
+  ) {
+    topics.push("cart");
+  }
+  if (requestsPaymentInformation(message, tokens)) topics.push("payment");
+  if (hasConcept(tokens, CONCEPTS.promotions)) topics.push("promotions");
+  if (hasConcept(tokens, CONCEPTS.hours)) topics.push("hours");
+  if (hasConcept(tokens, CONCEPTS.location)) topics.push("location");
+  if (hasConcept(tokens, CONCEPTS.appointments)) topics.push("appointments");
+  if (hasConcept(tokens, CONCEPTS.policies)) topics.push("policies");
+  if (hasConcept(tokens, CONCEPTS.recommendation)) {
+    topics.push("recommendation");
+  }
+  if (hasConcept(tokens, CONCEPTS.offerings)) topics.push("offerings");
+
+  return Array.from(new Set(topics));
 }
 
 function inferredTopic(tokens: string[], state: UniversalSessionState): UniversalIntentTopic {
@@ -552,6 +625,12 @@ export function classifyLocalUniversalIntent(input: {
   const totalCue =
     hasConcept(tokens, CONCEPTS.total) ||
     (tokens.includes("cuanto") && hasConcept(tokens, CONCEPTS.payment));
+  const requestedTopics = detectedRequestedTopics({
+    message: input.message,
+    tokens,
+    state: input.state,
+    primary: totalCue ? "cart" : topic,
+  });
 
   if (resetCue) {
     return candidate({
@@ -606,6 +685,7 @@ export function classifyLocalUniversalIntent(input: {
     return candidate({
       act: "cart_management",
       topic: "cart",
+      requestedTopics,
       mode: "total",
       confidence: 0.98,
       evidence: ["cart_total"],
@@ -626,6 +706,7 @@ export function classifyLocalUniversalIntent(input: {
     return candidate({
       act: "transactional",
       topic: topic === "general" ? "offerings" : topic,
+      requestedTopics,
       mode:
         selectionIndex !== null
           ? quantity
@@ -659,6 +740,12 @@ export function classifyLocalUniversalIntent(input: {
     return candidate({
       act: "informational",
       topic: resolvedTopic,
+      requestedTopics: detectedRequestedTopics({
+        message: input.message,
+        tokens,
+        state: input.state,
+        primary: resolvedTopic,
+      }),
       mode,
       confidence: informationCue || resolvedTopic !== "offerings" ? 0.95 : 0.86,
       offeringKeys: input.retrieval.offeringKeys,
@@ -672,6 +759,7 @@ export function classifyLocalUniversalIntent(input: {
   return candidate({
     act: "unknown",
     topic: "general",
+    requestedTopics,
     mode: "ask",
     confidence: semanticTokens.length ? 0.45 : 0.2,
     knowledgeKeys: input.retrieval.knowledgeKeys,
@@ -754,6 +842,7 @@ export function normalizeUniversalIntentCandidate(input: {
   return candidate({
     act,
     topic,
+    requestedTopics: uniqueValidTopics(value.requestedTopics),
     mode,
     confidence: Number.isFinite(numericConfidence) ? numericConfidence : 0,
     offeringKeys: uniqueValidKeys(value.offeringKeys, validOfferingKeys),
@@ -821,6 +910,9 @@ export function resolveUniversalIntentCandidate(input: {
       knowledgeKeys: Array.from(
         new Set([...local.knowledgeKeys, ...model.knowledgeKeys])
       ).slice(0, 12),
+      requestedTopics: Array.from(
+        new Set([...local.requestedTopics, ...model.requestedTopics])
+      ),
       confidence: Math.max(local.confidence, Math.min(model.confidence, 0.96)),
       source: "policy",
       evidence: [...local.evidence, "model_semantic_enrichment"],
@@ -838,6 +930,9 @@ export function resolveUniversalIntentCandidate(input: {
       knowledgeKeys: Array.from(
         new Set([...local.knowledgeKeys, ...model.knowledgeKeys])
       ).slice(0, 12),
+      requestedTopics: Array.from(
+        new Set([...local.requestedTopics, ...model.requestedTopics])
+      ),
       quantity: local.quantity ?? model.quantity,
       orderItems:
         local.orderItems.length > 0 ? local.orderItems : model.orderItems,

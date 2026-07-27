@@ -15,6 +15,9 @@ import {
 import { normalizeUniversalText } from "./universal-knowledge-engine";
 import type { UniversalSessionState } from "./universal-session-memory";
 
+const PAYMENT_UNAVAILABLE =
+  "Por el momento no contamos con formas de pago habilitadas.";
+
 function money(value: number, currency: string): string {
   return `${value.toFixed(2)} ${currency}`;
 }
@@ -82,19 +85,35 @@ function cartSummary(
     .join("\n");
 }
 
-function paymentInvitation(context: UniversalBusinessContext): string {
+function paymentAvailability(
+  context: UniversalBusinessContext,
+  inviteSelection = false
+): string {
   const methods = configuredPaymentMethods(context.payment);
-  if (methods.length) {
-    return `Opciones: ${methods.join(" o ")}.`;
-  }
+  const summary = context.payment.summary.trim();
+  const unavailableSummary =
+    !summary ||
+    /\b(?:no hay|no tenemos|no contamos|sin forma|sin metodo|no esta configurad|no se ha configurad)\b/.test(
+      normalizeUniversalText(summary)
+    );
   if (
-    context.payment.provider !== "none" &&
-    context.payment.provider !== "unknown" &&
-    context.payment.summary
+    context.payment.provider === "none" ||
+    context.payment.provider === "unknown" ||
+    (!methods.length && unavailableSummary)
   ) {
-    return context.payment.summary;
+    return PAYMENT_UNAVAILABLE;
   }
-  return "La forma de pago se confirma antes de finalizar.";
+  const paymentText = methods.length
+    ? `Puedes pagar por ${methods.join(" o ")}.`
+    : summary;
+  return inviteSelection ? `${paymentText} ¿Cuál prefieres?` : paymentText;
+}
+
+function paymentInvitation(context: UniversalBusinessContext): string {
+  const availability = paymentAvailability(context);
+  return availability === PAYMENT_UNAVAILABLE
+    ? availability
+    : availability.replace(/^Puedes pagar por /, "Opciones: ");
 }
 
 function featuredBusinessKnowledge(
@@ -183,28 +202,7 @@ export function composeUniversalCommercialAnswer(input: {
     const choosing =
       input.state.cart.length > 0 &&
       input.state.sessionMemory.checkoutStage === "awaiting_payment";
-    const methods = configuredPaymentMethods(input.context.payment);
-    const paymentSummary = input.context.payment.summary.trim();
-    const unavailableSummary =
-      !paymentSummary ||
-      /\b(?:no hay|no tenemos|no contamos|sin forma|sin metodo|no esta configurad|no se ha configurad)\b/.test(
-        normalizeUniversalText(paymentSummary)
-      );
-    if (
-      input.context.payment.provider === "none" ||
-      input.context.payment.provider === "unknown" ||
-      (!methods.length && unavailableSummary)
-    ) {
-      answer =
-        "Por el momento no contamos con formas de pago habilitadas.";
-    } else {
-      const paymentText = methods.length
-        ? `Puedes pagar por ${methods.join(" o ")}.`
-        : paymentSummary;
-      answer = choosing
-        ? `${paymentText} ¿Cuál prefieres?`
-        : paymentText;
-    }
+    answer = paymentAvailability(input.context, choosing);
   } else if (intent === "query_hours") {
     const hours = relevantKnowledgeAnswers(input.retrieval, [
       "hours",
@@ -256,14 +254,20 @@ export function composeUniversalCommercialAnswer(input: {
     const summary = cartSummary(input.state, input.context);
     const totals = cartTotals(input.state, input.context);
     const payment = paymentInvitation(input.context);
-    answer = summary
-      ? `Perfecto, tu pedido hasta ahora:\n${summary}\nTotal: ${
-          totals || "por calcular"
-        }.\n${
+    const paymentUnavailable = payment === PAYMENT_UNAVAILABLE;
+    const nextStep = paymentUnavailable
+      ? input.candidate.checkoutRequested
+        ? payment
+        : `${payment} ¿Deseas agregar algo más?`
+      : `${
           input.candidate.checkoutRequested
             ? "¿Cómo deseas pagar?"
             : "¿Deseas agregar algo más o cómo prefieres pagar?"
-        } ${payment}`
+        } ${payment}`;
+    answer = summary
+      ? `Perfecto, tu pedido hasta ahora:\n${summary}\nTotal: ${
+          totals || "por calcular"
+        }.\n${nextStep}`
       : "No pudimos validar esa opción. ¿Cuál deseas agregar?";
   } else if (intent === "cart_total") {
     const cart = getUniversalCartSnapshot(input.state, input.context);
@@ -273,6 +277,15 @@ export function composeUniversalCommercialAnswer(input: {
           input.context
         )}.`
       : "Tu pedido está vacío.";
+  } else if (intent === "cart_total_with_payment") {
+    const cart = getUniversalCartSnapshot(input.state, input.context);
+    const payment = paymentAvailability(input.context);
+    answer = cart.unitCount
+      ? `Tu pedido:\n${cartSummary(input.state, input.context)}\nTotal: ${cartTotals(
+          input.state,
+          input.context
+        )}.\n${payment}`
+      : `Tu pedido está vacío.\n${payment}`;
   } else if (intent === "finish_order_selection") {
     const cart = getUniversalCartSnapshot(input.state, input.context);
     answer = cart.unitCount

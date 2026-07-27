@@ -773,6 +773,7 @@ export function requiresDeterministicSessionAnswer(
     "select_presented_option",
     "add_to_cart",
     "cart_total",
+    "cart_total_with_payment",
     "reset_cart",
     "query_payment",
     "query_promotion",

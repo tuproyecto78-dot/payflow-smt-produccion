@@ -186,6 +186,20 @@ export function planUniversalDecision(input: {
     });
   }
 
+  if (
+    intent.act === "cart_management" &&
+    intent.mode === "total" &&
+    intent.requestedTopics.includes("payment")
+  ) {
+    return decision({
+      intent: "cart_total_with_payment",
+      confidence: intent.confidence,
+      scopes: ["identity", "cart", "payment"],
+      responseGoal:
+        "Mostrar el resumen y total validados junto con las formas de pago informativas.",
+    });
+  }
+
   if (intent.act === "cart_management" && intent.mode === "total") {
     return decision({
       intent: "cart_total",
