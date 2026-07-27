@@ -130,6 +130,12 @@ function includesAny(text: string, values: string[]): boolean {
   return values.some((value) => text.includes(value));
 }
 
+function isGenericOfferingBrowseQuery(text: string): boolean {
+  return /^(?:(?:quiero|quisiera|deseo)\s+(?:ver|conocer)\s+|(?:muestrame|ensename|mostrar)\s+|(?:cual|cuales)\s+(?:es|son)\s+)?(?:(?:el|la|los|las)\s+)?(?:(?:menu|catalogo|carta)(?:\s+(?:con\s+)?precios)?|(?:lista\s+de\s+)?precios|productos|servicios)(?:\s+(?:disponibles|actuales|de hoy))?$/.test(
+    text
+  );
+}
+
 function quantityFrom(message: string): number | null {
   const text = normalize(message);
   const digit = text.match(/\b(\d{1,2})\b/);
@@ -283,7 +289,8 @@ export function classifyUniversalIntent(input: {
   const appointment = includesAny(text, ["cita", "agendar", "reservar", "turno", "disponibilidad para"]);
   const policy = includesAny(text, ["politica", "devolucion", "garantia", "cambio", "envio", "entrega"]);
   const discover =
-    includesAny(text, [
+    isGenericOfferingBrowseQuery(text) ||
+    (includesAny(text, [
       "que venden",
       "que ofrecen",
       "que tienen",
@@ -293,7 +300,8 @@ export function classifyUniversalIntent(input: {
       "ver productos",
       "ver servicios",
       "opciones disponibles",
-    ]) && matches.length === 0;
+    ]) &&
+      matches.length === 0);
 
   const informationalRequest = includesAny(text, [
     "quiero saber",

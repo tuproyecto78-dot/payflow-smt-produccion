@@ -141,6 +141,44 @@ test('"cuál es el menú" stays informational and remembers the displayed list',
   assert.equal(state.sessionMemory.pendingOfferingKey, null);
 });
 
+test('"Menú" and "Precios" override accidental offering text matches', () => {
+  const collisionContext = {
+    ...context,
+    offerings: context.offerings.map((offering, index) =>
+      index === 0
+        ? {
+            ...offering,
+            description: "Menú con precios especiales",
+          }
+        : offering
+    ),
+  };
+
+  for (const message of ["Menú", "Precios"]) {
+    const state = normalizeUniversalSessionState(null, collisionContext);
+    const result = classifyUniversalSessionIntent({
+      message,
+      context: collisionContext,
+      state,
+    });
+
+    assert.equal(result.intent, "discover_offerings");
+    assert.deepEqual(result.scopes, ["identity", "offerings"]);
+    assert.equal(result.selection.offeringKeys.length, 3);
+    assert.equal(result.cartActions.length, 0);
+
+    const text = composeUniversalSessionAnswer({
+      message,
+      decision: result,
+      context: collisionContext,
+      state,
+    });
+    assert.match(text, /Porción de Papas/);
+    assert.match(text, /Hamburguesa Clásica/);
+    assert.doesNotMatch(text, /¿Deseas agregarlo a tu pedido\?/i);
+  }
+});
+
 test('"2x1 en viernes" queries only real promotions', () => {
   const result = classify("¿Tienen 2x1 en viernes?");
   assert.equal(result.intent, "query_promotion");
