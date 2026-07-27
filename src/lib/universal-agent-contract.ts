@@ -14,11 +14,19 @@ export type UniversalOffering = {
   currency: string;
   category: string;
   available: boolean;
+  source?: "catalog" | "knowledge_center" | "onboarding";
 };
 
 export type UniversalFaq = {
   question: string;
   answer: string;
+};
+
+export type UniversalKnowledgeEntry = {
+  key: string;
+  title: string;
+  content: string;
+  category: string;
 };
 
 export type UniversalBusinessContext = {
@@ -40,6 +48,7 @@ export type UniversalBusinessContext = {
   humanHandoffRules: string[];
   appointmentConditions: string[];
   rules: string[];
+  knowledge: UniversalKnowledgeEntry[];
   summary: string;
   warnings: string[];
 };
