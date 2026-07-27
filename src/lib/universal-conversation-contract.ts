@@ -59,7 +59,12 @@ export type UniversalOrderItemCandidate = {
  */
 export type UniversalIntentCandidate = {
   act: UniversalConversationAct;
+  /**
+   * Primary topic used to route the request. `requestedTopics` preserves every
+   * compatible topic explicitly requested in the same customer turn.
+   */
   topic: UniversalIntentTopic;
+  requestedTopics: UniversalIntentTopic[];
   mode: UniversalIntentMode;
   confidence: number;
   offeringKeys: string[];

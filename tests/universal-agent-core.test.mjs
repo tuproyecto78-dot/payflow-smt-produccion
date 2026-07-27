@@ -764,3 +764,130 @@ test("asking for the total returns only the order summary and total", async () =
   );
   assert.ok(result.answer.length < 180);
 });
+
+test("the stable flow keeps exact products, informational lists and a clean cart", async () => {
+  const context = restaurantConversationContext();
+  const order = await runUniversalConversation({
+    message: "3 hamburguesas clásicas",
+    context,
+  });
+
+  assert.equal(order.decision.intent, "add_to_cart");
+  assert.deepEqual(order.decision.cartActions, [
+    {
+      type: "add",
+      offeringKey: "product:hamburguesa-clasica-estancia",
+      quantity: 3,
+    },
+  ]);
+  assert.deepEqual(order.state.cart, [
+    {
+      offeringKey: "product:hamburguesa-clasica-estancia",
+      quantity: 3,
+    },
+  ]);
+  assert.equal(order.state.sessionMemory.pendingOrderDraft, null);
+
+  const options = await runUniversalConversation({
+    message: "Papas",
+    context,
+    rawState: order.state,
+  });
+  assert.equal(options.decision.intent, "discover_offerings");
+  assert.equal(options.decision.cartActions.length, 0);
+  assert.deepEqual(options.state.cart, order.state.cart);
+  assert.match(options.answer, /Papas Estancia Cintas/);
+  assert.match(options.answer, /Papas Fritas Clásicas/);
+  assert.doesNotMatch(options.answer, /cuántas unidades|agregamos/i);
+
+  const finished = await runUniversalConversation({
+    message: "Nada más",
+    context,
+    rawState: options.state,
+  });
+  assert.equal(finished.decision.intent, "finish_order_selection");
+  assert.equal(finished.decision.cartActions.length, 0);
+  assert.deepEqual(finished.state.cart, order.state.cart);
+  assert.equal(
+    finished.answer,
+    "Perfecto, tu pedido queda como está. ¿Deseas finalizar o ver el total?"
+  );
+  assert.doesNotMatch(
+    finished.answer,
+    /Papas|Hamburguesa|opciones|agregar/i
+  );
+  assert.equal(
+    finished.state.sessionMemory.lastPresentedOfferingKeys.length,
+    0
+  );
+});
+
+test("a compound total and payment request preserves both compatible topics", async () => {
+  const context = restaurantConversationContext();
+  const order = await runUniversalConversation({
+    message: "3 hamburguesas clásicas",
+    context,
+  });
+  const result = await runUniversalConversation({
+    message: "Total y medio de pago",
+    context,
+    rawState: order.state,
+  });
+
+  assert.equal(result.decision.intent, "cart_total_with_payment");
+  assert.deepEqual(
+    result.diagnostics.resolvedCandidate.requestedTopics,
+    ["cart", "payment"]
+  );
+  assert.deepEqual(result.state.cart, order.state.cart);
+  assert.equal(result.decision.cartActions.length, 0);
+  assert.match(
+    result.answer,
+    /3 × Hamburguesa Clásica Estancia — 3\.60 USD/
+  );
+  assert.match(result.answer, /Total: 3\.60 USD\./);
+  assert.match(
+    result.answer,
+    /Puedes pagar por transferencia bancaria o efectivo\./
+  );
+  assert.doesNotMatch(result.answer, /opciones|agregar|algo más|PayFlow/i);
+  assertCustomerSafe(result.answer);
+});
+
+test("a compound total and payment request handles unavailable payment commercially", async () => {
+  const context = restaurantConversationContext({
+    payment: {
+      provider: "none",
+      summary: "",
+      conditions: [],
+    },
+  });
+  const order = await runUniversalConversation({
+    message: "3 hamburguesas clásicas",
+    context,
+  });
+  assert.match(
+    order.answer,
+    /Por el momento no contamos con formas de pago habilitadas\./
+  );
+  assert.doesNotMatch(order.answer, /cómo (?:deseas|prefieres) pagar/i);
+  const result = await runUniversalConversation({
+    message: "Total y medio de pago",
+    context,
+    rawState: order.state,
+  });
+
+  assert.equal(result.decision.intent, "cart_total_with_payment");
+  assert.equal(result.decision.cartActions.length, 0);
+  assert.deepEqual(result.state.cart, order.state.cart);
+  assert.match(result.answer, /Total: 3\.60 USD\./);
+  assert.match(
+    result.answer,
+    /Por el momento no contamos con formas de pago habilitadas\./
+  );
+  assert.doesNotMatch(
+    result.answer,
+    /registrad|configur|proveedor|opciones|agregar|PayFlow/i
+  );
+  assertCustomerSafe(result.answer);
+});

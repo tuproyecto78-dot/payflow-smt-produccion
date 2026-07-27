@@ -1,6 +1,6 @@
 # Agente IA Universal v3
 
-Estado: implementado en simulador, pendiente de fusión.
+Estado: estable en simulador.
 
 ## Objetivo
 
@@ -25,9 +25,9 @@ flowchart TD
    `clientId`.
 2. **Centro de conocimiento:** incorpora productos, FAQs y documentos activos
    del negocio. No existe fallback demo entre negocios.
-3. **Clasificación universal:** produce únicamente acto, tema, modo y un
-   borrador semántico de artículos, cantidades y candidatos válidos. No puede
-   producir acciones de carrito.
+3. **Clasificación universal:** produce acto, tema principal, todos los temas
+   compatibles solicitados y un borrador semántico de artículos, cantidades y
+   candidatos válidos. No puede producir acciones de carrito.
 4. **Política determinista:** autoriza efectos solo cuando existe una compra
    explícita o una continuación inequívoca de memoria.
 5. **Memoria conversacional:** conserva lista, propósito
@@ -69,6 +69,21 @@ Gemini no puede:
 La política local ignora cualquier intento de elevar una intención informativa
 a transaccional.
 
+## Solicitudes compuestas
+
+El contrato separa `topic` (ruta principal) de `requestedTopics` (todos los
+temas explícitos del turno). La política solo combina temas compatibles:
+
+| Solicitud | Decisión | Efectos |
+|---|---|---|
+| Total | Resumen y total | Ninguno |
+| Forma de pago | Información de pago | Ninguno |
+| Total + forma de pago | Resumen, total e información de pago | Ninguno |
+| Producto + cantidad inequívocos | Actualización del carrito temporal | Solo carrito temporal |
+
+Gemini puede sugerir temas, pero no añadir permisos. Las acciones siguen
+dependiendo de evidencia local y claves revalidadas.
+
 ## Módulos
 
 | Archivo | Responsabilidad |
@@ -108,6 +123,8 @@ rutas actuales y no forman parte de esta ejecución.
   opciones habilitadas, se comunica sin lenguaje técnico.
 - Una solicitud de total devuelve únicamente el resumen y la suma, sin ofertas
   ni preguntas adicionales.
+- Una solicitud compuesta de total y pago conserva ambos temas y devuelve
+  únicamente resumen, suma y formas de pago informativas.
 - Si no hay promociones, solo se anuncia un plato destacado cuando está
   configurado; de lo contrario se recomienda un producto real sin llamarlo
   “plato del día”.
@@ -119,6 +136,7 @@ rutas actuales y no forman parte de esta ejecución.
 
 La suite cubre restaurante, clínica y servicios; aislamiento entre negocios;
 menú, precios, promociones, pagos, FAQs, agenda, selección numérica, pedidos
-multilínea, correcciones sin duplicado, borradores ambiguos, sumatorias, cierre
-informativo y un resultado malicioso de Gemini. La automatización de GitHub
-ejecuta contratos, escenarios, memoria y núcleo completo en cada PR.
+multilínea, correcciones sin duplicado, borradores ambiguos, sumatorias,
+solicitudes compuestas, cierre informativo y un resultado malicioso de Gemini.
+La automatización de GitHub ejecuta contratos, escenarios, memoria y núcleo
+completo en cada PR.

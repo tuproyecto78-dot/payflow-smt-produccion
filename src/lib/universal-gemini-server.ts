@@ -131,6 +131,7 @@ Devuelve exclusivamente JSON:
 {
   "act":"social|informational|transactional|cart_management|unknown",
   "topic":"greeting|offerings|promotions|payment|hours|location|policies|appointments|recommendation|cart|general",
+  "requestedTopics":["cart","payment"],
   "mode":"greet|browse|detail|recommend|select|quantity|total|finish|reset|ask",
   "confidence":0.0,
   "offeringKeys":[],
@@ -146,6 +147,7 @@ Devuelve exclusivamente JSON:
 Reglas:
 - Usa solo claves incluidas en relevantKnowledge o lastPresentedOptions.
 - Una pregunta sobre menú, precios, detalles, promociones o pagos es informational.
+- Conserva en requestedTopics todos los temas explícitos de una solicitud compuesta.
 - Mencionar una cantidad no convierte una consulta informativa en compra.
 - transactional exige una orden explícita e inequívoca de comprar, pedir o agregar.
 - "no", "ya no", "nada más" o "solo eso" después de una oferta o pedido es cart_management/finish.
@@ -166,6 +168,11 @@ function modelCandidate(data: Record<string, unknown>): UniversalIntentCandidate
   return {
     act: String(data.act || "unknown") as UniversalIntentCandidate["act"],
     topic: String(data.topic || "general") as UniversalIntentCandidate["topic"],
+    requestedTopics: Array.isArray(data.requestedTopics)
+      ? data.requestedTopics.map(
+          (topic) => String(topic || "") as UniversalIntentCandidate["topic"]
+        )
+      : [],
     mode: String(data.mode || "ask") as UniversalIntentCandidate["mode"],
     confidence: Number(data.confidence || 0),
     offeringKeys: Array.isArray(data.offeringKeys)

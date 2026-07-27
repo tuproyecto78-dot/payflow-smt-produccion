@@ -41,13 +41,24 @@ import type { UniversalBusinessContext, UniversalDataScope } from "./universal-a
 function scopesForTopic(topic: UniversalIntentTopic): UniversalDataScope[] {
   if (topic === "offerings" || topic === "recommendation") return ["offerings"];
   if (topic === "promotions") return ["promotions", "faqs"];
-  if (topic === "payment") return ["payment", "faqs"];
+  if (topic === "payment") return ["payment"];
   if (topic === "hours") return ["hours", "faqs"];
   if (topic === "location") return ["address", "faqs"];
   if (topic === "policies") return ["policies", "faqs", "rules"];
   if (topic === "appointments") return ["hours", "faqs", "rules"];
   if (topic === "cart") return ["cart"];
   return ["faqs", "policies", "rules", "address"];
+}
+
+function scopesForCandidate(
+  candidate: UniversalIntentCandidate
+): UniversalDataScope[] {
+  const topics = candidate.requestedTopics.length
+    ? candidate.requestedTopics
+    : [candidate.topic];
+  return Array.from(
+    new Set(topics.flatMap((topic) => scopesForTopic(topic)))
+  );
 }
 
 function mergeReferencedKnowledge(input: {
@@ -196,7 +207,7 @@ export async function runUniversalConversation(input: {
   const scopedRetrieval = retrieveUniversalKnowledge({
     query: message,
     index,
-    scopes: scopesForTopic(resolvedCandidate.topic),
+    scopes: scopesForCandidate(resolvedCandidate),
     limit: 12,
   });
   const retrieval = mergeReferencedKnowledge({
