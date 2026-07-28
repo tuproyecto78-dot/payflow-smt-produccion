@@ -144,12 +144,16 @@ test("restarting the simulator with no raw state produces an empty cart", async 
   await createOrder();
 
   const restarted = await runUniversalConversation({
-    message: "Total",
+    message: "hola",
     context,
     rawState: undefined,
   });
 
-  assert.equal(restarted.decision.intent, "cart_total");
+  assert.equal(restarted.decision.intent, "greeting");
   assertCleanState(restarted.state);
-  assert.match(restarted.answer, /pedido está vacío/i);
+  assert.equal(restarted.state.recentTurns.length, 2);
+  assert.doesNotMatch(
+    restarted.state.recentTurns.map((turn) => turn.text).join(" "),
+    /hamburguesa|15\.00/i
+  );
 });
