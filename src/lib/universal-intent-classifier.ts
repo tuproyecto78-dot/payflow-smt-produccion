@@ -6,7 +6,6 @@ import {
 } from "./universal-knowledge-engine";
 import {
   continueUniversalOrderDraft,
-  isAffirmativeCommercialReply,
   parseUniversalOrderRequest,
   selectedConfiguredPaymentMethod,
 } from "./universal-order-parser";
@@ -518,32 +517,6 @@ export function classifyLocalUniversalIntent(input: {
   }
 
   if (
-    memory.lastSuggestedOfferingKey &&
-    isAffirmativeCommercialReply(input.message)
-  ) {
-    return candidate({
-      act: "transactional",
-      topic: "offerings",
-      mode: "quantity",
-      confidence: 1,
-      offeringKeys: [memory.lastSuggestedOfferingKey],
-      knowledgeKeys: input.retrieval.knowledgeKeys,
-      quantity: 1,
-      orderItems: [
-        {
-          phrase: "sugerencia aceptada",
-          quantity: 1,
-          offeringKey: memory.lastSuggestedOfferingKey,
-          candidateOfferingKeys: [memory.lastSuggestedOfferingKey],
-        },
-      ],
-      orderOperation: "add",
-      source: "memory",
-      evidence: ["memory_suggestion_acceptance"],
-    });
-  }
-
-  if (
     memory.pendingOfferingKey &&
     quantity &&
     (number !== null || hasConcept(tokens, CONCEPTS.purchase))
@@ -877,7 +850,6 @@ function transactionIsLocallyAuthorized(local: UniversalIntentCandidate): boolea
         "memory_pending_quantity",
         "explicit_order_items",
         "memory_order_draft_continuation",
-        "memory_suggestion_acceptance",
         "configured_payment_selection",
       ].includes(entry)
     )
@@ -899,20 +871,26 @@ export function resolveUniversalIntentCandidate(input: {
   if (local.act === "cart_management" || local.act === "social") return local;
 
   if (local.act === "informational") {
+    const explicitLocalTopic = local.topic !== "general";
+    const offeringTopic =
+      local.topic === "offerings" || local.topic === "recommendation";
     return {
       ...local,
       topic: local.topic === "general" ? model.topic : local.topic,
       mode: local.mode === "ask" ? model.mode : local.mode,
-      offeringKeys:
-        local.offeringKeys.length > 0
+      offeringKeys: offeringTopic
+        ? local.offeringKeys.length > 0
           ? local.offeringKeys
-          : model.offeringKeys,
+          : model.offeringKeys
+        : [],
       knowledgeKeys: Array.from(
         new Set([...local.knowledgeKeys, ...model.knowledgeKeys])
       ).slice(0, 12),
-      requestedTopics: Array.from(
-        new Set([...local.requestedTopics, ...model.requestedTopics])
-      ),
+      requestedTopics: explicitLocalTopic
+        ? local.requestedTopics
+        : Array.from(
+            new Set([...local.requestedTopics, ...model.requestedTopics])
+          ),
       confidence: Math.max(local.confidence, Math.min(model.confidence, 0.96)),
       source: "policy",
       evidence: [...local.evidence, "model_semantic_enrichment"],

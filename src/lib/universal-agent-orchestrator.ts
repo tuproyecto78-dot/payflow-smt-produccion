@@ -40,7 +40,7 @@ import type { UniversalBusinessContext, UniversalDataScope } from "./universal-a
 
 function scopesForTopic(topic: UniversalIntentTopic): UniversalDataScope[] {
   if (topic === "offerings" || topic === "recommendation") return ["offerings"];
-  if (topic === "promotions") return ["promotions", "faqs"];
+  if (topic === "promotions") return ["promotions"];
   if (topic === "payment") return ["payment"];
   if (topic === "hours") return ["hours", "faqs"];
   if (topic === "location") return ["address", "faqs"];
@@ -53,6 +53,9 @@ function scopesForTopic(topic: UniversalIntentTopic): UniversalDataScope[] {
 function scopesForCandidate(
   candidate: UniversalIntentCandidate
 ): UniversalDataScope[] {
+  if (candidate.topic === "promotions" || candidate.topic === "payment") {
+    return scopesForTopic(candidate.topic);
+  }
   const topics = candidate.requestedTopics.length
     ? candidate.requestedTopics
     : [candidate.topic];
@@ -66,6 +69,7 @@ function mergeReferencedKnowledge(input: {
   candidate: UniversalIntentCandidate;
   index: ReturnType<typeof buildUniversalKnowledgeIndex>;
 }): UniversalKnowledgeRetrieval {
+  const allowedScopes = new Set(scopesForCandidate(input.candidate));
   const byKey = new Map(
     input.index.items.map((knowledgeItem) => [knowledgeItem.key, knowledgeItem])
   );
@@ -77,7 +81,7 @@ function mergeReferencedKnowledge(input: {
   for (const key of input.candidate.knowledgeKeys) {
     if (existing.has(key)) continue;
     const knowledgeItem = byKey.get(key);
-    if (!knowledgeItem) continue;
+    if (!knowledgeItem || !allowedScopes.has(knowledgeItem.scope)) continue;
     matches.push({ item: knowledgeItem, score: 1 });
     existing.add(key);
   }
@@ -85,12 +89,14 @@ function mergeReferencedKnowledge(input: {
   return {
     ...input.retrieval,
     matches: matches.slice(0, 12),
-    offeringKeys: Array.from(
-      new Set([
-        ...input.retrieval.offeringKeys,
-        ...input.candidate.offeringKeys,
-      ])
-    ).slice(0, 12),
+    offeringKeys: allowedScopes.has("offerings")
+      ? Array.from(
+          new Set([
+            ...input.retrieval.offeringKeys,
+            ...input.candidate.offeringKeys,
+          ])
+        ).slice(0, 12)
+      : [],
     knowledgeKeys: matches.map((match) => match.item.key),
   };
 }
@@ -212,7 +218,10 @@ export async function runUniversalConversation(input: {
   });
   const retrieval = mergeReferencedKnowledge({
     retrieval:
-      scopedRetrieval.matches.length > 0 ? scopedRetrieval : initialRetrieval,
+      scopedRetrieval.matches.length > 0 ||
+      resolvedCandidate.topic !== "general"
+        ? scopedRetrieval
+        : initialRetrieval,
     candidate: resolvedCandidate,
     index,
   });

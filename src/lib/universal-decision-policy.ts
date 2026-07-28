@@ -8,7 +8,6 @@ import type {
   UniversalKnowledgeIndex,
   UniversalKnowledgeRetrieval,
 } from "./universal-conversation-contract";
-import { normalizeUniversalText } from "./universal-knowledge-engine";
 import type { UniversalSessionState } from "./universal-session-memory";
 
 function decision(input: Partial<UniversalPlannerDecision> & {
@@ -72,28 +71,6 @@ function diverseOfferingKeys(
     if (selected.length >= max) break;
   }
   return selected.map((item) => item.key);
-}
-
-function promotionSuggestionKey(
-  context: UniversalBusinessContext
-): string | null {
-  const featuredKnowledge = context.knowledge.filter((entry) =>
-    /\b(?:plato del dia|especialidad|recomendad|destacad|favorit)\b/.test(
-      normalizeUniversalText(
-        `${entry.title} ${entry.category} ${entry.content}`
-      )
-    )
-  );
-  for (const entry of featuredKnowledge) {
-    const content = normalizeUniversalText(
-      `${entry.title} ${entry.content}`
-    );
-    const offering = visibleOfferings(context).find((item) =>
-      content.includes(normalizeUniversalText(item.name))
-    );
-    if (offering) return offering.key;
-  }
-  return diverseOfferingKeys(context, 1)[0] || null;
 }
 
 function browseKeys(input: {
@@ -254,25 +231,12 @@ export function planUniversalDecision(input: {
   }
 
   if (intent.topic === "promotions") {
-    const suggestionKey =
-      input.context.promotions.length === 0
-        ? promotionSuggestionKey(input.context)
-        : null;
     return decision({
       intent: "query_promotion",
       confidence: intent.confidence,
-      scopes: suggestionKey
-        ? ["identity", "promotions", "faqs", "offerings"]
-        : ["identity", "promotions", "faqs"],
-      selection: suggestionKey
-        ? {
-            mode: "selected",
-            offeringKeys: [suggestionKey],
-            maxItems: 1,
-          }
-        : undefined,
+      scopes: ["identity", "promotions"],
       responseGoal:
-        "Responder con promociones reales o una sugerencia validada del negocio.",
+        "Responder únicamente con promociones reales o indicar que no hay.",
     });
   }
 
