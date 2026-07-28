@@ -76,7 +76,7 @@ function emptyCartTotalResult(input: {
     }),
     entry({
       nodeId: "temporary-cart",
-      nodeType: "catalog_search",
+      nodeType: "ai_agent",
       nodeLabel: "Pedido temporal",
       status: "success",
       message: "Carrito temporal vacío. No se consultó ni mostró catálogo.",
