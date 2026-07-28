@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorView as BaseEditorView } from "./editor-view";
 import type { WorkflowSummary } from "@/stores/app-store";
+import { isUniversalSessionResetMessage } from "@/lib/universal-session-reset";
 
 type AiDeliveryMode = "simulation" | "assisted" | "automatic";
 const STATE_KEY = "__payflow_simulator_state";
@@ -30,24 +31,13 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
   useEffect(() => {
     const sessionKey = `${SESSION_PREFIX}${workflow.id}`;
     const stateKey = `${STATE_PREFIX}${workflow.id}`;
-    const storedSession = window.localStorage.getItem(sessionKey)?.trim();
-    const sessionId = storedSession || createSessionId();
+    const sessionId = createSessionId();
 
+    // Opening or reloading the simulator is always a new temporary order.
     simulatorSessionIdRef.current = sessionId;
-    if (!storedSession) window.localStorage.setItem(sessionKey, sessionId);
-
-    const storedState = window.localStorage.getItem(stateKey);
-    if (!storedState) {
-      simulatorStateRef.current = null;
-      return;
-    }
-
-    try {
-      simulatorStateRef.current = JSON.parse(storedState);
-    } catch {
-      simulatorStateRef.current = null;
-      window.localStorage.removeItem(stateKey);
-    }
+    simulatorStateRef.current = null;
+    window.localStorage.setItem(sessionKey, sessionId);
+    window.localStorage.removeItem(stateKey);
   }, [workflow.id]);
 
   useEffect(() => {
@@ -71,12 +61,18 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
 
         body.aiMode = mode;
         if (typeof body.clientMessage === "string") {
-          if (!simulatorSessionIdRef.current) {
+          const resetRequested = isUniversalSessionResetMessage(body.clientMessage);
+          const sessionKey = `${SESSION_PREFIX}${workflow.id}`;
+          const stateKey = `${STATE_PREFIX}${workflow.id}`;
+
+          if (resetRequested || !simulatorSessionIdRef.current) {
             simulatorSessionIdRef.current = createSessionId();
+            simulatorStateRef.current = null;
             window.localStorage.setItem(
-              `${SESSION_PREFIX}${workflow.id}`,
+              sessionKey,
               simulatorSessionIdRef.current
             );
+            window.localStorage.removeItem(stateKey);
           }
 
           const questionResponses = safeObject(body.questionResponses);
@@ -103,7 +99,7 @@ export function EditorView({ workflow }: { workflow: WorkflowSummary }) {
             );
           }
         } catch {
-          // Keep the last valid session state if the response has no JSON body.
+          // Keep only the current in-memory state if the response has no JSON body.
         }
 
         return response;

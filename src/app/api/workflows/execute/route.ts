@@ -13,6 +13,7 @@ import {
   recordSimulatorSessionTurn,
   SIMULATOR_STATE_KEY,
 } from "@/lib/simulator-session-memory-server";
+import { isUniversalSessionResetMessage } from "@/lib/universal-session-reset";
 import type { PaymentOutcome, FlowNode, FlowEdge } from "@/lib/workflow-types";
 import { validateWorkflow } from "@/lib/workflow-validator";
 
@@ -122,6 +123,7 @@ async function resolveWorkflowClientId(input: {
  *
  * - The regular Run button keeps the complete node-by-node simulator.
  * - Typed simulator messages restore their tenant-scoped conversation memory.
+ * - Full reset commands never restore a previous cart or conversation state.
  * - The engine loads business context before classification and response.
  * - Every successful simulator turn is recorded in audit_logs by session.
  * - No real WhatsApp message or payment is executed from this endpoint.
@@ -184,6 +186,9 @@ export async function POST(req: Request) {
       typeof body.clientMessage === "string"
         ? body.clientMessage.slice(0, 4000)
         : undefined;
+    const resetRequested = Boolean(
+      clientMessage && isUniversalSessionResetMessage(clientMessage)
+    );
 
     const clientId =
       session.clientId ||
@@ -200,7 +205,12 @@ export async function POST(req: Request) {
     };
     let memoryRestored = false;
 
+    if (resetRequested) {
+      delete questionResponses[SIMULATOR_STATE_KEY];
+    }
+
     if (
+      !resetRequested &&
       clientMessage &&
       clientId &&
       workflowId &&
@@ -273,6 +283,7 @@ export async function POST(req: Request) {
         aiMode,
         simulatorSessionId,
         memoryRestored,
+        memoryReset: resetRequested,
         requiresApproval: result?.variables?.ai_requires_approval === true,
         suggestedResponse: result?.variables?.ai_response || null,
         status:
