@@ -33,6 +33,10 @@ import {
   type UniversalSessionState,
 } from "./universal-session-memory";
 import {
+  isUniversalSessionResetMessage,
+  universalMessageForFreshOrder,
+} from "./universal-session-reset";
+import {
   composeUniversalCommercialAnswer,
   mayUseControlledModelResponse,
 } from "./universal-response-composer";
@@ -164,8 +168,13 @@ export async function runUniversalConversation(input: {
   rawState?: unknown;
   adapters?: UniversalConversationAdapters;
 }): Promise<UniversalConversationResult<UniversalSessionState>> {
-  const message = input.message.trim().slice(0, 4000);
-  const state = normalizeUniversalSessionState(input.rawState, input.context);
+  const customerMessage = input.message.trim().slice(0, 4000);
+  const resetRequested = isUniversalSessionResetMessage(customerMessage);
+  const message = universalMessageForFreshOrder(customerMessage);
+  const state = normalizeUniversalSessionState(
+    resetRequested ? undefined : input.rawState,
+    input.context
+  );
   const index = buildUniversalKnowledgeIndex(input.context);
   const initialRetrieval = retrieveUniversalKnowledge({
     query: message,
@@ -309,7 +318,7 @@ export async function runUniversalConversation(input: {
 
   const finalState = appendUniversalSessionTurn({
     state: memoryState,
-    customerMessage: message,
+    customerMessage,
     businessAnswer: answer,
     intent: decision.intent,
     pendingQuestion: decision.needsClarification
