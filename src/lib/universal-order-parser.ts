@@ -393,10 +393,3 @@ export function selectedConfiguredPaymentMethod(input: {
     )?.label || null
   );
 }
-
-export function isAffirmativeCommercialReply(message: string): boolean {
-  const text = normalizeUniversalText(message);
-  return /^(?:si|claro|ok|okay|dale|de acuerdo|perfecto|agregalo|anadelo)$/.test(
-    text
-  );
-}

@@ -148,6 +148,8 @@ Reglas:
 - Usa solo claves incluidas en relevantKnowledge o lastPresentedOptions.
 - Una pregunta sobre menú, precios, detalles, promociones o pagos es informational.
 - Conserva en requestedTopics todos los temas explícitos de una solicitud compuesta.
+- Si el tema principal es promociones, usa solo requestedTopics=["promotions"] y offeringKeys=[].
+- Promociones nunca recomienda productos ni autoriza carrito.
 - Mencionar una cantidad no convierte una consulta informativa en compra.
 - transactional exige una orden explícita e inequívoca de comprar, pedir o agregar.
 - "no", "ya no", "nada más" o "solo eso" después de una oferta o pedido es cart_management/finish.

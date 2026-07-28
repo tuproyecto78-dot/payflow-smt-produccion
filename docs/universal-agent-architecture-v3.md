@@ -121,13 +121,12 @@ rutas actuales y no forman parte de esta ejecución.
   pregunta de pago, pero solo se guarda una preferencia informativa.
 - Una consulta de pagos usa exclusivamente la configuración de pagos; si no hay
   opciones habilitadas, se comunica sin lenguaje técnico.
+- Una consulta de promociones usa exclusivamente promociones vigentes. Si no
+  existen, lo indica sin catálogo, precios, recomendaciones ni carrito.
 - Una solicitud de total devuelve únicamente el resumen y la suma, sin ofertas
   ni preguntas adicionales.
 - Una solicitud compuesta de total y pago conserva ambos temas y devuelve
   únicamente resumen, suma y formas de pago informativas.
-- Si no hay promociones, solo se anuncia un plato destacado cuando está
-  configurado; de lo contrario se recomienda un producto real sin llamarlo
-  “plato del día”.
 - El carrito es temporal y no crea pedidos reales.
 - Sin conocimiento válido, se aclara; no se inventa.
 - El resultado marca `whatsapp_sent=false` y `payments_executed=false`.

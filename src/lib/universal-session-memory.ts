@@ -695,12 +695,8 @@ export function transitionUniversalSessionMemory(input: {
       selectedPaymentMethod = input.candidate.paymentMethod;
     }
 
-    if (
-      input.decision.intent === "query_promotion" &&
-      input.decision.selection.offeringKeys.length === 1
-    ) {
-      lastSuggestedOfferingKey =
-        input.decision.selection.offeringKeys[0] || null;
+    if (input.decision.intent === "query_promotion") {
+      lastSuggestedOfferingKey = null;
     }
   }
 

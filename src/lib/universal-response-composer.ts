@@ -116,19 +116,6 @@ function paymentInvitation(context: UniversalBusinessContext): string {
     : availability.replace(/^Puedes pagar por /, "Opciones: ");
 }
 
-function featuredBusinessKnowledge(
-  context: UniversalBusinessContext
-): string | null {
-  const featured = context.knowledge.find((entry) =>
-    /\b(?:plato del dia|especialidad|recomendad|destacad|favorit)\b/.test(
-      normalizeUniversalText(
-        `${entry.title} ${entry.category} ${entry.content}`
-      )
-    )
-  );
-  return featured?.content.trim() || null;
-}
-
 export function composeUniversalCommercialAnswer(input: {
   message: string;
   candidate: UniversalIntentCandidate;
@@ -175,29 +162,15 @@ export function composeUniversalCommercialAnswer(input: {
       answer = `${offeringLine(offering)}.${detail} ¿Qué más deseas saber?`;
     }
   } else if (intent === "query_promotion") {
-    const promotions = relevantKnowledgeAnswers(input.retrieval, [
-      "promotion",
-      "faq",
-      "document",
-    ]);
+    const promotions = relevantKnowledgeAnswers(input.retrieval, ["promotion"]);
     const available = promotions.length
       ? promotions
       : input.context.promotions.slice(0, 3);
-    if (available.length) {
-      answer = `Promociones vigentes:\n${available
-        .map((promotion) => `• ${promotion}`)
-        .join("\n")}\n¿Cuál te interesa?`;
-    } else {
-      const featured = featuredBusinessKnowledge(input.context);
-      const suggestion = chosen[0];
-      answer = featured
-        ? `Hoy no hay promociones activas. ${featured} ¿Te interesa?`
-        : suggestion
-          ? `Hoy no hay promociones activas. Te sugerimos ${offeringLine(
-              suggestion
-            ).replace(/^•\s*/, "")}. ¿Deseas agregarlo?`
-          : "Hoy no hay promociones activas. ¿Deseas ver nuestras opciones?";
-    }
+    answer = available.length
+      ? `Promociones vigentes:\n${available
+          .map((promotion) => `• ${promotion}`)
+          .join("\n")}`
+      : "Hoy no hay promociones activas.";
   } else if (intent === "query_payment") {
     const choosing =
       input.state.cart.length > 0 &&
