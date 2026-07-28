@@ -31,4 +31,4 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run universal agent contracts
-        run: bun test tests/universal-agent-contract.test.mjs tests/universal-agent-scenarios.test.mjs tests/universal-session-memory.test.mjs tests/universal-agent-core.test.mjs tests/universal-agent-stable-freeze.test.mjs tests/universal-agent-memory-reset.test.mjs
+        run: bun test tests/universal-agent-contract.test.mjs tests/universal-agent-scenarios.test.mjs tests/universal-session-memory.test.mjs tests/universal-agent-core.test.mjs tests/universal-agent-stable-freeze.test.mjs tests/universal-agent-memory-reset.test.mjs tests/universal-agent-empty-cart-total.test.mjs
