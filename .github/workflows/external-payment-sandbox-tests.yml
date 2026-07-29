@@ -1,0 +1,37 @@
+name: External Payment Sandbox Tests
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/external-integrations/payments/**"
+      - "src/app/api/integrations/payments/**"
+      - "supabase/migrations/*external_payment_sandbox.sql"
+      - "tests/external-payment-sandbox.test.mjs"
+      - "tsconfig.external-payments.json"
+      - ".github/workflows/external-payment-sandbox-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  external-payment-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type-check sandbox core
+        run: bun x tsc -p tsconfig.external-payments.json --pretty false
+
+      - name: Run sandbox contracts
+        run: bun test tests/external-payment-sandbox.test.mjs
