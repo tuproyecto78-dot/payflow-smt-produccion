@@ -1,32 +1,39 @@
 import "server-only";
 
+import {
+  ManualLinkPaymentAdapter,
+  PayPhonePresentationAdapter,
+  PaymentAdapterRegistry,
+} from "./adapters";
 import { ExternalPaymentError } from "./domain";
-import { ExternalPaymentSandboxService } from "./service";
+import { ExternalPaymentOrchestrationService } from "./service";
 import { SupabaseExternalPaymentRepository } from "./supabase-repository";
 
-export function assertExternalPaymentSandboxEnabled(): void {
-  if (
-    process.env.EXTERNAL_PAYMENTS_MODE !== "sandbox" ||
-    process.env.EXTERNAL_PAYMENTS_SANDBOX_ENABLED !== "true"
-  ) {
+function realChargesEnabled(): boolean {
+  return process.env.EXTERNAL_PAYMENTS_REAL_CHARGES_ENABLED === "true";
+}
+
+export function assertExternalPaymentOrchestratorEnabled(): void {
+  if (process.env.EXTERNAL_PAYMENTS_ENABLED !== "true") {
     throw new ExternalPaymentError(
-      "PAYMENT_SANDBOX_DISABLED",
-      "Los pagos de prueba no están habilitados.",
+      "PAYMENT_ORCHESTRATOR_DISABLED",
+      "El orquestador de pagos no está habilitado.",
+      503
+    );
+  }
+  if (realChargesEnabled()) {
+    throw new ExternalPaymentError(
+      "REAL_CHARGES_DISABLED",
+      "Los cobros reales están prohibidos en esta fase.",
       503
     );
   }
 }
 
-export function externalPaymentWebhookSecret(): string {
-  const secret = process.env.EXTERNAL_PAYMENTS_WEBHOOK_SECRET || "";
-  if (secret.length < 32) {
-    throw new ExternalPaymentError(
-      "PAYMENT_WEBHOOK_SECRET_MISSING",
-      "El webhook de pagos de prueba no está configurado.",
-      503
-    );
-  }
-  return secret;
+function payPhoneMode(): "sandbox" | "presentation" {
+  const mode = process.env.PAYPHONE_ADAPTER_MODE;
+  if (mode === "sandbox" || mode === "presentation") return mode;
+  return "presentation";
 }
 
 export function externalPaymentPublicBaseUrl(request: Request): string {
@@ -37,28 +44,38 @@ export function externalPaymentPublicBaseUrl(request: Request): string {
   return new URL(request.url).origin;
 }
 
-export function createExternalPaymentSandboxService() {
-  assertExternalPaymentSandboxEnabled();
-  return new ExternalPaymentSandboxService(
-    new SupabaseExternalPaymentRepository()
+export function createExternalPaymentService() {
+  assertExternalPaymentOrchestratorEnabled();
+  return new ExternalPaymentOrchestrationService(
+    new SupabaseExternalPaymentRepository(),
+    new PaymentAdapterRegistry([
+      new ManualLinkPaymentAdapter(),
+      new PayPhonePresentationAdapter({
+        enabled: process.env.PAYPHONE_ADAPTER_ENABLED === "true",
+        mode: payPhoneMode(),
+        realChargesEnabled: realChargesEnabled(),
+      }),
+    ])
   );
 }
 
 export function externalPaymentErrorResponse(error: unknown): Response {
   if (error instanceof ExternalPaymentError) {
     return Response.json(
-      { error: error.message, code: error.code },
+      {
+        error: error.message,
+        code: error.code,
+        real_charge: false,
+      },
       { status: error.httpStatus }
     );
   }
-  console.error(
-    "[external-payments] unexpected error",
-    error instanceof Error ? error.message : "unknown"
-  );
+  console.error("[external-payments] unexpected error");
   return Response.json(
     {
-      error: "No se pudo procesar la solicitud de pago de prueba.",
+      error: "No se pudo procesar la operación de pagos.",
       code: "EXTERNAL_PAYMENT_ERROR",
+      real_charge: false,
     },
     { status: 500 }
   );
