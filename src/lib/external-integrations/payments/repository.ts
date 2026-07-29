@@ -1,43 +1,120 @@
-import {
-  ExternalPaymentError,
-  isExternalPaymentTransitionAllowed,
-} from "./domain";
+import { randomUUID } from "node:crypto";
+
+import { ExternalPaymentError } from "./domain";
 import type {
-  AppliedExternalPaymentEvent,
+  ActivePaymentBusiness,
+  BusinessPaymentMethod,
   ExternalPaymentRequest,
-  ExternalPaymentWebhookEvent,
+  ManualPaymentConfirmationResult,
+  NormalizedManualPaymentConfirmationCommand,
+  PaymentConfirmationAuditEntry,
 } from "./types";
 
 export interface ExternalPaymentRepository {
-  findBusinessName(clientId: string): Promise<string | null>;
+  findActiveBusiness(clientId: string): Promise<ActivePaymentBusiness | null>;
+  createMethod(method: BusinessPaymentMethod): Promise<BusinessPaymentMethod>;
+  listMethods(clientId: string): Promise<BusinessPaymentMethod[]>;
+  findMethod(
+    clientId: string,
+    methodId: string
+  ): Promise<BusinessPaymentMethod | null>;
+  deactivateMethod(input: {
+    clientId: string;
+    methodId: string;
+    actorUserId: string;
+    now: string;
+  }): Promise<{ method: BusinessPaymentMethod; changed: boolean }>;
   findById(id: string): Promise<ExternalPaymentRequest | null>;
   findByIdempotencyKey(
     clientId: string,
     idempotencyKey: string
   ): Promise<ExternalPaymentRequest | null>;
-  create(
+  createRequest(
     request: ExternalPaymentRequest
   ): Promise<{ request: ExternalPaymentRequest; created: boolean }>;
-  applyEvent(
-    event: ExternalPaymentWebhookEvent
-  ): Promise<AppliedExternalPaymentEvent>;
+  confirmManual(
+    command: NormalizedManualPaymentConfirmationCommand,
+    now: string
+  ): Promise<ManualPaymentConfirmationResult>;
 }
+
+type InMemoryBusiness = {
+  businessName: string;
+  status: "active" | "suspended" | "cancelled";
+};
 
 export class InMemoryExternalPaymentRepository
   implements ExternalPaymentRepository
 {
+  private readonly methods = new Map<string, BusinessPaymentMethod>();
   private readonly requests = new Map<string, ExternalPaymentRequest>();
-  private readonly idempotency = new Map<string, string>();
-  private readonly eventIds = new Map<string, string>();
+  private readonly requestIdempotency = new Map<string, string>();
+  private readonly confirmationAudit = new Map<
+    string,
+    PaymentConfirmationAuditEntry
+  >();
 
-  constructor(
-    private readonly businessNames: Record<string, string> = {
-      "client-test": "Negocio de prueba",
+  constructor(private readonly businesses: Record<string, InMemoryBusiness>) {}
+
+  async findActiveBusiness(
+    clientId: string
+  ): Promise<ActivePaymentBusiness | null> {
+    const business = this.businesses[clientId];
+    if (!business || business.status !== "active") return null;
+    return {
+      id: clientId,
+      businessName: business.businessName,
+      status: "active",
+    };
+  }
+
+  async createMethod(
+    method: BusinessPaymentMethod
+  ): Promise<BusinessPaymentMethod> {
+    this.methods.set(method.id, method);
+    return method;
+  }
+
+  async listMethods(clientId: string): Promise<BusinessPaymentMethod[]> {
+    return [...this.methods.values()]
+      .filter((method) => method.clientId === clientId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async findMethod(
+    clientId: string,
+    methodId: string
+  ): Promise<BusinessPaymentMethod | null> {
+    const method = this.methods.get(methodId);
+    return method?.clientId === clientId ? method : null;
+  }
+
+  async deactivateMethod(input: {
+    clientId: string;
+    methodId: string;
+    actorUserId: string;
+    now: string;
+  }): Promise<{ method: BusinessPaymentMethod; changed: boolean }> {
+    const method = await this.findMethod(input.clientId, input.methodId);
+    if (!method) {
+      throw new ExternalPaymentError(
+        "PAYMENT_METHOD_NOT_FOUND",
+        "El método de pago no existe.",
+        404
+      );
     }
-  ) {}
-
-  async findBusinessName(clientId: string): Promise<string | null> {
-    return this.businessNames[clientId] || null;
+    if (method.status === "inactive") {
+      return { method, changed: false };
+    }
+    const updated: BusinessPaymentMethod = {
+      ...method,
+      status: "inactive",
+      deactivatedBy: input.actorUserId,
+      deactivatedAt: input.now,
+      updatedAt: input.now,
+    };
+    this.methods.set(updated.id, updated);
+    return { method: updated, changed: true };
   }
 
   async findById(id: string): Promise<ExternalPaymentRequest | null> {
@@ -48,15 +125,17 @@ export class InMemoryExternalPaymentRepository
     clientId: string,
     idempotencyKey: string
   ): Promise<ExternalPaymentRequest | null> {
-    const id = this.idempotency.get(`${clientId}:${idempotencyKey}`);
+    const id = this.requestIdempotency.get(
+      `${clientId}:${idempotencyKey}`
+    );
     return id ? this.requests.get(id) || null : null;
   }
 
-  async create(
+  async createRequest(
     request: ExternalPaymentRequest
   ): Promise<{ request: ExternalPaymentRequest; created: boolean }> {
     const key = `${request.clientId}:${request.idempotencyKey}`;
-    const existingId = this.idempotency.get(key);
+    const existingId = this.requestIdempotency.get(key);
     if (existingId) {
       const existing = this.requests.get(existingId);
       if (!existing) {
@@ -69,64 +148,86 @@ export class InMemoryExternalPaymentRepository
       return { request: existing, created: false };
     }
     this.requests.set(request.id, request);
-    this.idempotency.set(key, request.id);
+    this.requestIdempotency.set(key, request.id);
     return { request, created: true };
   }
 
-  async applyEvent(
-    event: ExternalPaymentWebhookEvent
-  ): Promise<AppliedExternalPaymentEvent> {
-    const eventKey = `${event.provider}:${event.eventId}`;
-    const existingEventRequestId = this.eventIds.get(eventKey);
-    const current = this.requests.get(event.paymentRequestId);
-    if (!current) {
+  async confirmManual(
+    command: NormalizedManualPaymentConfirmationCommand,
+    now: string
+  ): Promise<ManualPaymentConfirmationResult> {
+    const request = this.requests.get(command.paymentRequestId);
+    if (!request || request.clientId !== command.clientId) {
       throw new ExternalPaymentError(
         "PAYMENT_NOT_FOUND",
         "La solicitud de pago no existe.",
         404
       );
     }
-    if (
-      existingEventRequestId &&
-      existingEventRequestId !== event.paymentRequestId
-    ) {
+    if (request.confirmationMode !== "manual") {
       throw new ExternalPaymentError(
-        "EVENT_CONFLICT",
-        "El evento ya pertenece a otra solicitud.",
-        409
-      );
-    }
-    if (existingEventRequestId) {
-      return {
-        request: current,
-        duplicate: true,
-        transitionApplied: false,
-      };
-    }
-    if (current.providerReference !== event.providerReference) {
-      throw new ExternalPaymentError(
-        "PROVIDER_REFERENCE_MISMATCH",
-        "La referencia del proveedor no coincide.",
+        "PAYMENT_NOT_MANUAL",
+        "Esta solicitud no admite confirmación manual.",
         409
       );
     }
 
-    this.eventIds.set(eventKey, event.paymentRequestId);
-    const transitionApplied =
-      current.status !== event.status &&
-      isExternalPaymentTransitionAllowed(current.status, event.status);
-    const now = event.occurredAt;
+    const auditKey = `${request.id}:${command.idempotencyKey}`;
+    const existingAudit = this.confirmationAudit.get(auditKey);
+    if (existingAudit) {
+      if (existingAudit.newStatus !== command.status) {
+        throw new ExternalPaymentError(
+          "IDEMPOTENCY_CONFLICT",
+          "La clave de idempotencia ya pertenece a otra confirmación.",
+          409
+        );
+      }
+      return {
+        request,
+        duplicate: true,
+        transitionApplied: false,
+      };
+    }
+
+    if (request.status !== "pending") {
+      throw new ExternalPaymentError(
+        "PAYMENT_TERMINAL",
+        "El pago ya tiene un estado terminal.",
+        409
+      );
+    }
+
     const updated: ExternalPaymentRequest = {
-      ...current,
-      status: transitionApplied ? event.status : current.status,
+      ...request,
+      status: command.status,
+      confirmedBy: command.actorUserId,
+      confirmedAt: now,
+      confirmationNote: command.note,
       lastEventAt: now,
       updatedAt: now,
-      metadata: {
-        ...current.metadata,
-        lastSandboxEventId: event.eventId,
-      },
+    };
+    const audit: PaymentConfirmationAuditEntry = {
+      id: randomUUID(),
+      paymentRequestId: request.id,
+      clientId: request.clientId,
+      idempotencyKey: command.idempotencyKey,
+      actorUserId: command.actorUserId,
+      actorRole: command.actorRole,
+      previousStatus: request.status,
+      newStatus: command.status,
+      note: command.note,
+      createdAt: now,
     };
     this.requests.set(updated.id, updated);
-    return { request: updated, duplicate: false, transitionApplied };
+    this.confirmationAudit.set(auditKey, audit);
+    return {
+      request: updated,
+      duplicate: false,
+      transitionApplied: true,
+    };
+  }
+
+  getConfirmationAudit(): PaymentConfirmationAuditEntry[] {
+    return [...this.confirmationAudit.values()];
   }
 }

@@ -15,7 +15,6 @@ export async function GET(request: Request, { params }: Context) {
       { status: 401 }
     );
   }
-
   try {
     const clientId = assertPaymentClientAccess({
       session,
@@ -23,13 +22,16 @@ export async function GET(request: Request, { params }: Context) {
       permission: "view",
     });
     const { id } = await params;
-    const payment = await createExternalPaymentService().getForClient(
-      id,
-      clientId
-    );
+    const payment =
+      await createExternalPaymentService().getPayPhonePresentation(
+        id,
+        clientId
+      );
     return Response.json({
-      orchestrator: true,
+      presentation: true,
+      provider: "payphone",
       real_charge: false,
+      message: "Demostración PayPhone: no se realizará ningún cobro.",
       payment,
     });
   } catch (error) {

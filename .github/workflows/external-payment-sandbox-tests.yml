@@ -1,13 +1,14 @@
-name: External Payment Sandbox Tests
+name: External Payment Orchestration Tests
 
 on:
   pull_request:
     paths:
       - "src/lib/external-integrations/payments/**"
       - "src/app/api/integrations/payments/**"
-      - "supabase/migrations/*external_payment_sandbox.sql"
-      - "tests/external-payment-sandbox.test.mjs"
+      - "supabase/migrations/*business_payment_methods.sql"
+      - "tests/external-payment-orchestration.test.mjs"
       - "tsconfig.external-payments.json"
+      - "docs/external-payment-orchestration.md"
       - ".github/workflows/external-payment-sandbox-tests.yml"
   workflow_dispatch:
 
@@ -30,8 +31,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Type-check sandbox core
+      - name: Type-check payment orchestration core
         run: bun x tsc -p tsconfig.external-payments.json --pretty false
 
-      - name: Run sandbox contracts
-        run: bun test tests/external-payment-sandbox.test.mjs
+      - name: Run orchestration contracts
+        run: bun test tests/external-payment-orchestration.test.mjs

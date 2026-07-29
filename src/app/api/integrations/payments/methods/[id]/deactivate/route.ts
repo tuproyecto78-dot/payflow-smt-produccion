@@ -4,10 +4,11 @@ import { assertNoSensitivePaymentFields } from "@/lib/external-integrations/paym
 import {
   createExternalPaymentService,
   externalPaymentErrorResponse,
-  externalPaymentPublicBaseUrl,
 } from "@/lib/external-integrations/payments/runtime";
 
-export async function POST(request: Request) {
+type Context = { params: Promise<{ id: string }> };
+
+export async function POST(request: Request, { params }: Context) {
   const session = await requireActiveSession();
   if (!session) {
     return Response.json(
@@ -15,36 +16,26 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-
   try {
     const body = await request.json();
     assertNoSensitivePaymentFields(body);
     const clientId = assertPaymentClientAccess({
       session,
       requestedClientId: body?.client_id,
-      permission: "create",
+      permission: "manage",
     });
-    const result = await createExternalPaymentService().create({
+    const { id } = await params;
+    const result = await createExternalPaymentService().deactivateMethod({
       clientId,
-      paymentMethodId: body?.payment_method_id,
-      createdBy: session.userId,
-      amount: body?.amount,
-      currency: body?.currency,
-      description: body?.description,
-      customerName: body?.customer_name,
-      orderReference: body?.order_reference,
-      idempotencyKey: body?.idempotency_key,
-      publicBaseUrl: externalPaymentPublicBaseUrl(request),
+      methodId: id,
+      actorUserId: session.userId,
     });
-    return Response.json(
-      {
-        orchestrator: true,
-        real_charge: false,
-        reused: result.reused,
-        payment: result.payment,
-      },
-      { status: result.reused ? 200 : 201 }
-    );
+    return Response.json({
+      orchestrator: true,
+      real_charge: false,
+      changed: result.changed,
+      method: result.method,
+    });
   } catch (error) {
     return externalPaymentErrorResponse(error);
   }

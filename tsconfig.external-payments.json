@@ -8,10 +8,10 @@
   "include": [
     "src/lib/external-integrations/payments/types.ts",
     "src/lib/external-integrations/payments/domain.ts",
+    "src/lib/external-integrations/payments/access.ts",
+    "src/lib/external-integrations/payments/adapters.ts",
     "src/lib/external-integrations/payments/repository.ts",
-    "src/lib/external-integrations/payments/sandbox-provider.ts",
-    "src/lib/external-integrations/payments/service.ts",
-    "src/lib/external-integrations/payments/webhook-signature.ts"
+    "src/lib/external-integrations/payments/service.ts"
   ],
   "exclude": [
     "node_modules"
