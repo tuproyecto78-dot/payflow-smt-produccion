@@ -73,8 +73,26 @@ export async function POST(req: Request) {
     const authorizationCode = String(body.AuthorizationCode || body.authorizationCode || "").trim() || null;
     const reference = String(body.Reference || body.reference || "").trim() || null;
 
+    // ─── Per-business storeId validation ───────────────────────────────
+    // PayFlow SMT is a multi-provider orchestrator: each business can have its
+    // own PayPhone token + storeId. The webhook must accept notifications from
+    // ANY registered business storeId, not just the global env one.
     const configuredStoreId = getPayphoneConfig().storeId;
-    if (!configuredStoreId || !storeId || storeId !== configuredStoreId) {
+    let authorizedStoreId = false;
+    if (storeId && configuredStoreId && storeId === configuredStoreId) {
+      // Global env storeId (sandbox / single-tenant).
+      authorizedStoreId = true;
+    } else if (storeId) {
+      // Check if this storeId belongs to any business PaymentAccount.
+      const businessAccount = await db.paymentAccount.findFirst({
+        where: { payphoneStoreId: storeId, paymentRoute: "payphone_token" },
+        select: { id: true, clientId: true },
+      });
+      if (businessAccount) {
+        authorizedStoreId = true;
+      }
+    }
+    if (!authorizedStoreId) {
       return NextResponse.json({ error: "StoreId no autorizado." }, { status: 401 });
     }
     if (!clientTransactionId) {
