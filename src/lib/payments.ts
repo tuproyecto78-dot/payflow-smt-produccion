@@ -1,5 +1,14 @@
 // Capa de proveedores de pago para PayFlow SMT.
 import type { PaymentOutcome } from "./workflow-types";
+import {
+  createPayphoneApiLink,
+  generateClientTransactionId,
+} from "./payphone/api-link";
+import { getPayphoneMerchantCredentials } from "./payphone/merchant-credentials";
+import {
+  completePartnerTransaction,
+  reservePartnerTransaction,
+} from "./payphone/partner-transactions";
 
 export type PaymentProvider = "Mock" | "PayPhone" | "DEUNA" | "Stripe" | "API personalizada";
 export type PaymentStatus = "payment_success" | "payment_failed" | "payment_pending" | "error";
@@ -7,6 +16,7 @@ export type PaymentStatus = "payment_success" | "payment_failed" | "payment_pend
 export interface CreatePaymentInput {
   provider: PaymentProvider; amount: number; currency: string; description: string;
   customer: string; phoneNumber: string; orderId: string; userId: string;
+  clientId?: string;
   workflowId?: string; workflowRunId?: string;
   customApiUrl?: string; customApiHeaders?: Record<string, string>;
   forceOutcome?: PaymentStatus;
@@ -66,35 +76,143 @@ function mockProvider(input: CreatePaymentInput, base: any): CreatePaymentResult
 }
 
 async function payphoneProvider(input: CreatePaymentInput, base: any): Promise<CreatePaymentResult> {
-  const token = process.env.PAYPHONE_TOKEN;
-  const storeId = process.env.PAYPHONE_STORE_ID;
   const countryCode = input.countryCode || "593";
-  if (!token || !storeId) {
-    const mock = mockProvider(input, base);
-    return { ...mock, payment_provider: "PayPhone", payment_link: "", payphone_business_status: "not_configured", payphone_store_id: null, payphone_personal_status: "skipped", customer_phone: input.phoneNumber, customer_document: input.customerDocument, customer_name: input.customer, country_code: countryCode, whatsapp_message: mock.payment_status === "payment_success" ? PAYPHONE_MSG.success : mock.payment_status === "payment_failed" ? PAYPHONE_MSG.failed : mock.payment_status === "payment_pending" ? PAYPHONE_MSG.pending : PAYPHONE_MSG.error, raw_response: { ...mock.raw_response, provider: "PayPhone", credentials_configured: false, note: "PAYPHONE_TOKEN/PAYPHONE_STORE_ID no configurados." } };
+  const safeBase = {
+    ...base,
+    payment_provider: "PayPhone" as const,
+    customer_phone: input.phoneNumber,
+    customer_document: input.customerDocument,
+    customer_name: input.customer,
+    country_code: countryCode,
+  };
+  if (!input.clientId) {
+    return {
+      payment_id: `pp_err_${Date.now()}`,
+      provider_payment_id: null,
+      payment_status: "error",
+      payment_link: "",
+      payphone_business_status: "client_required",
+      payphone_store_id: null,
+      payphone_personal_status: "skipped",
+      whatsapp_message: PAYPHONE_MSG.business_not_configured,
+      raw_response: { provider: "PayPhone", code: "PAYPHONE_CLIENT_REQUIRED" },
+      ...safeBase,
+    };
   }
-  // API Users Check
-  if (input.phoneNumber) {
-    try {
-      const checkRes = await fetch(`https://pay.payphonelab.com/api/v1/users/check/${countryCode}${input.phoneNumber}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
-      if (!checkRes.ok) {
-        return { payment_id: `pp_nouser_${Date.now()}`, provider_payment_id: null, payment_provider: "PayPhone", payment_status: "payment_failed", payment_link: "", whatsapp_message: PAYPHONE_MSG.customer_not_registered, ...base, payphone_business_status: "configured", payphone_store_id: storeId, payphone_personal_status: "not_registered", customer_phone: input.phoneNumber, customer_document: input.customerDocument, customer_name: input.customer, country_code: countryCode, raw_response: { provider: "PayPhone", step: "users_check", registered: false } };
-      }
-    } catch { /* continue to sale */ }
-  }
-  // API Sale
   try {
-    const amountCents = Math.round(input.amount * 100);
-    const res = await fetch("https://pay.payphonelab.com/api/v1/sale", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ phoneNumber: input.phoneNumber, countryCode, amount: amountCents, amountWithoutTax: amountCents, currency: input.currency, clientTransactionId: base.order_id, storeId, reference: input.reference || input.description }) });
-    const data = await res.json().catch(() => ({}));
-    const status = normalizeStatus((data as any).status ?? (res.ok ? "payment_pending" : "error"));
-    let msg = PAYPHONE_MSG.error;
-    if (status === "payment_success") msg = PAYPHONE_MSG.success;
-    else if (status === "payment_failed") msg = PAYPHONE_MSG.failed;
-    else if (status === "payment_pending") msg = PAYPHONE_MSG.sale_created;
-    return { payment_id: String((data as any).paymentId ?? `pp_${Date.now()}`), provider_payment_id: String((data as any).paymentId ?? null), payment_provider: "PayPhone", payment_status: status, payment_link: "", whatsapp_message: msg, ...base, payphone_business_status: "configured", payphone_store_id: storeId, payphone_personal_status: "registered", customer_phone: input.phoneNumber, customer_document: input.customerDocument, customer_name: input.customer, country_code: countryCode, raw_response: { provider: "PayPhone", step: "sale", httpStatus: res.status, ...data } };
-  } catch (err) {
-    return { payment_id: `pp_err_${Date.now()}`, provider_payment_id: null, payment_provider: "PayPhone", payment_status: "error", payment_link: "", whatsapp_message: PAYPHONE_MSG.error, ...base, payphone_business_status: "configured", payphone_store_id: storeId, payphone_personal_status: "registered", customer_phone: input.phoneNumber, customer_document: input.customerDocument, customer_name: input.customer, country_code: countryCode, raw_response: { provider: "PayPhone", step: "sale", error: err instanceof Error ? err.message : String(err) } };
+    const credentials = await getPayphoneMerchantCredentials(input.clientId);
+    const realCharge =
+      credentials.environment === "production" &&
+      process.env.PAYPHONE_REAL_CHARGES_ENABLED === "true";
+    const clientTransactionId = generateClientTransactionId();
+    const reservation = await reservePartnerTransaction({
+      clientId: input.clientId,
+      accountId: credentials.accountId,
+      createdBy: input.userId,
+      clientTransactionId,
+      idempotencyKey: `node:${String(base.order_id)}`.slice(0, 120),
+      amountCents: Math.round(input.amount * 100),
+      currency: "USD",
+      reference: input.reference || input.description,
+      realCharge,
+    });
+    if (reservation.reused) {
+      const stillCreating =
+        reservation.transaction.status === "creating";
+      return {
+        payment_id: reservation.transaction.id,
+        provider_payment_id:
+          reservation.transaction.providerTransactionId,
+        payment_status:
+          stillCreating
+            ? "error"
+            : reservation.transaction.status === "approved"
+            ? "payment_success"
+            : reservation.transaction.status === "rejected"
+              ? "payment_failed"
+              : reservation.transaction.status === "error"
+                ? "error"
+                : "payment_pending",
+        payment_link: reservation.transaction.paymentLink || "",
+        payphone_business_status: "configured",
+        payphone_store_id: `****${credentials.storeId.slice(-4)}`,
+        payphone_personal_status: "skipped",
+        whatsapp_message: stillCreating
+          ? PAYPHONE_MSG.error
+          : PAYPHONE_MSG.pending,
+        raw_response: {
+          provider: "PayPhone",
+          reused: true,
+          code: stillCreating
+            ? "PAYPHONE_REQUEST_IN_PROGRESS"
+            : "PAYPHONE_REQUEST_REUSED",
+          fallback_used: reservation.transaction.fallbackUsed,
+          real_charge: reservation.transaction.realCharge,
+        },
+        ...safeBase,
+      };
+    }
+    const canCallProvider =
+      credentials.environment === "sandbox" || realCharge;
+    const result = canCallProvider
+      ? await createPayphoneApiLink(
+          {
+            amount: input.amount,
+            currency: "USD",
+            reference: input.reference || input.description,
+            storeId: credentials.storeId,
+          },
+          clientTransactionId,
+          { token: credentials.token, storeId: credentials.storeId }
+        )
+      : {
+          ok: false,
+          payment_link: "",
+          raw_response: { error: "PAYPHONE_REAL_CHARGES_DISABLED" },
+        };
+    const fallbackUsed = !result.ok && Boolean(credentials.fallbackUrl);
+    const paymentLink = result.ok
+      ? result.payment_link
+      : credentials.fallbackUrl;
+    const completed = await completePartnerTransaction({
+      id: reservation.transaction.id,
+      clientId: input.clientId,
+      status: paymentLink ? "pending" : "error",
+      paymentLink,
+      fallbackUsed,
+      providerResponse: result.raw_response,
+    });
+    return {
+      payment_id: completed.id,
+      provider_payment_id: completed.providerTransactionId,
+      payment_status: paymentLink ? "payment_pending" : "error",
+      payment_link: paymentLink || "",
+      payphone_business_status: "configured",
+      payphone_store_id: `****${credentials.storeId.slice(-4)}`,
+      payphone_personal_status: "skipped",
+      whatsapp_message: paymentLink ? PAYPHONE_MSG.pending : PAYPHONE_MSG.error,
+      raw_response: {
+        provider: "PayPhone",
+        integration: "API_LINK",
+        fallback_used: fallbackUsed,
+        real_charge: realCharge,
+        http_status: result.raw_response["httpStatus"] || null,
+      },
+      ...safeBase,
+    };
+  } catch {
+    return {
+      payment_id: `pp_err_${Date.now()}`,
+      provider_payment_id: null,
+      payment_status: "error",
+      payment_link: "",
+      payphone_business_status: "not_configured",
+      payphone_store_id: null,
+      payphone_personal_status: "skipped",
+      whatsapp_message: PAYPHONE_MSG.error,
+      raw_response: { provider: "PayPhone", code: "PAYPHONE_ACCOUNT_UNAVAILABLE" },
+      ...safeBase,
+    };
   }
 }
 
@@ -152,12 +270,11 @@ export function getAllProviderStatuses() {
     },
     {
       provider: "PayPhone",
-      configured: !!(process.env.PAYPHONE_PRODUCTION_TOKEN || process.env.PAYPHONE_SANDBOX_TOKEN),
-      mode: (process.env.PAYPHONE_ENV || "disabled").toLowerCase(),
-      missingVars: [
-        ...(process.env.PAYPHONE_PRODUCTION_TOKEN ? [] : ["PAYPHONE_PRODUCTION_TOKEN"]),
-        ...(process.env.PAYPHONE_PRODUCTION_STORE_ID ? [] : ["PAYPHONE_PRODUCTION_STORE_ID"]),
-      ].filter((v, i, a) => a.indexOf(v) === i),
+      configured: !!process.env.PAYPHONE_CREDENTIALS_MASTER_KEY,
+      mode: "per_business",
+      missingVars: process.env.PAYPHONE_CREDENTIALS_MASTER_KEY
+        ? []
+        : ["PAYPHONE_CREDENTIALS_MASTER_KEY"],
     },
     {
       provider: "DEUNA",
