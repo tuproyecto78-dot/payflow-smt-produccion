@@ -1,270 +1,125 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { rateLimit, getClientIP, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
-import { logAudit } from "@/lib/audit";
-import { getPayphoneConfig } from "@/lib/payphone/config";
 import {
-  verifyPayphoneTransaction,
-  type VerifiedPayphoneTransaction,
-} from "@/lib/payphone/verify-transaction";
-import { updateDurablePayphonePayment } from "@/lib/operational-telemetry";
-import { mapPayphoneWebhookStatus } from "@/lib/payphone-link";
+  applyPayphoneNotification,
+} from "@/lib/payphone/partner-transactions";
+import {
+  getClientIP,
+  rateLimit,
+  RATE_LIMIT_ERROR,
+} from "@/lib/security";
 import { verifySharedSecret } from "@/lib/webhook-signature";
 
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/payphone/webhook
- *
- * Recibe la Notificación Externa de PayPhone cuando el estado de una
- * transacción cambia (Approved, Canceled, etc.).
- *
- * PayPhone envía estos campos:
- *   - ClientTransactionId  (nuestro ID generado al crear el link)
- *   - TransactionId        (ID interno de PayPhone)
- *   - StatusCode           (1=Pending, 2=Canceled, 3=Approved)
- *   - TransactionStatus    ("Pending" | "Canceled" | "Approved")
- *   - StoreId
- *   - Amount               (en centavos)
- *   - Currency             ("USD")
- *   - AuthorizationCode
- *   - Reference
- *
- * Reglas:
- *   1. Buscar payment_transaction por client_transaction_id.
- *   2. Evitar duplicados por TransactionId (providerTransactionId).
- *   3. No duplicar mensajes WhatsApp.
- *   4. No cambiar payment_success a failed.
- *   5. Guardar raw_event.
- *   6. Registrar audit log.
- *   7. Responder JSON confirmando recepción.
- */
-export async function POST(req: Request) {
-  const ip = getClientIP(req);
-  if (!rateLimit(`payphone-webhook:${ip}`, 120, 60_000)) {
-    return NextResponse.json({ error: RATE_LIMIT_ERROR }, { status: 429 });
-  }
+type PayphoneNotification = {
+  storeId: string;
+  clientTransactionId: string;
+  providerTransactionId: string;
+  statusCode: number;
+  transactionStatus: string | null;
+  amountCents: number;
+  currency: string;
+  authorizationCode: string | null;
+  reference: string | null;
+};
 
-  const requestUrl = new URL(req.url);
-  const receivedSecret = req.headers.get("x-payphone-webhook-secret") || requestUrl.searchParams.get("token");
-  const configuredSecret = process.env.PAYPHONE_WEBHOOK_SECRET || "";
-  const allowUnsignedDevelopment =
-    process.env.NODE_ENV !== "production" && process.env.ALLOW_UNSIGNED_PAYPHONE_WEBHOOKS === "true";
-  if (!verifySharedSecret(receivedSecret, configuredSecret) && !allowUnsignedDevelopment) {
-    return NextResponse.json({ error: "Webhook no autorizado." }, { status: 401 });
+export function normalizePayphoneNotification(
+  body: Record<string, unknown>
+): PayphoneNotification {
+  const text = (pascal: string, camel: string) =>
+    String(body[pascal] ?? body[camel] ?? "").trim();
+  const number = (pascal: string, camel: string) =>
+    Number(body[pascal] ?? body[camel]);
+  const storeId = text("StoreId", "storeId");
+  const clientTransactionId = text(
+    "ClientTransactionId",
+    "clientTransactionId"
+  );
+  const providerTransactionId = text("TransactionId", "transactionId");
+  const statusCode = number("StatusCode", "statusCode");
+  const amountCents = number("Amount", "amount");
+  const currency = text("Currency", "currency").toUpperCase() || "USD";
+  if (
+    !storeId ||
+    !clientTransactionId ||
+    !providerTransactionId ||
+    !Number.isInteger(statusCode) ||
+    ![1, 2, 3].includes(statusCode) ||
+    !Number.isSafeInteger(amountCents) ||
+    amountCents <= 0 ||
+    currency !== "USD"
+  ) {
+    throw new Error("PAYPHONE_INVALID_NOTIFICATION");
   }
+  return {
+    storeId,
+    clientTransactionId,
+    providerTransactionId,
+    statusCode,
+    transactionStatus:
+      text("TransactionStatus", "transactionStatus") || null,
+    amountCents,
+    currency,
+    authorizationCode:
+      text("AuthorizationCode", "authorizationCode") || null,
+    reference: text("Reference", "reference") || null,
+  };
+}
 
+function providerResponse(
+  response: boolean,
+  errorCode: string,
+  status: number,
+  details?: Record<string, unknown>
+) {
+  return Response.json(
+    { Response: response, ErrorCode: errorCode, ...details },
+    { status }
+  );
+}
+
+export async function POST(request: Request) {
+  const ip = getClientIP(request);
+  if (!rateLimit(`payphone-partner-notification:${ip}`, 120, 60_000)) {
+    return providerResponse(false, "777", 429, {
+      error: RATE_LIMIT_ERROR,
+    });
+  }
+  const requestUrl = new URL(request.url);
+  const receivedSecret =
+    request.headers.get("x-payphone-webhook-secret") ||
+    requestUrl.searchParams.get("token");
+  const configuredSecret =
+    process.env.PAYPHONE_EXTERNAL_NOTIFICATION_SECRET || "";
+  if (!verifySharedSecret(receivedSecret, configuredSecret)) {
+    return providerResponse(false, "111", 401);
+  }
   try {
-    const body = await req.json().catch(() => ({}));
-
-    // Extract PayPhone webhook fields
-    const clientTransactionId = String(body.ClientTransactionId || body.clientTransactionId || "").trim();
-    const providerTransactionId = String(body.TransactionId || body.transactionId || "").trim() || null;
-    const statusCode = typeof body.StatusCode === "number"
-      ? body.StatusCode
-      : typeof body.statusCode === "number"
-        ? body.statusCode
-        : (typeof body.StatusCode === "string" ? parseInt(body.StatusCode, 10) : undefined);
-    const transactionStatus = String(body.TransactionStatus || body.transactionStatus || "").trim() || null;
-    const storeId = String(body.StoreId || body.storeId || "").trim() || null;
-    const amountRaw = body.Amount ?? body.amount;
-    const amount = typeof amountRaw === "number" ? amountRaw / 100 : null; // PayPhone sends cents
-    const currency = String(body.Currency || body.currency || "USD").trim() || null;
-    const authorizationCode = String(body.AuthorizationCode || body.authorizationCode || "").trim() || null;
-    const reference = String(body.Reference || body.reference || "").trim() || null;
-
-    const configuredStoreId = getPayphoneConfig().storeId;
-    if (!configuredStoreId || !storeId || storeId !== configuredStoreId) {
-      return NextResponse.json({ error: "StoreId no autorizado." }, { status: 401 });
-    }
-    if (!clientTransactionId) {
-      return NextResponse.json({ error: "ClientTransactionId es obligatorio." }, { status: 400 });
-    }
-
-    // Check for duplicates by providerTransactionId
-    let isDuplicate = false;
-    if (providerTransactionId) {
-      const existing = await db.paymentWebhookEvent.findFirst({
-        where: { providerTransactionId, provider: "PayPhone" },
-        select: { id: true, processed: true },
-      });
-      if (existing) {
-        isDuplicate = true;
-      }
-    }
-
-    // Find the payment transaction by clientTransactionId
-    let tx: { id: string; status: string; clientTransactionId: string | null; reference: string | null; amount: number; storeId: string | null } | null = null;
-    if (clientTransactionId) {
-      tx = await db.paymentTransaction.findFirst({
-        where: { clientTransactionId },
-        select: { id: true, status: true, clientTransactionId: true, reference: true, amount: true, storeId: true },
-      });
-    }
-
-    // Also try by orderId as fallback
-    if (!tx && clientTransactionId) {
-      tx = await db.paymentTransaction.findFirst({
-        where: { orderId: clientTransactionId },
-        select: { id: true, status: true, clientTransactionId: true, reference: true, amount: true, storeId: true },
-      });
-    }
-
-    const previousStatus = tx?.status || null;
-
-    if (!tx) {
-      return NextResponse.json({ error: "Transacción no encontrada." }, { status: 404 });
-    }
-    if (tx.storeId && tx.storeId !== storeId) {
-      return NextResponse.json({ error: "La tienda no coincide con la transacción." }, { status: 409 });
-    }
-    if (amount !== null && Math.abs(tx.amount - amount) > 0.001) {
-      return NextResponse.json({ error: "El monto no coincide con la transacción." }, { status: 409 });
-    }
-
-    let verified: VerifiedPayphoneTransaction = {
-      clientTransactionId,
-      transactionId: providerTransactionId || "",
-      status: mapPayphoneWebhookStatus(statusCode, transactionStatus || undefined),
-      amount: amount ?? tx.amount,
-      currency: currency || "USD",
-      authorizationCode: authorizationCode || undefined,
-    };
-    if (verified.status === "payment_success" && (!providerTransactionId || !authorizationCode)) {
-      return NextResponse.json({ error: "La aprobación no incluye identificadores verificables." }, { status: 400 });
-    }
-
-    // Optional defense in depth. Enable only after PayPhone confirms that the
-    // authenticated Sale query applies to the merchant's API Link contract.
-    if (process.env.PAYPHONE_WEBHOOK_VERIFY_WITH_API === "true") {
-      try {
-        verified = await verifyPayphoneTransaction(clientTransactionId);
-      } catch (verificationError) {
-        console.error(
-          "[payphone/webhook] provider verification failed",
-          verificationError instanceof Error ? verificationError.message : "unknown"
-        );
-        return NextResponse.json(
-          { error: "No se pudo verificar la transacción con PayPhone." },
-          { status: 503 }
-        );
-      }
-    }
-    if (Math.abs(tx.amount - verified.amount) > 0.001 || verified.currency !== "USD") {
-      return NextResponse.json({ error: "La verificación del monto o moneda no coincide." }, { status: 409 });
-    }
-    if (providerTransactionId && verified.transactionId && providerTransactionId !== verified.transactionId) {
-      return NextResponse.json({ error: "El identificador de PayPhone no coincide." }, { status: 409 });
-    }
-    const verifiedStatus = verified.status;
-
-    // Determine if we should update the transaction
-    let shouldUpdate = false;
-    if (verifiedStatus !== "error") {
-      // Rule: No cambiar payment_success a failed
-      if (tx.status === "payment_success" && verifiedStatus !== "payment_success") {
-        shouldUpdate = false;
-      }
-      // Rule: No cambiar si el estado es el mismo (idempotency)
-      else if (tx.status === verifiedStatus) {
-        shouldUpdate = false;
-      } else {
-        shouldUpdate = true;
-      }
-    }
-
-    // Update the transaction if needed
-    if (shouldUpdate && tx) {
-      await db.paymentTransaction.update({
-        where: { id: tx.id },
-        data: {
-          status: verifiedStatus,
-          providerPaymentId: verified.transactionId || providerTransactionId || undefined,
-          paidAt: verifiedStatus === "payment_success" ? new Date() : undefined,
-        },
-      });
-
-      await updateDurablePayphonePayment({
-        clientTransactionId,
-        providerPaymentId: verified.transactionId || providerTransactionId,
-        status: verifiedStatus,
-        verifiedPayload: verified,
-      });
-
-      void logAudit({
-        action: "payment_status_changed",
-        entityType: "payment",
-        entityId: tx.id,
-        ipAddress: ip,
-        metadata: {
-          provider: "PayPhone",
-          previous_status: previousStatus,
-          new_status: verifiedStatus,
-          client_transaction_id: clientTransactionId || null,
-          provider_transaction_id: providerTransactionId,
-          status_code: statusCode ?? null,
-          transaction_status: transactionStatus,
-          authorization_code: authorizationCode,
-        },
-      });
-    }
-
-    // Save the webhook event
-    const webhookEvent = await db.paymentWebhookEvent.create({
-      data: {
-        provider: "PayPhone",
-        paymentTransactionId: tx?.id || null,
-        clientTransactionId: clientTransactionId || null,
-        providerTransactionId,
-        storeId,
-        statusCode: !isNaN(statusCode as number) ? statusCode : null,
-        transactionStatus,
-        amount,
-        currency,
-        authorizationCode,
-        reference,
-        rawEvent: JSON.stringify(body),
-        processed: true,
-        duplicate: isDuplicate,
-        processedAt: new Date(),
-      },
+    const notification = normalizePayphoneNotification(
+      (await request.json().catch(() => ({}))) as Record<string, unknown>
+    );
+    const result = await applyPayphoneNotification({
+      ...notification,
+      receivedAt: new Date().toISOString(),
     });
-
-    void logAudit({
-      action: "payment_webhook_received",
-      entityType: "payment",
-      entityId: tx?.id || webhookEvent.id,
-      ipAddress: ip,
-      metadata: {
-        provider: "PayPhone",
-        client_transaction_id: clientTransactionId || null,
-        provider_transaction_id: providerTransactionId,
-        status_code: statusCode ?? null,
-        transaction_status: transactionStatus,
-        normalized_status: verifiedStatus,
-        transaction_found: !!tx,
-        status_updated: shouldUpdate,
-        duplicate: isDuplicate,
-      },
+    return providerResponse(true, "000", 200, {
+      duplicate: result.duplicate,
+      transition_applied: result.transition_applied,
+      status: result.status,
     });
-
-    return NextResponse.json({
-      ok: true,
-      received: true,
-      client_transaction_id: clientTransactionId || null,
-      provider_transaction_id: providerTransactionId,
-      status_code: statusCode ?? null,
-      transaction_status: transactionStatus,
-      normalized_status: verifiedStatus,
-      transaction_found: !!tx,
-      previous_status: previousStatus,
-      status_updated: shouldUpdate,
-      duplicate: isDuplicate,
-      webhook_event_id: webhookEvent.id,
-      message: "Notificación recibida y procesada correctamente.",
-    });
-  } catch (err) {
-    console.error("[payphone/webhook] error:", err);
-    return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "PAYPHONE_INVALID_NOTIFICATION") {
+      return providerResponse(false, "222", 400);
+    }
+    if (code === "PAYPHONE_NOTIFICATION_UNAUTHORIZED") {
+      return providerResponse(false, "111", 401);
+    }
+    if (code === "PAYPHONE_TRANSACTION_NOT_FOUND") {
+      return providerResponse(false, "333", 404);
+    }
+    if (code === "PAYPHONE_NOTIFICATION_MISMATCH") {
+      return providerResponse(false, "444", 409);
+    }
+    return providerResponse(false, "666", 500);
   }
 }
