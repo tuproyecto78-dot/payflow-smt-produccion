@@ -33,7 +33,7 @@ export async function GET() {
         storeIdMasked: "—",
         externalNotificationEnabled: false,
         preregistrationEnabled: false,
-        missingVars: ["PAYPHONE_ENV", "PAYPHONE_TOKEN", "PAYPHONE_STORE_ID"],
+        missingVars: ["PAYPHONE_CREDENTIALS_MASTER_KEY"],
       },
       { status: 200 }
     );
