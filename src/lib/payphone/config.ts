@@ -1,23 +1,13 @@
 /**
  * PayFlow SMT — Canonical PayPhone configuration module.
  *
- * Single source of truth for PayPhone credentials and feature flags.
+ * Legacy global PayPhone configuration compatibility layer.
  *
  * Server-only. NEVER import this from a Client Component.
  *
- * Environment variables (configured in Vercel):
- *   - PAYPHONE_ENV                              → "production" | "sandbox" | "disabled"
- *   - PAYPHONE_MODE                             → "link" | "sale"  (we only support "link")
- *   - PAYPHONE_TOKEN                            → Bearer token (server only)
- *   - PAYPHONE_STORE_ID                         → Store ID (server only)
- *   - PAYPHONE_EXTERNAL_NOTIFICATION_ENABLED    → "true" | "false"
- *   - PAYPHONE_PREREGISTRATION_ENABLED          → "true" | "false"
- *
- * SECURITY RULES:
- *   1. PAYPHONE_TOKEN is NEVER exposed to the frontend.
- *   2. PAYPHONE_STORE_ID is NEVER exposed in full — only the last 4 digits.
- *   3. No NEXT_PUBLIC_PAYPHONE_* variables are used.
- *   4. The token is never printed to logs.
+ * Global merchant credentials are deliberately unsupported. Active payment
+ * paths resolve encrypted third-party credentials by client_id through
+ * merchant-credentials.ts.
  */
 
 import "server-only";
@@ -66,80 +56,23 @@ export function isDevOrPreview(): boolean {
  * NEVER throws — always returns a valid object.
  */
 export function getPayphoneConfig(): PayPhoneRuntimeConfig {
-  const rawEnv = (process.env.PAYPHONE_ENV || "").toLowerCase().trim();
-  const rawMode = (process.env.PAYPHONE_MODE || "link").toLowerCase().trim();
-  const token = process.env.PAYPHONE_TOKEN?.trim() || null;
-  const storeId = process.env.PAYPHONE_STORE_ID?.trim() || null;
   const externalNotificationEnabled =
     (process.env.PAYPHONE_EXTERNAL_NOTIFICATION_ENABLED || "").toLowerCase() === "true";
   const preregistrationEnabled =
     (process.env.PAYPHONE_PREREGISTRATION_ENABLED || "").toLowerCase() === "true";
 
-  // Resolve environment
-  let env: PayPhoneEnv;
-  if (rawEnv === "disabled") {
-    // If credentials exist, treat "disabled" as "production" (user probably
-    // forgot to change PAYPHONE_ENV after setting credentials).
-    if (token && storeId) {
-      console.log("[payphone] PAYPHONE_ENV=disabled but credentials exist, using production");
-      env = "production";
-    } else {
-      env = "disabled";
-    }
-  } else if (rawEnv === "production" || rawEnv === "sandbox" || rawEnv === "test") {
-    env = rawEnv === "test" ? "sandbox" : rawEnv;
-  } else if (!rawEnv) {
-    // PAYPHONE_ENV not set — if TOKEN and STORE_ID exist, default to production.
-    // This is critical for Vercel deployments where the user set TOKEN + STORE_ID
-    // but didn't set PAYPHONE_ENV. We should NOT mark as "not_configured" or
-    // "disabled" in that case.
-    if (token && storeId) {
-      env = "production";
-    } else {
-      env = "not_configured";
-    }
-  } else {
-    // Unknown value — treat as production if credentials exist.
-    if (token && storeId) {
-      env = "production";
-    } else {
-      env = "not_configured";
-    }
-  }
-
-  const mode: PayPhoneMode = rawMode === "sale" ? "sale" : "link";
-
-  const tokenConfigured = !!token;
-  const storeIdConfigured = !!storeId;
-  const storeIdLastFour = storeId && storeId.length >= 4 ? storeId.slice(-4) : storeId ? storeId : null;
-
-  const missingVars: string[] = [];
-  if (env === "disabled") {
-    // Disabled — no validation required
-  } else {
-    if (!token) missingVars.push("PAYPHONE_TOKEN");
-    if (!storeId) missingVars.push("PAYPHONE_STORE_ID");
-  }
-
-  // Configured = not disabled + has token + has storeId
-  // (PAYPHONE_ENV is NOT required if token + storeId exist)
-  const configured =
-    env !== "disabled" &&
-    tokenConfigured &&
-    storeIdConfigured;
-
   return {
-    configured,
-    env,
-    mode,
-    tokenConfigured,
-    storeIdConfigured,
-    storeIdLastFour,
-    storeId,
-    token,
+    configured: false,
+    env: "not_configured",
+    mode: "link",
+    tokenConfigured: false,
+    storeIdConfigured: false,
+    storeIdLastFour: null,
+    storeId: null,
+    token: null,
     externalNotificationEnabled,
     preregistrationEnabled,
-    missingVars,
+    missingVars: ["PAYPHONE_CREDENTIALS_MASTER_KEY"],
   };
 }
 
@@ -158,13 +91,7 @@ export function validatePayphoneConfig(): { ok: boolean; error?: string } {
   if (!cfg.tokenConfigured) {
     return {
       ok: false,
-      error: "Falta la variable de servidor PAYPHONE_TOKEN.",
-    };
-  }
-  if (!cfg.storeIdConfigured) {
-    return {
-      ok: false,
-      error: "Falta la variable de servidor PAYPHONE_STORE_ID.",
+      error: "Las credenciales PayPhone se configuran por negocio.",
     };
   }
   if (cfg.mode !== "link") {
