@@ -144,6 +144,16 @@ model PaymentAccount {
   storeIdLastFour             String?
   externalNotificationStatus  String   @default("not_active") // not_active | active
   testLinkStatus              String   @default("pending") // pending | generated | error
+  // ─── Two payment routes per business ───────────────────────────────
+  // "manual_link"  → negocio pega su propio link de pago externo
+  // "payphone_token" → usa token+storeId de PayPhone guardados por negocio
+  // "global"       → usa PAYPHONE_TOKEN + PAYPHONE_STORE_ID del env (default, retrocompatible)
+  paymentRoute                String   @default("global") // global | manual_link | payphone_token
+  // Ruta 1: link externo manual (el negocio pega su link de Stripe/PayPal/etc.)
+  manualPaymentLink           String?
+  // Ruta 2: token de PayPhone por negocio (server-only, NUNCA expuesto al frontend)
+  payphoneToken               String?
+  payphoneStoreId             String?
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 
