@@ -5,6 +5,8 @@ import { createPayment, type PaymentProvider, type PaymentStatus } from "@/lib/p
 import { rateLimit, getClientIP, isValidAmount, isValidProvider, isValidCurrency, RATE_LIMIT_ERROR, GENERIC_ERROR } from "@/lib/security";
 import { logAudit } from "@/lib/audit";
 import { recordDurablePayment } from "@/lib/operational-telemetry";
+import { assertPaymentClientAccess } from "@/lib/external-integrations/payments/access";
+import { ExternalPaymentError } from "@/lib/external-integrations/payments/domain";
 
 export async function POST(req: Request) {
   const session = await requireActiveSession();
@@ -21,17 +23,26 @@ export async function POST(req: Request) {
     if (!isValidProvider(provider)) return NextResponse.json({ error: "Proveedor de pago inválido." }, { status: 400 });
     if (currency && !isValidCurrency(currency)) return NextResponse.json({ error: "Moneda no permitida." }, { status: 400 });
 
+    const paymentClientId =
+      provider === "PayPhone"
+        ? assertPaymentClientAccess({
+            session,
+            requestedClientId: body.client_id || body.clientId || session.clientId,
+            permission: "create",
+          })
+        : session.clientId || undefined;
+
     const result = await createPayment({
       provider: (provider as PaymentProvider) || "Mock", amount, currency: currency || "USD",
       description: description || "Pago", customer: customer || "", phoneNumber: phoneNumber || "",
-      orderId: orderId || `ord_${Date.now()}`, userId: session.userId, workflowId, workflowRunId,
+      orderId: orderId || `ord_${Date.now()}`, userId: session.userId, clientId: paymentClientId, workflowId, workflowRunId,
       customApiUrl, customApiHeaders, forceOutcome: forceOutcome as PaymentStatus | undefined,
       payphoneIntegration, countryCode, customerDocument, reference,
     });
 
     const tx = await db.paymentTransaction.create({
       data: {
-        userId: session.userId, workflowId: workflowId || null, workflowRunId: workflowRunId || null,
+        userId: session.userId, clientId: paymentClientId || null, workflowId: workflowId || null, workflowRunId: workflowRunId || null,
         provider: result.payment_provider, providerPaymentId: result.provider_payment_id,
         orderId: result.order_id, amount: result.payment_amount, currency: result.payment_currency,
         status: result.payment_status, paymentLink: result.payment_link,
@@ -41,7 +52,7 @@ export async function POST(req: Request) {
 
     await recordDurablePayment({
       userId: session.userId,
-      clientId: session.clientId,
+      clientId: paymentClientId,
       sourceKey: `payment:${tx.id}`,
       workflowId: workflowId || null,
       workflowRunId: workflowRunId || null,
@@ -70,6 +81,12 @@ export async function POST(req: Request) {
       whatsapp_message: result.whatsapp_message,
     });
   } catch (err) {
+    if (err instanceof ExternalPaymentError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.httpStatus }
+      );
+    }
     console.error("[payments/create] error", err);
     return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
   }

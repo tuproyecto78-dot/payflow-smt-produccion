@@ -96,7 +96,7 @@ export function defaultModeForProvider(provider: PaymentProvider): "direct" | "l
 export function getProviderConfigStatus(provider: PaymentProvider): ProviderConfigStatus {
   const REQUIRED: Record<PaymentProvider, string[]> = {
     Mock: [],
-    PayPhone: ["PAYPHONE_TOKEN", "PAYPHONE_STORE_ID"],
+    PayPhone: ["PAYPHONE_CREDENTIALS_MASTER_KEY"],
     DEUNA: ["DEUNA_API_KEY", "DEUNA_MERCHANT_ID"],
     Stripe: ["STRIPE_SECRET_KEY"],
     PayPal: ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET"],
@@ -113,7 +113,7 @@ export function getProviderConfigStatus(provider: PaymentProvider): ProviderConf
   if (provider === "PayPal" && process.env.PAYPAL_ENV === "production") mode = "production";
   if (provider === "Stripe" && process.env.STRIPE_SECRET_KEY?.startsWith("sk_live")) mode = "production";
   if (provider === "Mercado Pago" && process.env.MERCADOPAGO_ACCESS_TOKEN?.startsWith("APP_USR")) mode = "production";
-  if (provider === "PayPhone") mode = "production"; // PayPhone has no sandbox flag in tokens
+  if (provider === "PayPhone") mode = "sandbox"; // Environment is resolved per business.
 
   return { provider, configured, mode, missingVars };
 }

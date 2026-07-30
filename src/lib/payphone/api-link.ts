@@ -5,18 +5,34 @@
  *   POST https://pay.payphonetodoesposible.com/api/Links
  *
  * Server-only. NEVER import from a Client Component.
- * The PAYPHONE_TOKEN is used here as a Bearer token and is NEVER logged
- * or returned to the caller.
+ * A per-business third-party token is supplied explicitly by the server-side
+ * merchant credential resolver. There is no global PayPhone token fallback.
  *
  * Docs: https://docs.payphone.app/api-link
  */
 
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { getPayphoneConfig, getPayphoneBaseUrl, validatePayphoneConfig } from "./config";
 
-// Re-export validatePayphoneConfig so callers can import it from this module.
-export { validatePayphoneConfig };
+const PAYPHONE_API_BASE_URL =
+  "https://pay.payphonetodoesposible.com/api";
+
+export interface PayphoneApiCredentials {
+  token: string;
+  storeId: string;
+}
+
+export function validatePayphoneConfig(
+  credentials?: Partial<PayphoneApiCredentials> | null
+): { ok: boolean; error?: string } {
+  if (!credentials?.token?.trim() || !credentials.storeId?.trim()) {
+    return {
+      ok: false,
+      error: "Las credenciales PayPhone del negocio no están configuradas.",
+    };
+  }
+  return { ok: true };
+}
 
 export interface PayphoneLinkRequestInput {
   /** Amount in DOLLARS (e.g. 25.00). Will be converted to cents. */
@@ -39,7 +55,7 @@ export interface PayphoneLinkRequestInput {
   expireIn?: number;
   /** Language: "es" or "en". */
   language?: "es" | "en";
-  /** Optional storeId override (defaults to PAYPHONE_STORE_ID from env). */
+  /** Store ID expected for this business. */
   storeId?: string;
 }
 
@@ -133,9 +149,10 @@ function validateAmountBreakdown(req: PayphoneLinkRequestInput): {
  */
 export async function createPayphoneApiLink(
   req: PayphoneLinkRequestInput,
-  clientTransactionId: string
+  clientTransactionId: string,
+  credentials?: PayphoneApiCredentials
 ): Promise<PayphoneLinkResult> {
-  const validation = validatePayphoneConfig();
+  const validation = validatePayphoneConfig(credentials);
   if (!validation.ok) {
     return {
       ok: false,
@@ -147,8 +164,8 @@ export async function createPayphoneApiLink(
     };
   }
 
-  const cfg = getPayphoneConfig();
-  const storeId = (req.storeId || cfg.storeId || "").toString();
+  const token = credentials?.token?.trim() || "";
+  const storeId = String(req.storeId || credentials?.storeId || "").trim();
 
   if (!storeId) {
     return {
@@ -193,20 +210,34 @@ export async function createPayphoneApiLink(
     language: req.language === "en" ? "en" : "es",
   };
 
-  const url = `${getPayphoneBaseUrl()}/Links`;
+  if (credentials?.storeId !== storeId) {
+    return {
+      ok: false,
+      payment_link: "",
+      client_transaction_id: clientTransactionId,
+      store_id: storeId,
+      raw_response: { error: "El Store ID no pertenece a las credenciales." },
+      error: "El Store ID no pertenece a las credenciales.",
+    };
+  }
+
+  const url = `${PAYPHONE_API_BASE_URL}/Links`;
 
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${cfg.token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
       cache: "no-store",
     });
 
-    const data = await res.json().catch(() => ({}));
+    const data = (await res.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
 
     if (!res.ok) {
       const providerMsg =
@@ -219,7 +250,10 @@ export async function createPayphoneApiLink(
         client_transaction_id: clientTransactionId,
         store_id: storeId,
         http_status: res.status,
-        raw_response: { httpStatus: res.status, ...data },
+        raw_response: {
+          httpStatus: res.status,
+          providerCode: String(data.code || data.Code || ""),
+        },
         error: providerMsg,
       };
     }
@@ -242,7 +276,12 @@ export async function createPayphoneApiLink(
       client_transaction_id: clientTransactionId,
       store_id: storeId,
       http_status: res.status,
-      raw_response: { httpStatus: res.status, ...data },
+      raw_response: {
+        httpStatus: res.status,
+        providerId: String(
+          data.id || data.Id || data.linkId || data.LinkId || ""
+        ),
+      },
     };
   } catch (err) {
     return {
@@ -250,8 +289,8 @@ export async function createPayphoneApiLink(
       payment_link: "",
       client_transaction_id: clientTransactionId,
       store_id: storeId,
-      raw_response: { error: err instanceof Error ? err.message : String(err) },
-      error: err instanceof Error ? err.message : String(err),
+      raw_response: { error: "PAYPHONE_NETWORK_ERROR" },
+      error: "No se pudo conectar con PayPhone.",
     };
   }
 }
