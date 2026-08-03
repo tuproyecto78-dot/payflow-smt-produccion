@@ -599,15 +599,208 @@ export async function executeWorkflow(
           // This is used to branch the flow (buy vs info) and to produce
           // a contextual mock response when no real AI provider is configured.
           const clientText = String(inputText ?? "").toLowerCase();
-          const intent = detectIntent(clientText);
+          const legacyIntent = detectIntent(clientText);
 
           // ─── Knowledge Center integration ────────────────────────────
           // Load the knowledge base for the business (products, FAQs, docs).
           // Priority: structured data (products, FAQs) over documents.
           // The Agente IA Universal uses this to answer with REAL data and
           // NEVER invents — if no knowledge matches, it says so.
-          const knowledge = await getKnowledgeContext("demo-business");
+          const businessId = (ctx.variables["business_id"] as string) || "demo-business";
+          const phoneNumber = (ctx.variables["client_phone"] as string) || (ctx.variables["last_whatsapp_phone"] as string) || "+0000000000";
+          const knowledge = await getKnowledgeContext(businessId);
           const fullSystemPrompt = `${systemPrompt}\n\n${knowledge.systemPromptSection}`;
+
+          // ─── Universal Intent Library integration ─────────────────────
+          // Load (or create) the persisted conversation session + cart.
+          // This gives the Agente IA full context: history, cart, pendingIntent.
+          let conversationCtx = null;
+          let intentMatch = null;
+          try {
+            const intentLib = await import("@/lib/intent");
+            const loadContext = intentLib.loadContext;
+            const addMessage = intentLib.addMessage;
+            const detectUniversal = intentLib.detectIntent;
+            const getOrCreateCart = intentLib.getOrCreateCart;
+            const saveCartItems = intentLib.saveCartItems;
+            const clearCart = intentLib.clearCart;
+            type CartItem = import("@/lib/intent").CartItem;
+            conversationCtx = await loadContext(businessId, phoneNumber);
+            // Save the client's message in the conversation history.
+            await addMessage(conversationCtx.sessionId, "client", String(inputText ?? ""));
+            // Detect intent with full context (history + cart + pendingIntent).
+            intentMatch = detectUniversal(String(inputText ?? ""), {
+              cart: conversationCtx.cart,
+              pendingIntent: conversationCtx.pendingIntent,
+              pendingEntities: conversationCtx.pendingEntities,
+            });
+
+            // ─── Cart operations (executed here, before IA response) ────
+            if (intentMatch && (intentMatch.intent === "#CARRITO_AGREGAR" || intentMatch.intent === "#CARRITO_AGREGAR_MULTIPLE")) {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              const items: CartItem[] = [...cart.items];
+              const productNames = (intentMatch.entities.productos || "").split(",").map((s) => s.trim()).filter(Boolean);
+              const qty = parseInt(intentMatch.entities.cantidades || "1", 10) || 1;
+              // Match each product name against the knowledge base
+              for (const pname of productNames) {
+                const found = knowledge.products.find((p) => p.name.toLowerCase().includes(pname.toLowerCase()) || pname.toLowerCase().includes(p.name.toLowerCase()));
+                if (found) {
+                  const existing = items.find((i) => i.productId === found.name);
+                  if (existing) {
+                    existing.qty += qty;
+                  } else {
+                    items.push({ productId: found.name, name: found.name, price: found.price, currency: found.currency, qty });
+                  }
+                }
+              }
+              const { total, count } = await saveCartItems(cart.id, items);
+              aiContent = items.length > 0
+                ? `✅ Agregué ${count} producto(s) a tu carrito.\n\n🛒 *Tu carrito:*\n${items.map((i, idx) => `${idx + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${total.toFixed(2)} USD*\n\n¿Algo más?`
+                : "No reconocí el producto. ¿Puedes verificar el nombre?";
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_add";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_AGREGAR");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Carrito: agregado. ${items.length} items, total ${total.toFixed(2)}.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_QUITAR") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              const items: CartItem[] = [...cart.items];
+              const idx = parseInt(intentMatch.entities.producto_o_indice || "0", 10);
+              if (idx > 0 && idx <= items.length) {
+                const removed = items.splice(idx - 1, 1)[0];
+                const { total } = await saveCartItems(cart.id, items);
+                aiContent = `✅ Quité "${removed.name}" de tu carrito.\n\n🛒 *Carrito actualizado:*\n${items.length > 0 ? items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n") : "(vacío)"}\n\n*Total: ${total.toFixed(2)} USD*`;
+              } else {
+                aiContent = "No encontré ese producto en tu carrito. Usa el número que aparece al lado de cada item.";
+              }
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_remove";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_QUITAR");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Carrito: item quitado. ${items.length} items restantes.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_MODIFICAR_CANTIDAD") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              const items: CartItem[] = [...cart.items];
+              const idx = parseInt(intentMatch.entities.producto_o_indice || "0", 10);
+              const qty = parseInt(intentMatch.entities.cantidad || "1", 10);
+              if (idx > 0 && idx <= items.length && qty > 0) {
+                items[idx - 1].qty = qty;
+                const { total } = await saveCartItems(cart.id, items);
+                aiContent = `✅ Cambié la cantidad de "${items[idx - 1].name}" a ${qty}.\n\n🛒 *Carrito actualizado:*\n${items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${total.toFixed(2)} USD*`;
+              } else {
+                aiContent = "No pude identificar el producto o la cantidad. Usa el número del carrito y la cantidad deseada.";
+              }
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_qty";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_MODIFICAR_CANTIDAD");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Carrito: cantidad modificada.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_CONSULTAR") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              const items = cart.items;
+              aiContent = items.length > 0
+                ? `🛒 *Tu carrito:*\n${items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${cart.total.toFixed(2)} USD*`
+                : "Tu carrito está vacío. ¿Qué te gustaría pedir?";
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_view";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_CONSULTAR");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Carrito consultado: ${items.length} items.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_CONSULTAR_TOTAL") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              aiContent = cart.items.length > 0
+                ? `💰 Llevas ${cart.items.reduce((s, i) => s + i.qty, 0)} producto(s) en el carrito.\n\n*Total hasta ahora: ${cart.total.toFixed(2)} USD*\n\n¿Quieres agregar algo más o confirmar el pedido?`
+                : "Tu carrito está vacío.";
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_total";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_CONSULTAR_TOTAL");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Total consultado: ${cart.total.toFixed(2)}.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_VER_MENU") {
+              if (knowledge.products.length === 0) {
+                aiContent = "No tengo productos cargados en el catálogo en este momento.";
+              } else {
+                const byCat = new Map<string, typeof knowledge.products>();
+                for (const p of knowledge.products) {
+                  if (!byCat.has(p.category)) byCat.set(p.category, []);
+                  byCat.get(p.category)!.push(p);
+                }
+                const lines: string[] = ["📋 *Nuestro menú:*"];
+                for (const [cat, items] of byCat) {
+                  lines.push(`\n*${cat}*`);
+                  items.forEach((p, i) => lines.push(`${i + 1}. ${p.name} — ${p.price.toFixed(2)} ${p.currency}`));
+                }
+                lines.push("\nTu carrito se mantiene. ¿Qué te gustaría agregar?");
+                aiContent = lines.join("\n");
+              }
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "view_menu";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_VER_MENU");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Menú mostrado: ${knowledge.products.length} productos. Carrito preservado.`, durationMs: Date.now() - startedAt });
+              nextHandle = "info";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_NUEVO_PEDIDO") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              await clearCart(cart.id);
+              aiContent = "🧹 Carrito vaciado. ¿Qué te gustaría pedir?";
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_new";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_NUEVO_PEDIDO");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Carrito vaciado para nuevo pedido.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_CONFIRMAR_PEDIDO") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              if (cart.items.length === 0) {
+                aiContent = "Tu carrito está vacío. Agrega productos primero con el menú.";
+              } else {
+                aiContent = `✅ *Pedido confirmado:*\n${cart.items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${cart.total.toFixed(2)} USD*\n\nTe generaré el link de pago enseguida. 🛒`;
+                ctx.variables["payment_amount"] = cart.total;
+                ctx.variables["payment_currency"] = "USD";
+              }
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_confirm";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_CONFIRMAR_PEDIDO");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Pedido confirmado: ${cart.items.length} items, ${cart.total.toFixed(2)}.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+            if (intentMatch && intentMatch.intent === "#CARRITO_CANCELAR_PEDIDO") {
+              const cart = await getOrCreateCart(conversationCtx.sessionId, businessId);
+              await clearCart(cart.id);
+              aiContent = "❌ Pedido cancelado. Tu carrito está vacío. ¿En qué más puedo ayudarte?";
+              ctx.variables["ai_response"] = aiContent;
+              ctx.variables["last_ai_response"] = aiContent;
+              ctx.variables["ai_intent"] = "cart_cancel";
+              await addMessage(conversationCtx.sessionId, "bot", aiContent, "#CARRITO_CANCELAR_PEDIDO");
+              log(ctx, { nodeId: node.id, nodeType: node.type as NodeType, nodeLabel: label, status: "success", message: `Pedido cancelado, carrito vaciado.`, durationMs: Date.now() - startedAt });
+              nextHandle = "out";
+              break;
+            }
+          } catch (intentErr) {
+            console.error("[engine] intent library error:", intentErr instanceof Error ? intentErr.message : String(intentErr));
+            // Fall through to legacy intent handling if the intent library fails.
+          }
 
           if (providerName === "mock") {
             // Mock provider — use the Knowledge Center to answer.
@@ -620,20 +813,20 @@ export async function executeWorkflow(
               aiContent = relevant.content;
             } else {
               // 2. No structured match — respond based on intent with knowledge.
-              aiContent = buildMockResponse(intent, clientText, knowledge);
+              aiContent = buildMockResponse(legacyIntent, clientText, knowledge);
             }
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
               nodeLabel: label,
               status: "info",
-              message: `Knowledge Center: ${knowledge.products.length} productos, ${knowledge.faqs.length} FAQs, ${knowledge.documents.length} documentos. Intención: "${intent}". Respuesta con datos del negocio.`,
+              message: `Knowledge Center: ${knowledge.products.length} productos, ${knowledge.faqs.length} FAQs, ${knowledge.documents.length} documentos. Intención: "${legacyIntent}". Respuesta con datos del negocio.`,
               durationMs: Date.now() - startedAt,
             });
           } else if (!apiKey) {
             // Missing API key for the selected provider.
             const keyName = providerName === "openrouter" ? "OPENROUTER_API_KEY" : "ZAI_API_KEY";
-            aiContent = buildMockResponse(intent, clientText, knowledge);
+            aiContent = buildMockResponse(legacyIntent, clientText, knowledge);
             log(ctx, {
               nodeId: node.id,
               nodeType: node.type as NodeType,
@@ -693,7 +886,7 @@ export async function executeWorkflow(
                   shortMsg = `Falló ${providerName} (HTTP ${res.status}).`;
                 }
 
-                aiContent = buildMockResponse(intent, clientText, knowledge);
+                aiContent = buildMockResponse(legacyIntent, clientText, knowledge);
                 log(ctx, {
                   nodeId: node.id,
                   nodeType: node.type as NodeType,
@@ -704,7 +897,7 @@ export async function executeWorkflow(
                 });
               } else {
                 const data = await res.json();
-                aiContent = data?.choices?.[0]?.message?.content || buildMockResponse(intent, clientText, knowledge);
+                aiContent = data?.choices?.[0]?.message?.content || buildMockResponse(legacyIntent, clientText, knowledge);
 
                 console.log(`[engine] ${providerName} success:`, {
                   provider: providerName,
@@ -717,7 +910,7 @@ export async function executeWorkflow(
             } catch (err) {
               console.error(`[engine] ${providerName} fetch failed:`, err instanceof Error ? err.message : String(err));
               // Network error — use mock fallback so the flow continues.
-              aiContent = buildMockResponse(intent, clientText, knowledge);
+              aiContent = buildMockResponse(legacyIntent, clientText, knowledge);
               log(ctx, {
                 nodeId: node.id,
                 nodeType: node.type as NodeType,
@@ -731,7 +924,7 @@ export async function executeWorkflow(
 
           ctx.variables[outputVariable] = aiContent;
           ctx.variables["last_ai_response"] = aiContent;
-          ctx.variables["ai_intent"] = intent;
+          ctx.variables["ai_intent"] = legacyIntent;
           // Log detallado: entrada recibida y resultado generado
           if (inputVar) {
             log(ctx, {
@@ -748,7 +941,7 @@ export async function executeWorkflow(
             nodeType: node.type as NodeType,
             nodeLabel: label,
             status: "success",
-            message: `Nodo ejecutado. Intención: "${intent}". Resultado: {{${outputVariable}}}="${aiContent.slice(0, 60)}${aiContent.length > 60 ? "…" : ""}" (${aiContent.length} caracteres)`,
+            message: `Nodo ejecutado. Intención: "${legacyIntent}". Resultado: {{${outputVariable}}}="${aiContent.slice(0, 60)}${aiContent.length > 60 ? "…" : ""}" (${aiContent.length} caracteres)`,
             durationMs: Date.now() - startedAt,
           });
           // ─── Branching by intent ─────────────────────────────────────
@@ -770,9 +963,9 @@ export async function executeWorkflow(
           const hasGreetingEdge = edges.some(
             (e) => e.source === node.id && (e.sourceHandle || null) === "greeting"
           );
-          if (intent === "buy") {
+          if (legacyIntent === "buy") {
             nextHandle = "out";
-          } else if (intent === "info") {
+          } else if (legacyIntent === "info") {
             if (hasInfoEdge) {
               nextHandle = "info";
             } else {

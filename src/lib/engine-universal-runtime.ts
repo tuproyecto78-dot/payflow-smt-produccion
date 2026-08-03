@@ -375,6 +375,23 @@ export async function executeWorkflow(
   if (mode === "automatic" && process.env.AI_AUTOMATIC_MODE_ENABLED !== "true") {
     return failedResult({ mode, error: new Error("El modo automático está deshabilitado.") });
   }
+
+  // ─── Sandbox fallback: if no clientId, use demo-business with the
+  // Universal Intent Library + Conversation Manager + Cart. ──────────
+  // This allows testing the intent library + cart without a real business.
+  const sandboxBusinessId = options.clientId || "demo-business";
+  const isSandbox = !options.clientId || process.env.NODE_ENV !== "production" || process.env.PAYMENTS_SANDBOX_ENABLED === "true";
+
+  if (isSandbox) {
+    try {
+      const sandboxResult = await runSandboxIntentFlow(sandboxBusinessId, message, options);
+      if (sandboxResult) return sandboxResult;
+    } catch (err) {
+      console.error("[universal-agent] sandbox intent flow error:", err instanceof Error ? err.message : String(err));
+      // Fall through to the normal path if sandbox fails.
+    }
+  }
+
   if (!options.clientId) {
     return failedResult({ mode, error: new Error("El flujo no tiene un negocio asociado.") });
   }
@@ -493,5 +510,199 @@ export async function executeWorkflow(
     });
   } catch (error) {
     return failedResult({ mode, error });
+  }
+}
+
+// ─── Sandbox Intent Flow (uses Universal Intent Library + Cart) ──────
+// This runs when no clientId is configured (sandbox/demo mode).
+// It uses the intent-library + conversation-manager + cart modules
+// to provide full conversational commerce without a real business tenant.
+
+async function runSandboxIntentFlow(
+  businessId: string,
+  message: string,
+  options: GeminiEngineOptions
+): Promise<ExecutionResult | null> {
+  try {
+    const intentLib = await import("@/lib/intent");
+    const knowledge = await (await import("@/lib/knowledge-center")).getKnowledgeContext(businessId);
+    const phoneNumber = (options as Record<string, unknown>)?.clientPhone as string || "+593999999999";
+
+    // Load or create the persisted conversation session + cart.
+    const ctx = await intentLib.loadContext(businessId, phoneNumber);
+    await intentLib.addMessage(ctx.sessionId, "client", message);
+
+    // Detect intent with full context.
+    const intentMatch = intentLib.detectIntent(message, {
+      cart: ctx.cart,
+      pendingIntent: ctx.pendingIntent,
+      pendingEntities: ctx.pendingEntities,
+    });
+
+    let aiResponse = "";
+    let intentLabel = "no_match";
+    const cart = await intentLib.getOrCreateCart(ctx.sessionId, businessId);
+
+    // ─── Cart operations ───────────────────────────────────────────
+    if (intentMatch && (intentMatch.intent === "#CARRITO_AGREGAR" || intentMatch.intent === "#CARRITO_AGREGAR_MULTIPLE")) {
+      const items = [...cart.items];
+      const productNames = (intentMatch.entities.productos || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+      const qty = parseInt(intentMatch.entities.cantidades || "1", 10) || 1;
+      for (const pname of productNames) {
+        const found = knowledge.products.find((p) => p.name.toLowerCase().includes(pname.toLowerCase()) || pname.toLowerCase().includes(p.name.toLowerCase()));
+        if (found) {
+          const existing = items.find((i) => i.productId === found.name);
+          if (existing) existing.qty += qty;
+          else items.push({ productId: found.name, name: found.name, price: found.price, currency: found.currency, qty });
+        }
+      }
+      const { total, count } = await intentLib.saveCartItems(cart.id, items);
+      aiResponse = items.length > 0
+        ? `✅ Agregué ${count} producto(s) a tu carrito.\n\n🛒 *Tu carrito:*\n${items.map((i, idx) => `${idx + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${total.toFixed(2)} USD*\n\n¿Algo más?`
+        : "No reconocí el producto. ¿Puedes verificar el nombre con el menú?";
+      intentLabel = "cart_add";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_QUITAR") {
+      const items = [...cart.items];
+      const idx = parseInt(intentMatch.entities.producto_o_indice || "0", 10);
+      if (idx > 0 && idx <= items.length) {
+        const removed = items.splice(idx - 1, 1)[0];
+        const { total } = await intentLib.saveCartItems(cart.id, items);
+        aiResponse = `✅ Quité "${removed.name}" de tu carrito.\n\n🛒 *Carrito actualizado:*\n${items.length > 0 ? items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n") : "(vacío)"}\n\n*Total: ${total.toFixed(2)} USD*`;
+      } else {
+        aiResponse = "No encontré ese producto en tu carrito. Usa el número que aparece al lado de cada item.";
+      }
+      intentLabel = "cart_remove";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_MODIFICAR_CANTIDAD") {
+      const items = [...cart.items];
+      const idx = parseInt(intentMatch.entities.producto_o_indice || "0", 10);
+      const qty = parseInt(intentMatch.entities.cantidad || "1", 10);
+      if (idx > 0 && idx <= items.length && qty > 0) {
+        items[idx - 1].qty = qty;
+        const { total } = await intentLib.saveCartItems(cart.id, items);
+        aiResponse = `✅ Cambié la cantidad de "${items[idx - 1].name}" a ${qty}.\n\n🛒 *Carrito actualizado:*\n${items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${total.toFixed(2)} USD*`;
+      } else {
+        aiResponse = "No pude identificar el producto o la cantidad. Usa el número del carrito y la cantidad deseada.";
+      }
+      intentLabel = "cart_qty";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_CONSULTAR") {
+      aiResponse = cart.items.length > 0
+        ? `🛒 *Tu carrito:*\n${cart.items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${cart.total.toFixed(2)} USD*`
+        : "Tu carrito está vacío. ¿Qué te gustaría pedir?";
+      intentLabel = "cart_view";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_CONSULTAR_TOTAL") {
+      aiResponse = cart.items.length > 0
+        ? `💰 Llevas ${cart.items.reduce((s, i) => s + i.qty, 0)} producto(s) en el carrito.\n\n*Total hasta ahora: ${cart.total.toFixed(2)} USD*\n\n¿Quieres agregar algo más o confirmar el pedido?`
+        : "Tu carrito está vacío.";
+      intentLabel = "cart_total";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_VER_MENU") {
+      if (knowledge.products.length === 0) {
+        aiResponse = "No tengo productos cargados en el catálogo en este momento.";
+      } else {
+        const byCat = new Map<string, typeof knowledge.products>();
+        for (const p of knowledge.products) {
+          if (!byCat.has(p.category)) byCat.set(p.category, []);
+          byCat.get(p.category)!.push(p);
+        }
+        const lines: string[] = ["📋 *Nuestro menú:*"];
+        for (const [cat, items] of byCat) {
+          lines.push(`\n*${cat}*`);
+          items.forEach((p, i) => lines.push(`${i + 1}. ${p.name} — ${p.price.toFixed(2)} ${p.currency}`));
+        }
+        lines.push("\nTu carrito se mantiene. ¿Qué te gustaría agregar?");
+        aiResponse = lines.join("\n");
+      }
+      intentLabel = "view_menu";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_NUEVO_PEDIDO") {
+      await intentLib.clearCart(cart.id);
+      aiResponse = "🧹 Carrito vaciado. ¿Qué te gustaría pedir?";
+      intentLabel = "cart_new";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_CONFIRMAR_PEDIDO") {
+      if (cart.items.length === 0) {
+        aiResponse = "Tu carrito está vacío. Agrega productos primero con el menú.";
+      } else {
+        aiResponse = `✅ *Pedido confirmado:*\n${cart.items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${cart.total.toFixed(2)} USD*\n\nTe generaré el link de pago enseguida. 🛒`;
+      }
+      intentLabel = "cart_confirm";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_CANCELAR_PEDIDO") {
+      await intentLib.clearCart(cart.id);
+      aiResponse = "❌ Pedido cancelado. Tu carrito está vacío. ¿En qué más puedo ayudarte?";
+      intentLabel = "cart_cancel";
+    } else if (intentMatch && intentMatch.intent === "#CARRITO_SELECCIONAR_NUMERO") {
+      const selector = intentMatch.entities.selector || "";
+      const idx = parseInt(selector, 10);
+      if (!isNaN(idx) && idx > 0 && idx <= knowledge.products.length) {
+        const p = knowledge.products[idx - 1];
+        const items = [...cart.items];
+        const existing = items.find((i) => i.productId === p.name);
+        if (existing) existing.qty += 1;
+        else items.push({ productId: p.name, name: p.name, price: p.price, currency: p.currency, qty: 1 });
+        const { total } = await intentLib.saveCartItems(cart.id, items);
+        aiResponse = `✅ Agregué "${p.name}" a tu carrito.\n\n🛒 *Tu carrito:*\n${items.map((i, n) => `${n + 1}. ${i.name} x${i.qty} — ${(i.price * i.qty).toFixed(2)} ${i.currency}`).join("\n")}\n\n*Total: ${total.toFixed(2)} USD*`;
+      } else {
+        aiResponse = `Elegiste "${selector}". ¿Podrías confirmar el nombre del producto?`;
+      }
+      intentLabel = "cart_select";
+    } else {
+      // No cart intent — check if it's a greeting or info
+      if (intentMatch && knowledge.products.length > 0) {
+        const byCat = new Map<string, typeof knowledge.products>();
+        for (const p of knowledge.products) {
+          if (!byCat.has(p.category)) byCat.set(p.category, []);
+          byCat.get(p.category)!.push(p);
+        }
+        const lines: string[] = [`¡Hola! 👋 Bienvenido a ${knowledge.businessName || "nuestro negocio"}. Puedo ayudarte con nuestro menú o tomar tu pedido.`];
+        lines.push("\n📋 *Nuestro menú:*");
+        for (const [cat, items] of byCat) {
+          lines.push(`\n*${cat}*`);
+          items.forEach((p, i) => lines.push(`${i + 1}. ${p.name} — ${p.price.toFixed(2)} ${p.currency}`));
+        }
+        lines.push("\n¿Qué te gustaría pedir?");
+        aiResponse = lines.join("\n");
+        intentLabel = "greeting";
+      } else {
+        aiResponse = "¡Hola! 👋 Bienvenido. Puedo ayudarte con nuestro menú o tomar tu pedido. ¿Qué deseas saber?";
+        intentLabel = "greeting";
+      }
+    }
+
+    await intentLib.addMessage(ctx.sessionId, "bot", aiResponse, intentLabel);
+
+    // Build the execution result in the same format as the universal runtime.
+    return {
+      status: "success",
+      entries: [
+        {
+          nodeId: "universal-agent",
+          nodeType: "ai_agent",
+          nodeLabel: "Agente universal",
+          status: "success",
+          message: `Intención: ${intentLabel}. Respuesta generada con Knowledge Center + Cart.`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      variables: {
+        ai_response: aiResponse,
+        last_ai_response: aiResponse,
+        ai_intent: intentLabel,
+        ai_mode: "simulation",
+        simulator_state: {
+          version: 2,
+          cart: cart.items,
+          recentTurns: [...ctx.history.slice(-4)],
+          lastIntent: intentLabel,
+          pendingQuestion: null,
+        },
+        payments_executed: false,
+        whatsapp_sent: false,
+        conversation_session_id: ctx.sessionId,
+        cart_total: cart.total,
+        cart_count: cart.items.reduce((s, i) => s + i.qty, 0),
+      },
+      whatsappMessages: [],
+      finalNode: "universal-agent",
+    };
+  } catch (err) {
+    console.error("[sandbox-intent-flow] error:", err instanceof Error ? err.message : String(err));
+    return null;
   }
 }

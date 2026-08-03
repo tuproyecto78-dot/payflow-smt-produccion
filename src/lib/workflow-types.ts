@@ -329,6 +329,7 @@ export const NODE_METADATA: Record<NodeType, NodeMeta> = {
       { id: "out", label: "Comprar" },
       { id: "info", label: "Info / catálogo" },
       { id: "greeting", label: "Saludo" },
+      { id: "action", label: "Acción operativa" },
     ],
   },
 

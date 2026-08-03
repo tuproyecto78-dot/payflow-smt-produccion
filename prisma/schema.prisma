@@ -339,3 +339,67 @@ model KnowledgeProduct {
   @@index([knowledgeBaseId])
   @@index([active])
 }
+
+// ─── Universal Intent Library: Conversation, Cart, Promotion ─────────
+// Per-business conversation state with full context + cart persistence.
+
+model ConversationSession {
+  id            String   @id @default(cuid())
+  businessId    String
+  phoneNumber   String
+  status        String   @default("active") // active | closed | expired
+  pendingIntent String?  // intent esperando entities del cliente
+  pendingEntitiesJson String @default("{}") // entities recolectados parciales
+  cartId        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  messages      ConversationMessage[]
+  cart          Cart?
+  @@unique([businessId, phoneNumber, status])
+  @@index([businessId])
+  @@index([status])
+}
+
+model ConversationMessage {
+  id            String   @id @default(cuid())
+  sessionId     String
+  session       ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role          String   // "client" | "bot" | "system"
+  text          String
+  intent        String?  // intent detectado en este mensaje
+  entitiesJson  String   @default("{}")
+  timestamp     DateTime @default(now())
+  @@index([sessionId])
+}
+
+model Cart {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique
+  session       ConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  businessId    String
+  itemsJson     String   @default("[]") // [{productId,name,price,currency,qty,note}]
+  status        String   @default("open") // open | checked_out | abandoned
+  promoApplied  String?
+  promoDiscount Float    @default(0)
+  total         Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([businessId])
+  @@index([status])
+}
+
+model Promotion {
+  id              String   @id @default(cuid())
+  businessId      String
+  name            String
+  type            String   // "percentage" | "2x1" | "fixed_amount" | "free_shipping"
+  value           Float    @default(0)
+  productCategory String?
+  code            String?
+  active          Boolean  @default(true)
+  startsAt        DateTime @default(now())
+  endsAt          DateTime
+  createdAt       DateTime @default(now())
+  @@index([businessId, active])
+  @@index([code])
+}
