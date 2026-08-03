@@ -53,8 +53,13 @@ export function CreateFlowDialog(props: Props) {
         try {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           const businessName = String(body.businessName || "");
-          body.detectedKnowledge = detectedRef.current;
-          body.knowledgeSources = sourcesRef.current;
+          const activationApproved = body.knowledgeActivationApproved === true;
+          const reviewedKnowledge = body.reviewedKnowledge;
+          body.detectedKnowledge = activationApproved && reviewedKnowledge && typeof reviewedKnowledge === "object"
+            ? reviewedKnowledge
+            : null;
+          body.knowledgeSources = activationApproved ? sourcesRef.current : [];
+          delete body.reviewedKnowledge;
           body.isDemo = /\b(demo|prueba|test)\b/i.test(businessName);
 
           const response = await originalFetch(input, {
@@ -62,7 +67,7 @@ export function CreateFlowDialog(props: Props) {
             body: JSON.stringify(body),
           });
 
-          if (response.ok) {
+          if (response.ok && activationApproved) {
             try {
               const payload = await response.clone().json();
               const clientId = typeof payload.client_id === "string" ? payload.client_id : "";

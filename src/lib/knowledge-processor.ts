@@ -16,6 +16,7 @@ export type KnowledgeSourceType =
   | "excel"
   | "csv"
   | "txt"
+  | "image"
   | "manual"
   | "faq";
 
@@ -66,6 +67,8 @@ export interface DetectedKnowledge {
   faqs: DetectedFaq[];
   business_hours: DetectedBusinessHour[];
   policies: string[];
+  promotions: string[];
+  notes: string[];
   prices: Array<{ item: string; price: number; currency?: string }>;
   stock_items: Array<{ name: string; stock: number }>;
   address: string;
@@ -96,6 +99,8 @@ export function processKnowledgeSource(source: KnowledgeSource): ProcessResult {
     faqs: [],
     business_hours: [],
     policies: [],
+    promotions: [],
+    notes: [],
     prices: [],
     stock_items: [],
     address: "",
@@ -133,6 +138,8 @@ export function processKnowledgeSource(source: KnowledgeSource): ProcessResult {
     detected.faqs.length +
     detected.business_hours.length +
     detected.policies.length +
+    detected.promotions.length +
+    detected.notes.length +
     detected.prices.length +
     detected.stock_items.length +
     (detected.address ? 1 : 0) +
@@ -215,7 +222,7 @@ function extractProductFromRow(
   lowerHeaders: string[],
   headers: string[]
 ): DetectedProduct {
-  const product: DetectedProduct = {};
+  const product: DetectedProduct = { name: "" }
 
   for (let i = 0; i < headers.length; i++) {
     const val = row[headers[i]] || "";
@@ -244,7 +251,7 @@ function extractServiceFromRow(
   lowerHeaders: string[],
   headers: string[]
 ): DetectedService {
-  const service: DetectedService = {};
+  const service: DetectedService = { name: "" }
   for (let i = 0; i < headers.length; i++) {
     const val = row[headers[i]] || "";
     const lh = lowerHeaders[i];
@@ -300,6 +307,18 @@ function classifyLine(line: string, detected: DetectedKnowledge) {
   // ─── Human handoff rules ──────────────────────────────────────────
   if (/derivar|humano|operador|agente humano|transferir|reclamo|queja/.test(lower)) {
     detected.human_handoff_rules.push(trimmed.replace(/^.*?:\s*/, ""));
+    return;
+  }
+
+  // ─── Promotions ───────────────────────────────────────────────────
+  if (/promoci[oó]n|descuento|oferta|\b2x1\b|happy hour|cup[oó]n/.test(lower)) {
+    detected.promotions.push(trimmed.replace(/^.*?:\s*/, ""));
+    return;
+  }
+
+  // ─── Notes ────────────────────────────────────────────────────────
+  if (/^(?:nota|observaci[oó]n|informaci[oó]n adicional)\s*[:\-]/.test(lower)) {
+    detected.notes.push(trimmed.replace(/^.*?[:\-]\s*/, ""));
     return;
   }
 
@@ -435,6 +454,8 @@ export function mergeDetectedKnowledge(
     faqs: [],
     business_hours: [],
     policies: [],
+    promotions: [],
+    notes: [],
     prices: [],
     stock_items: [],
     address: "",
@@ -451,6 +472,8 @@ export function mergeDetectedKnowledge(
     merged.faqs.push(...d.faqs);
     merged.business_hours.push(...d.business_hours);
     merged.policies.push(...d.policies);
+    merged.promotions.push(...d.promotions);
+    merged.notes.push(...d.notes);
     merged.prices.push(...d.prices);
     merged.stock_items.push(...d.stock_items);
     if (!merged.address && d.address) merged.address = d.address;
@@ -463,6 +486,9 @@ export function mergeDetectedKnowledge(
   // Deduplicate products by name
   merged.products = dedupeByName(merged.products);
   merged.services = dedupeByName(merged.services);
+  merged.policies = dedupeStrings(merged.policies);
+  merged.promotions = dedupeStrings(merged.promotions);
+  merged.notes = dedupeStrings(merged.notes);
 
   return merged;
 }
@@ -472,6 +498,16 @@ function dedupeByName<T extends { name: string }>(arr: T[]): T[] {
   return arr.filter((item) => {
     const key = item.name.toLowerCase().trim();
     if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = item.toLowerCase().trim();
+    if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -524,6 +560,14 @@ export function formatDetectedKnowledgeForPrompt(
 
   if (detected.policies.length > 0) {
     parts.push(`POLÍTICAS:\n${detected.policies.map((p) => `- ${p}`).join("\n")}`);
+  }
+
+  if (detected.promotions.length > 0) {
+    parts.push(`PROMOCIONES:\n${detected.promotions.map((p) => `- ${p}`).join("\n")}`);
+  }
+
+  if (detected.notes.length > 0) {
+    parts.push(`NOTAS:\n${detected.notes.map((p) => `- ${p}`).join("\n")}`);
   }
 
   if (detected.payment_conditions.length > 0) {

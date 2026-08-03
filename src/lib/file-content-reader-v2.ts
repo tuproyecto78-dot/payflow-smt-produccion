@@ -2,7 +2,7 @@
 
 export interface ExtractedFileContent {
   source_id: string;
-  type: "pdf" | "excel" | "csv" | "txt" | "manual";
+  type: "pdf" | "excel" | "csv" | "txt" | "image" | "manual";
   name: string;
   rawText?: string;
   rows?: Record<string, string>[];
@@ -82,7 +82,23 @@ export async function readFileContent(file: File, sourceId: string): Promise<Ext
   if (extension === "xlsx" || extension === "xls") return readExcel(file, sourceId);
   if (extension === "csv") return readCsv(file, sourceId);
   if (extension === "pdf") return readPdf(file, sourceId);
+  if (extension === "jpg" || extension === "jpeg" || extension === "png") {
+    return readImage(file, sourceId);
+  }
   return { source_id: sourceId, type: "txt", name: file.name, rawText: await file.text() };
+}
+
+async function readImage(file: File, sourceId: string): Promise<ExtractedFileContent> {
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("spa+eng");
+  try {
+    const result = await worker.recognize(file);
+    const rawText = result.data.text.trim();
+    if (!rawText) throw new Error("No se detectó texto legible en la imagen.");
+    return { source_id: sourceId, type: "image", name: file.name, rawText };
+  } finally {
+    await worker.terminate();
+  }
 }
 
 async function readExcel(file: File, sourceId: string): Promise<ExtractedFileContent> {

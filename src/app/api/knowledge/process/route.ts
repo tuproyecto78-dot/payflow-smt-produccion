@@ -19,7 +19,7 @@ import {
  *     sources: [
  *       {
  *         source_id: string,
- *         type: "pdf" | "excel" | "csv" | "txt" | "manual" | "faq",
+ *         type: "pdf" | "excel" | "csv" | "txt" | "image" | "manual" | "faq",
  *         name: string,
  *         rawText?: string,   // extracted text or manual text
  *         rows?: Record<string,string>[],  // for CSV/Excel
@@ -44,10 +44,14 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
+    const allowedTypes = new Set<KnowledgeSourceType>([
+      "pdf", "excel", "csv", "txt", "image", "manual", "faq",
+    ]);
     const sources: KnowledgeSource[] = (body.sources || [])
       .filter((s: unknown) => s && typeof s === "object")
       .map((s: Record<string, unknown>) => {
-        const type = String(s.type || "manual") as KnowledgeSourceType;
+        const requestedType = String(s.type || "manual") as KnowledgeSourceType;
+        const type = allowedTypes.has(requestedType) ? requestedType : "manual";
         return {
           source_id: String(s.source_id || `src_${Date.now()}`),
           type,
@@ -79,6 +83,8 @@ export async function POST(req: Request) {
       results,
       merged,
       promptBlock,
+      active: false,
+      activationRequired: true,
     });
   } catch (err) {
     console.error("[/api/knowledge/process] error:", err);

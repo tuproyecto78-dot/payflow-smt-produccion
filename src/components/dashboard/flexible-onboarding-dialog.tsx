@@ -79,7 +79,7 @@ interface FileEntry {
   file: File;
   name: string;
   size: number;
-  type: "pdf" | "excel" | "csv" | "txt";
+  type: "pdf" | "excel" | "csv" | "txt" | "image";
   status: FileStatus;
   error?: string;
 }
@@ -90,7 +90,17 @@ interface KnowledgeSummary {
   faqs: number;
   schedules: number;
   policies: number;
+  promotions: number;
+  notes: number;
+  categories: number;
   sourceCount: number;
+}
+
+interface KnowledgeReview {
+  products: string;
+  promotions: string;
+  policies: string;
+  notes: string;
 }
 
 const STEP_LABELS = [
@@ -167,7 +177,7 @@ const BUSINESS_TYPES = [
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = new Set(["pdf", "xlsx", "xls", "csv", "txt"]);
+const ALLOWED_EXTENSIONS = new Set(["pdf", "xlsx", "xls", "csv", "txt", "jpg", "jpeg", "png"]);
 
 function fileSize(value: number) {
   if (value < 1024) return `${value} B`;
@@ -181,6 +191,7 @@ function fileType(name: string): FileEntry["type"] | null {
   if (extension === "pdf") return "pdf";
   if (extension === "xlsx" || extension === "xls") return "excel";
   if (extension === "csv") return "csv";
+  if (extension === "jpg" || extension === "jpeg" || extension === "png") return "image";
   return "txt";
 }
 
@@ -201,6 +212,20 @@ function newFileId() {
   return `knowledge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function reviewLines(value: string): string[] {
+  return value.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+function parseReviewedProducts(value: string) {
+  return reviewLines(value)
+    .map((line) => {
+      const [name = "", priceValue = "", category = ""] = line.split("|").map((part) => part.trim());
+      const parsedPrice = Number.parseFloat(priceValue.replace(/[^0-9.,]/g, "").replace(",", "."));
+      return { name, ...(Number.isFinite(parsedPrice) ? { price: parsedPrice, currency: "USD" } : {}), ...(category ? { category } : {}) };
+    })
+    .filter((product) => product.name);
+}
+
 export function CreateFlowDialog({
   open,
   onOpenChange,
@@ -214,6 +239,8 @@ export function CreateFlowDialog({
   const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeSummary | null>(null);
+  const [knowledgeReview, setKnowledgeReview] = useState<KnowledgeReview | null>(null);
+  const [knowledgeActivationApproved, setKnowledgeActivationApproved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [business, setBusiness] = useState({
@@ -228,6 +255,8 @@ export function CreateFlowDialog({
 
   const [catalogNotes, setCatalogNotes] = useState("");
   const [promotions, setPromotions] = useState("");
+  const [policies, setPolicies] = useState("");
+  const [notes, setNotes] = useState("");
 
   const [modules, setModules] = useState({
     usesAgenda: false,
@@ -261,6 +290,8 @@ export function CreateFlowDialog({
     setDragging(false);
     setFiles([]);
     setKnowledge(null);
+    setKnowledgeReview(null);
+    setKnowledgeActivationApproved(false);
     setBusiness({
       name: "",
       type: "Restaurante",
@@ -272,6 +303,8 @@ export function CreateFlowDialog({
     });
     setCatalogNotes("");
     setPromotions("");
+    setPolicies("");
+    setNotes("");
     setModules({
       usesAgenda: false,
       usesCatalog: false,
@@ -376,11 +409,12 @@ export function CreateFlowDialog({
 
     if (next.length) {
       setFiles((current) => [...current, ...next]);
+      setKnowledgeActivationApproved(false);
       toast.success(`${next.length} archivo(s) añadido(s).`);
     }
     if (rejected) {
       toast.warning(
-        `${rejected} archivo(s) no se añadieron. Usa PDF, Excel, CSV o TXT de hasta 10 MB.`
+        `${rejected} archivo(s) no se añadieron. Usa PDF, Excel, CSV, JPG, PNG o TXT de hasta 10 MB.`
       );
     }
   }
@@ -392,7 +426,7 @@ export function CreateFlowDialog({
   }
 
   async function processKnowledge() {
-    if (!files.length && !catalogNotes.trim() && !promotions.trim()) {
+    if (!files.length && !catalogNotes.trim() && !promotions.trim() && !policies.trim() && !notes.trim()) {
       toast.info("Puedes subir archivos o continuar y completar el catálogo después.");
       return;
     }
@@ -406,7 +440,7 @@ export function CreateFlowDialog({
       const { readFileContent } = await import("@/lib/file-content-reader");
       const sources: Array<{
         source_id: string;
-        type: "pdf" | "excel" | "csv" | "txt" | "manual";
+        type: "pdf" | "excel" | "csv" | "txt" | "image" | "manual";
         name: string;
         rawText?: string;
         rows?: Record<string, string>[];
@@ -431,6 +465,8 @@ export function CreateFlowDialog({
       const manualText = [
         catalogNotes.trim() ? `CATÁLOGO Y LISTA DE PRECIOS:\n${catalogNotes.trim()}` : "",
         promotions.trim() ? `PROMOCIONES VIGENTES:\n${promotions.trim()}` : "",
+        policies.trim() ? `POLÍTICAS:\n${policies.trim()}` : "",
+        notes.trim() ? `NOTAS:\n${notes.trim()}` : "",
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -459,22 +495,34 @@ export function CreateFlowDialog({
       }
 
       const merged = data.merged as {
-        products?: unknown[];
+        products?: Array<{ name?: string; price?: number; category?: string }>;
+        promotions?: string[];
+        notes?: string[];
         services?: unknown[];
         faqs?: unknown[];
         business_hours?: unknown[];
-        policies?: unknown[];
+        policies?: string[];
       };
+      const categories = new Set((merged.products || []).map((product) => product.category).filter(Boolean));
+      setKnowledgeReview({
+        products: (merged.products || []).map((product) => [product.name || "", product.price ?? "", product.category || ""].join(" | ")).join("\n"),
+        promotions: (merged.promotions || []).join("\n"),
+        policies: (merged.policies || []).join("\n"),
+        notes: (merged.notes || []).join("\n"),
+      });
+      setKnowledgeActivationApproved(false);
       setKnowledge({
         products: merged.products?.length || 0,
         services: merged.services?.length || 0,
         faqs: merged.faqs?.length || 0,
         schedules: merged.business_hours?.length || 0,
         policies: merged.policies?.length || 0,
+        promotions: merged.promotions?.length || 0,
+        notes: merged.notes?.length || 0,
+        categories: categories.size,
         sourceCount: sources.length,
       });
-      setModules((current) => ({ ...current, usesCatalog: true }));
-      toast.success("Catálogo procesado. Revisa el resumen antes de continuar.");
+      toast.success("Información procesada como borrador. Revísala antes de activar.");
     } catch (error) {
       console.error("[flexible-onboarding] knowledge error", error);
       setFiles((current) =>
@@ -562,6 +610,15 @@ export function CreateFlowDialog({
           amountMode: modules.amountMode,
           fixedAmount: modules.fixedAmount,
           knowledgeSummary,
+          knowledgeActivationApproved,
+          reviewedKnowledge: knowledgeActivationApproved && knowledgeReview
+            ? {
+                products: parseReviewedProducts(knowledgeReview.products),
+                promotions: reviewLines(knowledgeReview.promotions),
+                policies: reviewLines(knowledgeReview.policies),
+                notes: reviewLines(knowledgeReview.notes),
+              }
+            : null,
         }),
       });
       const data = await response.json();
@@ -827,13 +884,13 @@ export function CreateFlowDialog({
                 <Upload className="size-8 mx-auto text-purple-500" />
                 <p className="text-sm font-medium mt-3">Arrastra archivos o selecciónalos</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  PDF, Excel, CSV y TXT · máximo 10 MB por archivo
+                  PDF, Excel, CSV, JPG, PNG y TXT · máximo 10 MB por archivo
                 </p>
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".pdf,.xlsx,.xls,.csv,.txt"
+                  accept=".pdf,.xlsx,.xls,.csv,.txt,.jpg,.jpeg,.png"
                   className="hidden"
                   onChange={(event) => {
                     if (event.target.files) addFiles(event.target.files);
@@ -875,7 +932,7 @@ export function CreateFlowDialog({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        onClick={() => setFiles((current) => current.filter((file) => file.id !== entry.id))}
+                        onClick={() => { setFiles((current) => current.filter((file) => file.id !== entry.id)); setKnowledgeActivationApproved(false); }}
                         aria-label="Eliminar archivo"
                       >
                         <Trash2 className="size-4" />
@@ -890,7 +947,7 @@ export function CreateFlowDialog({
                   <Label>Lista de precios o información adicional</Label>
                   <Textarea
                     value={catalogNotes}
-                    onChange={(event) => setCatalogNotes(event.target.value)}
+                    onChange={(event) => { setCatalogNotes(event.target.value); setKnowledgeActivationApproved(false); }}
                     placeholder="Producto, descripción, precio, disponibilidad..."
                     rows={5}
                   />
@@ -899,10 +956,18 @@ export function CreateFlowDialog({
                   <Label>Promociones vigentes</Label>
                   <Textarea
                     value={promotions}
-                    onChange={(event) => setPromotions(event.target.value)}
+                    onChange={(event) => { setPromotions(event.target.value); setKnowledgeActivationApproved(false); }}
                     placeholder="Ej: 2x1 los martes, envío gratis desde $20..."
                     rows={5}
                   />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Políticas</Label>
+                  <Textarea value={policies} onChange={(event) => { setPolicies(event.target.value); setKnowledgeActivationApproved(false); }} placeholder="Cambios, devoluciones, garantías..." rows={5} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Notas</Label>
+                  <Textarea value={notes} onChange={(event) => { setNotes(event.target.value); setKnowledgeActivationApproved(false); }} placeholder="Información adicional para revisar..." rows={5} />
                 </div>
               </div>
 
@@ -920,18 +985,20 @@ export function CreateFlowDialog({
                 Procesar y revisar información
               </Button>
 
-              {knowledge && (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/10 p-4">
+              {knowledge && knowledgeReview && (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10 p-4 space-y-4">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="size-5 text-emerald-600" />
-                    <p className="text-sm font-semibold">Información detectada</p>
+                    <CheckCircle2 className="size-5 text-amber-600" />
+                    <div>
+                      <p className="text-sm font-semibold">Resumen editable pendiente de activación</p>
+                      <p className="text-xs text-muted-foreground">Una línea por elemento. Productos: Nombre | Precio | Categoría.</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       ["Productos", knowledge.products],
-                      ["Servicios", knowledge.services],
-                      ["FAQs", knowledge.faqs],
-                      ["Horarios", knowledge.schedules],
+                      ["Categorías", knowledge.categories],
+                      ["Promociones", knowledge.promotions],
                       ["Políticas", knowledge.policies],
                     ].map(([label, value]) => (
                       <div key={String(label)} className="rounded-lg bg-background/70 border px-2 py-2 text-center">
@@ -939,6 +1006,34 @@ export function CreateFlowDialog({
                         <p className="text-[10px] text-muted-foreground">{label}</p>
                       </div>
                     ))}
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {([
+                      ["products", "Productos, precios y categorías", "Nombre | Precio | Categoría"],
+                      ["promotions", "Promociones", "Una promoción por línea"],
+                      ["policies", "Políticas", "Una política por línea"],
+                      ["notes", "Notas", "Una nota por línea"],
+                    ] as const).map(([field, label, placeholder]) => (
+                      <div key={field} className="space-y-1.5">
+                        <Label>{label}</Label>
+                        <Textarea
+                          value={knowledgeReview[field]}
+                          placeholder={placeholder}
+                          rows={4}
+                          onChange={(event) => {
+                            setKnowledgeReview((current) => current ? { ...current, [field]: event.target.value } : current);
+                            setKnowledgeActivationApproved(false);
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-lg border bg-background/70 p-3 flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium">Activar información revisada</p>
+                      <p className="text-xs text-muted-foreground mt-1">Desactivado por defecto. Solo se transferirá el contenido si lo apruebas explícitamente.</p>
+                    </div>
+                    <Switch checked={knowledgeActivationApproved} onCheckedChange={setKnowledgeActivationApproved} aria-label="Activar información revisada" />
                   </div>
                 </div>
               )}

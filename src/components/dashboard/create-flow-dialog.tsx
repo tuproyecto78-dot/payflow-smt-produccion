@@ -1168,7 +1168,7 @@ export function CreateFlowDialog({
 
       const sources: Array<{
         source_id: string;
-        type: "pdf" | "excel" | "csv" | "txt" | "manual";
+        type: "pdf" | "excel" | "csv" | "txt" | "image" | "manual";
         name: string;
         rawText?: string;
         rows?: Record<string, string>[];
