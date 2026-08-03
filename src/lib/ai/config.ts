@@ -24,6 +24,30 @@ export interface AIProviderConfig {
   mode: "groq" | "gemini" | "openai";
 }
 
+export interface AIFailoverConfig {
+  primary: AIProviderConfig & { provider: "groq" };
+  fallback: AIProviderConfig & { provider: "gemini" };
+}
+
+function groqConfig(): AIProviderConfig & { provider: "groq" } {
+  const apiKey = process.env.GROQ_API_KEY?.trim() || null;
+  const baseUrl = process.env.GROQ_BASE_URL?.trim() || "https://api.groq.com/openai/v1";
+  const model = process.env.GROQ_MODEL?.trim() || "llama-3.1-8b-instant";
+  return { provider: "groq", configured: !!apiKey, hasApiKey: !!apiKey, apiKey, baseUrl, model, endpoint: `${baseUrl}/chat/completions`, mode: "groq" };
+}
+
+function geminiConfig(): AIProviderConfig & { provider: "gemini" } {
+  const apiKey = process.env.GEMINI_API_KEY?.trim() || null;
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const baseUrl = "https://generativelanguage.googleapis.com/v1beta";
+  return { provider: "gemini", configured: !!apiKey, hasApiKey: !!apiKey, apiKey, baseUrl, model, endpoint: `${baseUrl}/models/${model}:generateContent`, mode: "gemini" };
+}
+
+/** Fixed provider chain for the administrative AI assistants. */
+export function getAIFailoverConfig(): AIFailoverConfig {
+  return { primary: groqConfig(), fallback: geminiConfig() };
+}
+
 /**
  * Get the current AI provider config from env vars.
  */
@@ -32,18 +56,12 @@ export function getAIConfig(): AIProviderConfig {
 
   // ─── Groq ──────────────────────────────────────────────────────────
   if (provider === "groq") {
-    const apiKey = process.env.GROQ_API_KEY?.trim() || null;
-    const baseUrl = process.env.GROQ_BASE_URL?.trim() || "https://api.groq.com/openai/v1";
-    const model = process.env.GROQ_MODEL?.trim() || "llama-3.1-8b-instant";
-    return { provider: "groq", configured: !!apiKey, hasApiKey: !!apiKey, apiKey, baseUrl, model, endpoint: `${baseUrl}/chat/completions`, mode: "groq" };
+    return groqConfig();
   }
 
   // ─── Gemini ────────────────────────────────────────────────────────
   if (provider === "gemini") {
-    const apiKey = process.env.GEMINI_API_KEY?.trim() || null;
-    const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
-    const baseUrl = "https://generativelanguage.googleapis.com/v1beta";
-    return { provider: "gemini", configured: !!apiKey, hasApiKey: !!apiKey, apiKey, baseUrl, model, endpoint: `${baseUrl}/models/${model}:generateContent`, mode: "gemini" };
+    return geminiConfig();
   }
 
   // ─── NVIDIA NIM ────────────────────────────────────────────────────
@@ -92,8 +110,16 @@ export function getAIConfig(): AIProviderConfig {
 }
 
 export function getSafeAIStatus() {
-  const cfg = getAIConfig();
-  return { provider: cfg.provider, configured: cfg.configured, model: cfg.model, hasApiKey: cfg.hasApiKey, mode: cfg.mode, missing: cfg.hasApiKey ? [] : [`${cfg.provider.toUpperCase()}_API_KEY`] };
+  const { primary, fallback } = getAIFailoverConfig();
+  return {
+    provider: primary.provider,
+    configured: primary.configured,
+    model: primary.model,
+    hasApiKey: primary.hasApiKey,
+    mode: primary.mode,
+    fallback: { provider: fallback.provider, configured: fallback.configured, model: fallback.model },
+    missing: primary.hasApiKey ? [] : ["GROQ_API_KEY"],
+  };
 }
 
 export function logAIConfig() {

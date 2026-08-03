@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getAIConfig, logAIConfig } from "@/lib/ai/config";
+import { getAIFailoverConfig, logAIConfig } from "@/lib/ai/config";
+import { AIProviderError, completeWithGroqFallback, type AIMessage } from "@/lib/ai/provider-client";
 
 export const dynamic = "force-dynamic";
 
@@ -189,6 +190,13 @@ function parseAIResponse(content: string, source: string): FlowAssistantResponse
   return { source, reply: content.slice(0, 500) || "Lo siento, no pude procesar tu solicitud.", suggestions: {}, warnings: [], missingFields: [], fallbackUsed: false };
 }
 
+function validateAIJson(content: string) {
+  const clean = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("missing_json");
+  JSON.parse(match[0]);
+}
+
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Tu sesión expiró. Inicia sesión nuevamente." }, { status: 401 });
@@ -207,122 +215,47 @@ export async function POST(req: Request) {
   }
 
   const history = body.conversationHistory || body.conversation || [];
-  const cfg = getAIConfig();
+  const providerChain = getAIFailoverConfig();
+  const { primary } = providerChain;
   logAIConfig();
 
-  if (cfg.provider === "mock" || !cfg.hasApiKey) {
+  if (!primary.hasApiKey) {
     console.log("[/api/ai/flow-assistant] No AI configured, using local fallback");
     return NextResponse.json(localFallback(userMessage, "no_ai_configured"));
   }
 
-  console.log("[/api/ai/flow-assistant] calling AI:", { provider: cfg.provider, model: cfg.model, mode: cfg.mode, messageCount: history.length });
+  console.log("[/api/ai/flow-assistant] calling AI:", { provider: primary.provider, model: primary.model, messageCount: history.length });
 
   try {
-    let content = "";
-
-    if (cfg.mode === "gemini") {
-      const FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash"];
-      const modelsToTry = [cfg.model, ...FALLBACK_MODELS.filter(m => m !== cfg.model)];
-      let geminiSuccess = false;
-      let geminiError = "";
-
-      for (const tryModel of modelsToTry) {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${tryModel}:generateContent?key=${cfg.apiKey}`;
-        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-        if (history.length === 0) {
-          contents.push({ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\nUsuario: ${userMessage}` }] });
-        } else {
-          for (const msg of history.slice(-10)) {
-            if (msg.role === "user" || msg.role === "assistant") {
-              contents.push({ role: msg.role === "assistant" ? "model" : "user", parts: [{ text: msg.content }] });
-            }
-          }
-          const last = contents[contents.length - 1];
-          if (!last || last.role !== "user" || last.parts[0]?.text !== userMessage) {
-            contents.push({ role: "user", parts: [{ text: userMessage }] });
-          }
-        }
-
-        console.log("[/api/ai/flow-assistant] trying Gemini model:", tryModel);
-        try {
-          const res = await fetch(endpoint, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents, generationConfig: { temperature: 0.4, maxOutputTokens: 800 } }),
-            cache: "no-store",
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            content = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            if (data?.candidates?.[0]?.finishReason === "SAFETY") content = "Lo siento, no puedo responder a eso. ¿Puedes reformular tu pregunta?";
-            console.log("[/api/ai/flow-assistant] Gemini success:", tryModel, "len:", content.length);
-            geminiSuccess = true;
-            break;
-          }
-
-          const errText = await res.text().catch(() => "");
-          console.warn("[/api/ai/flow-assistant] Gemini error:", tryModel, res.status);
-          if (res.status === 404) { geminiError = "model_not_found"; continue; }
-          if (res.status === 429) { geminiError = "quota_exceeded"; break; }
-          geminiError = "api_error"; break;
-        } catch { geminiError = "network_error"; continue; }
-      }
-
-      if (!geminiSuccess || !content) {
-        console.warn("[/api/ai/flow-assistant] Gemini failed:", geminiError);
-        let friendlyMsg = geminiError === "quota_exceeded" ? "La IA avanzada no está disponible temporalmente por límite de cuota. Activé el asistente local inteligente para ayudarte a crear el flujo."
-          : geminiError === "model_not_found" ? "El modelo de IA configurado no está disponible. Activé el asistente local inteligente."
-          : geminiError === "network_error" ? "No pude conectar con la IA avanzada. Activé el asistente local inteligente."
-          : "La IA avanzada no está disponible en este momento. Activé el asistente local inteligente.";
-        const fallback = localFallback(userMessage, geminiError);
-        return NextResponse.json({ ...fallback, reply: `${friendlyMsg}\n\n${fallback.reply}`, warnings: [geminiError === "quota_exceeded" ? "AI_QUOTA_EXCEEDED" : "AI_ERROR"] });
-      }
-    } else {
-      // OpenAI-compatible (Groq/NIM/OpenRouter/Z.ai)
-      const messages: Array<{ role: string; content: string }> = [{ role: "system", content: SYSTEM_PROMPT }];
-      for (const msg of history.slice(-10)) {
-        if (msg.role === "user" || msg.role === "assistant") messages.push({ role: msg.role, content: msg.content });
-      }
-      const lastMsg = messages[messages.length - 1];
-      if (!lastMsg || lastMsg.content !== userMessage) messages.push({ role: "user", content: userMessage });
-
-      const headers: Record<string, string> = { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" };
-      if (cfg.provider === "openrouter") { headers["HTTP-Referer"] = "https://payflow-smt.vercel.app"; headers["X-Title"] = "PayFlow SMT"; }
-
-      console.log("[/api/ai/flow-assistant] calling", cfg.provider, "at", cfg.endpoint);
-      const res = await fetch(cfg.endpoint, {
-        method: "POST", headers,
-        body: JSON.stringify({ model: cfg.model, messages, temperature: 0.4, max_tokens: 800 }),
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        console.warn(`[/api/ai/flow-assistant] ${cfg.provider} error:`, res.status, errText.slice(0, 300));
-        let friendlyMsg = res.status === 429 ? "La IA avanzada no está disponible temporalmente por límite de cuota. Activé el asistente local inteligente."
-          : res.status === 401 || res.status === 403 ? "La IA avanzada no está disponible. Activé el asistente local inteligente."
-          : res.status === 404 ? "El modelo de IA configurado no está disponible. Activé el asistente local inteligente."
-          : "La IA avanzada no está disponible en este momento. Activé el asistente local inteligente.";
-        let errorType = res.status === 429 ? "quota_exceeded" : res.status === 401 || res.status === 403 ? "invalid_api_key" : res.status === 404 ? "model_not_found" : "api_error";
-        const fallback = localFallback(userMessage, errorType);
-        return NextResponse.json({ ...fallback, reply: `${friendlyMsg}\n\n${fallback.reply}`, warnings: [errorType === "quota_exceeded" ? "AI_QUOTA_EXCEEDED" : "AI_ERROR"] });
-      }
-
-      const data = await res.json();
-      content = data?.choices?.[0]?.message?.content || "";
-      console.log(`[/api/ai/flow-assistant] ${cfg.provider} success: len=${content.length}, preview=${content.slice(0, 150)}`);
+    const messages: AIMessage[] = history.slice(-10)
+      .filter((message): message is AIMessage => message.role === "user" || message.role === "assistant")
+      .map((message) => ({ role: message.role, content: String(message.content).slice(0, 4000) }));
+    if (!messages.length || messages[messages.length - 1].content !== userMessage) {
+      messages.push({ role: "user", content: userMessage });
     }
 
-    if (!content) {
-      console.warn("[/api/ai/flow-assistant] Empty AI response, using fallback");
-      return NextResponse.json(localFallback(userMessage, "empty_response"));
-    }
-
-    console.log("[/api/ai/flow-assistant] AI source:", cfg.provider);
-    return NextResponse.json(parseAIResponse(content, cfg.provider));
+    const completion = await completeWithGroqFallback({
+      systemPrompt: SYSTEM_PROMPT,
+      messages,
+      temperature: 0.4,
+      maxOutputTokens: 800,
+      validateContent: validateAIJson,
+    }, providerChain);
+    console.log("[/api/ai/flow-assistant] AI completed", {
+      provider: completion.provider,
+      model: completion.model,
+      fallbackUsed: completion.fallbackUsed,
+    });
+    return NextResponse.json({
+      ...parseAIResponse(completion.content, completion.provider),
+      fallbackUsed: completion.fallbackUsed,
+      fallbackReason: completion.fallbackReason,
+    });
   } catch (err) {
-    console.warn("[/api/ai/flow-assistant] AI fetch failed:", err instanceof Error ? err.message : String(err));
-    const fallback = localFallback(userMessage, "network_error");
+    console.warn("[/api/ai/flow-assistant] AI request failed", {
+      error: err instanceof Error ? err.message : "unknown_error",
+    });
+    const fallback = localFallback(userMessage, err instanceof AIProviderError ? err.reason : "ai_unavailable");
     return NextResponse.json({ ...fallback, reply: `No pude conectar con la IA en este momento, pero te ayudo con sugerencias locales.\n\n${fallback.reply}` });
   }
 }

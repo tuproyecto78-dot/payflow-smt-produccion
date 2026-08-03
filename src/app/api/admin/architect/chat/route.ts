@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-server";
-import { getAIConfig } from "@/lib/ai/config";
+import { getAIFailoverConfig } from "@/lib/ai/config";
+import { completeWithGroqFallback, type AIMessage } from "@/lib/ai/provider-client";
 import { getSupabaseAdmin } from "@/lib/clickup";
 import { collectArchitectContext, type ArchitectSystemContext } from "@/lib/architect-context";
 
@@ -251,9 +252,17 @@ function parseReply(
   }
 }
 
+function validateArchitectJson(content: string) {
+  const clean = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("missing_json");
+  JSON.parse(match[0]);
+}
+
 async function callAI(message: string, history: HistoryMessage[], context: ArchitectSystemContext): Promise<ArchitectReply> {
-  const cfg = getAIConfig();
-  if (!cfg.hasApiKey || !cfg.apiKey || cfg.provider === "mock") return fallbackReply(message, context, history);
+  const providerChain = getAIFailoverConfig();
+  const { primary } = providerChain;
+  if (!primary.apiKey) return fallbackReply(message, context, history);
 
   const liveContext = JSON.stringify({
     generatedAt: context.generatedAt,
@@ -262,50 +271,23 @@ async function callAI(message: string, history: HistoryMessage[], context: Archi
     metrics: context.metrics,
   });
   const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto. Si todavía falta un dato imprescindible, haz una sola pregunta concreta.`;
-
-  if (cfg.mode === "gemini") {
-    const conversation = history
-      .slice(-8)
-      .map((item) => `${item.role === "assistant" ? "Arquitecto" : "Administrador"}: ${item.content}`)
-      .join("\n");
-    const endpoint = `${cfg.endpoint}?key=${cfg.apiKey}`;
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `${groundedPrompt}\n\n${conversation}\nAdministrador: ${message}` }] }],
-        generationConfig: { temperature: 0.35, maxOutputTokens: 1800 },
-      }),
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`Proveedor IA HTTP ${response.status}`);
-    const data = await response.json();
-    const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    return parseReply(content, cfg.provider, message, context, history);
-  }
-
-  const messages = [
-    { role: "system", content: groundedPrompt },
+  const messages: AIMessage[] = [
     ...history.slice(-8).map((item) => ({ role: item.role, content: item.content })),
     { role: "user", content: message },
   ];
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${cfg.apiKey}`,
-    "Content-Type": "application/json",
-  };
-  if (cfg.provider === "openrouter") {
-    headers["HTTP-Referer"] = "https://tuproyecto78-dot-payflow-smt-produc.vercel.app";
-    headers["X-Title"] = "Arquitecto PayFlow SMT";
-  }
-  const response = await fetch(cfg.endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: cfg.model, messages, temperature: 0.35, max_tokens: 1800 }),
-    cache: "no-store",
+  const completion = await completeWithGroqFallback({
+    systemPrompt: groundedPrompt,
+    messages,
+    temperature: 0.35,
+    maxOutputTokens: 1800,
+    validateContent: validateArchitectJson,
+  }, providerChain);
+  console.log("[architect/chat] AI completed", {
+    provider: completion.provider,
+    model: completion.model,
+    fallbackUsed: completion.fallbackUsed,
   });
-  if (!response.ok) throw new Error(`Proveedor IA HTTP ${response.status}`);
-  const data = await response.json();
-  return parseReply(data?.choices?.[0]?.message?.content || "", cfg.provider, message, context, history);
+  return parseReply(completion.content, completion.provider, message, context, history);
 }
 
 async function saveSuggestion(reply: ArchitectReply, actorUserId: string): Promise<string | null> {
