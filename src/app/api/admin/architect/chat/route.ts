@@ -37,14 +37,14 @@ const SYSTEM_PROMPT = `Eres Arquitecto Hermes, Arquitecto Principal y Coordinado
 El administrador puede escribir con errores, frases cortas o lenguaje no técnico. Interpreta su intención sin corregirlo ni hacerlo repetir información que ya aparece en el contexto. Explica como una persona experta que quiere ayudar, no como un formulario ni como un manual.
 
 FORMA DE RESPONDER:
+- El campo reply debe contener la respuesta completa y autosuficiente: conclusión, diagnóstico y acciones útiles, en lenguaje conversacional.
 - Actúa como un agente operativo 24/7: toma iniciativa, conecta el mensaje con el historial y entrega una respuesta útil en cada turno.
 - Empieza con una confirmación breve de lo que entendiste y responde de inmediato. No conviertas la conversación en una entrevista.
 - Usa palabras sencillas, frases claras y pasos concretos. Explica cualquier término técnico indispensable.
 - Di qué observas en el contexto real, qué recomiendas y cuál es el siguiente paso.
 - Decide una ruta recomendada con la información disponible. Si hay varias opciones razonables, elige la más segura y reversible y explica el supuesto usado.
 - No termines preguntando qué quiere hacer el administrador, qué desea automatizar, por dónde empezar ni si quiere que continúes. Propón el siguiente paso directamente.
-- nextQuestion debe ser vacío salvo que falte un dato imposible de inferir y que impida cualquier avance seguro, por ejemplo el negocio/tenant objetivo de una operación destructiva.
-- Si existe un bloqueo real, haz UNA sola pregunta cerrada y específica. Mientras espera la respuesta, entrega igualmente diagnóstico, supuestos, acciones preparatorias y una recomendación.
+- nextQuestion debe ser siempre una cadena vacía. No hagas preguntas adicionales ni solicites confirmaciones dentro de la respuesta.
 - Si puedes avanzar con una suposición segura, indícala y continúa; nunca repitas una pregunta ya contestada en el historial.
 - Si el administrador pide una opinión, sugiere la mejor opción y explica brevemente por qué.
 
@@ -197,9 +197,10 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
   }
 
   return {
-    reply: requiresApproval
-      ? "Entendí el cambio. Ya organicé una ruta concreta, segura y reversible para que puedas autorizarla sin una cadena de preguntas previa."
-      : "Entendí la idea. Tomé la opción más segura con el contexto disponible y te dejo una ruta concreta para avanzar.",
+    reply: [
+      diagnostic,
+      actions.length ? `\n\n${actions.map((action, index) => `${index + 1}. ${action}`).join("\n")}` : "",
+    ].join(""),
     understoodRequest,
     title: message.slice(0, 80) || "Consulta de Arquitecto Hermes",
     diagnostic,
@@ -242,9 +243,7 @@ function parseReply(
       actions: Array.isArray(parsed.actions)
         ? parsed.actions.slice(0, 6).map((action: unknown) => String(action).slice(0, 500))
         : [],
-      nextQuestion: parsed.nextQuestion && /bloque|imprescind|tenant|negocio objetivo|eliminar|producci/i.test(String(parsed.nextQuestion))
-        ? String(parsed.nextQuestion).slice(0, 700)
-        : null,
+      nextQuestion: null,
       riskLevel: risks.includes(parsed.riskLevel) ? parsed.riskLevel : "medium",
       suggestionType: types.includes(parsed.suggestionType) ? parsed.suggestionType : "investigacion",
       changeScope: scopes.includes(parsed.changeScope) ? parsed.changeScope : "analysis",
@@ -267,7 +266,7 @@ async function callAI(message: string, history: HistoryMessage[], context: Archi
     alerts: context.alerts,
     metrics: context.metrics,
   });
-  const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto y el historial para decidir y avanzar. Responde con una recomendación completa; no cierres con una pregunta. Solo usa nextQuestion ante un bloqueo crítico imposible de inferir.`;
+  const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto y el historial para decidir y avanzar. Entrega el informe directamente; no hagas preguntas ni solicites confirmaciones.`;
 
   if (cfg.mode === "gemini") {
     const conversation = history
