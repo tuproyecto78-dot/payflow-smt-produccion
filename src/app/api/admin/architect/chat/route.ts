@@ -37,11 +37,15 @@ const SYSTEM_PROMPT = `Eres Arquitecto Hermes, Arquitecto Principal y Coordinado
 El administrador puede escribir con errores, frases cortas o lenguaje no técnico. Interpreta su intención sin corregirlo ni hacerlo repetir información que ya aparece en el contexto. Explica como una persona experta que quiere ayudar, no como un formulario ni como un manual.
 
 FORMA DE RESPONDER:
-- Empieza con una confirmación breve de lo que entendiste y responde de inmediato.
+- Actúa como un agente operativo 24/7: toma iniciativa, conecta el mensaje con el historial y entrega una respuesta útil en cada turno.
+- Empieza con una confirmación breve de lo que entendiste y responde de inmediato. No conviertas la conversación en una entrevista.
 - Usa palabras sencillas, frases claras y pasos concretos. Explica cualquier término técnico indispensable.
 - Di qué observas en el contexto real, qué recomiendas y cuál es el siguiente paso.
-- Haz como máximo UNA pregunta, solo cuando la respuesta cambie materialmente la solución. Debe ser específica y fácil de contestar.
-- Si puedes avanzar con una suposición segura, indícala y continúa; no hagas preguntas genéricas como "¿qué tipo de configuración necesitas?".
+- Decide una ruta recomendada con la información disponible. Si hay varias opciones razonables, elige la más segura y reversible y explica el supuesto usado.
+- No termines preguntando qué quiere hacer el administrador, qué desea automatizar, por dónde empezar ni si quiere que continúes. Propón el siguiente paso directamente.
+- nextQuestion debe ser vacío salvo que falte un dato imposible de inferir y que impida cualquier avance seguro, por ejemplo el negocio/tenant objetivo de una operación destructiva.
+- Si existe un bloqueo real, haz UNA sola pregunta cerrada y específica. Mientras espera la respuesta, entrega igualmente diagnóstico, supuestos, acciones preparatorias y una recomendación.
+- Si puedes avanzar con una suposición segura, indícala y continúa; nunca repitas una pregunta ya contestada en el historial.
 - Si el administrador pide una opinión, sugiere la mejor opción y explica brevemente por qué.
 
 AUTORIZACIÓN Y EJECUCIÓN:
@@ -49,7 +53,7 @@ AUTORIZACIÓN Y EJECUCIÓN:
 - Si pide crear, configurar, corregir, implementar, modificar, instalar, borrar, ejecutar o desplegar, prepara el plan y marca requiresApproval=true.
 - Nunca afirmes que cambiaste código, base de datos, configuración, despliegue o estado de pago si no existe evidencia de ejecución.
 - executionAction debe ser none. Las automatizaciones se coordinan mediante eventos internos, Supabase, webhooks propios o cron de Hermes y nunca se ejecutan sin los controles de aprobación correspondientes.
-- Si todavía necesitas una respuesta imprescindible del administrador, incluye nextQuestion y no presentes el plan como listo para autorización.
+- Solo si existe un bloqueo crítico imposible de inferir, incluye nextQuestion y no presentes el plan como listo para autorización.
 - Cuando executionAction=none, la aprobación registra y autoriza el plan, pero no equivale a que el código ya fue modificado.
 - Nunca pidas ni muestres tokens, contraseñas, claves privadas o service role. Indica que los secretos se colocan en el servidor/Vercel.
 - Nunca confirmes un pago por cuenta propia: solo el proveedor y el webhook validado pueden hacerlo.
@@ -62,11 +66,20 @@ CONOCIMIENTO DE PAYFLOW:
 - Las integraciones viven en backend; Supabase persiste y aplica RLS; Vercel guarda secretos; Hermes coordina eventos internos, webhooks propios y automatizaciones; el panel administra aprobaciones.
 
 Devuelve SOLO JSON válido, sin markdown ni backticks:
-{"reply":"respuesta humana y directa","understoodRequest":"lo que entendiste en una frase","title":"título corto","diagnostic":"lo que observas o falta","actions":["paso 1","paso 2"],"nextQuestion":"una sola pregunta concreta o cadena vacía","riskLevel":"low|medium|high","suggestionType":"bug|mejora|decision|investigacion","changeScope":"analysis|automation|integration|workflow|database|code|configuration","executionAction":"none","requiresApproval":true|false}`;
+{"reply":"respuesta humana, resolutiva y directa; no debe terminar en pregunta","understoodRequest":"lo que entendiste en una frase","title":"título corto","diagnostic":"lo que observas, el supuesto seguro usado y la decisión recomendada","actions":["siguiente acción concreta","validación"],"nextQuestion":"solo un dato bloqueante crítico o cadena vacía","riskLevel":"low|medium|high","suggestionType":"bug|mejora|decision|investigacion","changeScope":"analysis|automation|integration|workflow|database|code|configuration","executionAction":"none","requiresApproval":true|false}`;
 
 function moduleDetail(context: ArchitectSystemContext | undefined, moduleId: string): string | null {
   const systemModule = context?.modules.find((item) => item.id === moduleId);
   return systemModule ? `${systemModule.label}: ${systemModule.detail}` : null;
+}
+
+function withoutClosingQuestion(value: unknown): string {
+  const text = String(value || "").trim().slice(0, 2500);
+  const decisive = text
+    .replace(/\s*¿[^?]+\?\s*$/u, "")
+    .replace(/\s+[^.!?\n]+\?\s*$/u, "")
+    .trim();
+  return decisive || "Tomé la ruta más segura con el contexto disponible y preparé los siguientes pasos concretos.";
 }
 
 function fallbackReply(message: string, context?: ArchitectSystemContext, history: HistoryMessage[] = []): ArchitectReply {
@@ -78,13 +91,13 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
     text.length < 80 ? scopeText : text
   );
   let understoodRequest = `Quieres ayuda para ${message.trim().replace(/[.!?]+$/, "")}.`;
-  let diagnostic = "Todavía no identifico con precisión el módulo afectado, pero puedo convertir tu objetivo en un flujo claro y comprobable.";
+  let diagnostic = "No hay un módulo crítico identificado todavía. Asumo que buscas mejorar la operación general y priorizo una revisión automática del recorrido con mayor impacto antes de proponer cambios.";
   let actions = [
     "Ubicar el módulo relacionado y revisar su estado actual.",
-    "Definir el resultado esperado y una prueba sencilla para comprobarlo.",
-    "Preparar el cambio reversible y dejar evidencia en el historial.",
+    "Priorizar el recorrido con mayor impacto entre conversación, conversión y operación.",
+    "Preparar una mejora reversible con una prueba sencilla y evidencia en el historial.",
   ];
-  let nextQuestion: string | null = "¿Qué resultado quieres ver al final, explicado con un ejemplo sencillo?";
+  let nextQuestion: string | null = null;
   let suggestionType: SuggestionType = requiresApproval ? "mejora" : "investigacion";
   let riskLevel: RiskLevel = requiresApproval ? "medium" : "low";
   let changeScope: ChangeScope = requiresApproval ? "configuration" : "analysis";
@@ -125,9 +138,11 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
     } else if (answeredCredentialQuestion || answeredTestChoice) {
       nextQuestion = null;
     } else {
-      nextQuestion = context?.modules.find((item) => item.id === "payphone")?.status === "healthy"
-        ? "PayPhone aparece configurado. ¿Quieres probar primero la creación del link o revisar la confirmación por webhook?"
-        : "¿PayPhone ya te entregó el token de producción y el Store ID? No los pegues aquí; solo dime si ya los tienes.";
+      const payphoneHealthy = context?.modules.find((item) => item.id === "payphone")?.status === "healthy";
+      diagnostic += payphoneHealthy
+        ? " Como la integración aparece activa, priorizo una prueba completa del link y después la confirmación por webhook."
+        : " Como la configuración aparece incompleta, dejo preparada la validación técnica y marco las credenciales comerciales como bloqueo externo, sin pedir que se compartan en el chat.";
+      nextQuestion = null;
     }
     riskLevel = "medium";
     changeScope = "integration";
@@ -140,7 +155,7 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
       "Comprobar índices e idempotencia.",
       "Registrar la modificación en audit_logs.",
     ];
-    nextQuestion = "¿Qué dato o proceso quieres guardar, consultar o corregir en Supabase?";
+    nextQuestion = null;
     riskLevel = "high";
     changeScope = "database";
   } else if (/(código|codigo|frontend|backend|endpoint|archivo|repositorio|despliegue)/i.test(scopeText)) {
@@ -152,7 +167,7 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
       "Validar lint, compilación y el caso funcional solicitado.",
       "Aplicar mediante control de versiones y verificar el despliegue antes de marcarlo como ejecutado.",
     ];
-    nextQuestion = "¿Qué comportamiento ves ahora y cómo quieres que funcione después del cambio?";
+    nextQuestion = null;
     riskLevel = "medium";
     changeScope = "code";
   } else if (/(whatsapp|chatbot|asistente|\bbot\b)/i.test(scopeText)) {
@@ -164,7 +179,8 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
       "Conectar las acciones reales del negocio: catálogo, agenda, pagos y atención humana.",
       "Probar casos normales, mensajes incompletos y errores antes de activarlo.",
     ];
-    nextQuestion = "¿Qué debe lograr primero el cliente en WhatsApp: comprar, pagar, agendar o pedir ayuda?";
+    diagnostic += " Si el objetivo todavía es amplio, priorizo el recorrido más frecuente: entender la intención, resolverla y derivar a una persona cuando falte información.";
+    nextQuestion = null;
     changeScope = "automation";
   } else if (/(flujo|automatiza|proceso)/i.test(scopeText)) {
     understoodRequest = "Quieres convertir un proceso del negocio en un flujo automático y fácil de operar.";
@@ -175,14 +191,15 @@ function fallbackReply(message: string, context?: ArchitectSystemContext, histor
       "Conectar módulos externos con reintentos, idempotencia y auditoría.",
       "Agregar una salida humana y una prueba completa antes de publicarlo.",
     ];
-    nextQuestion = "Cuéntame un ejemplo real: ¿qué dice el cliente al inicio y qué debería ocurrir al final?";
+    diagnostic += " Tomo como punto de partida el evento operativo más frecuente y diseño el flujo para poder ajustar después sus reglas sin rehacerlo.";
+    nextQuestion = null;
     changeScope = "workflow";
   }
 
   return {
     reply: requiresApproval
-      ? "Sí, puedo ayudarte con esto. Ya organicé una ruta concreta; primero confirmamos el punto clave y después podrás autorizar el plan antes de tocar la configuración o el código."
-      : "Entendí la idea. Te explico lo que veo y la mejor forma de avanzar sin complicarte.",
+      ? "Entendí el cambio. Ya organicé una ruta concreta, segura y reversible para que puedas autorizarla sin una cadena de preguntas previa."
+      : "Entendí la idea. Tomé la opción más segura con el contexto disponible y te dejo una ruta concreta para avanzar.",
     understoodRequest,
     title: message.slice(0, 80) || "Consulta de Arquitecto Hermes",
     diagnostic,
@@ -218,14 +235,16 @@ function parseReply(
     const scopes: ChangeScope[] = ["analysis", "automation", "integration", "workflow", "database", "code", "configuration"];
     const executionActions: ExecutionAction[] = ["none"];
     return {
-      reply: String(parsed.reply || "Preparé una recomendación para revisión.").slice(0, 2500),
+      reply: withoutClosingQuestion(parsed.reply || "Preparé una recomendación para revisión."),
       understoodRequest: String(parsed.understoodRequest || `Quieres ayuda con: ${originalMessage}`).slice(0, 700),
       title: String(parsed.title || originalMessage || "Propuesta de Arquitecto Hermes").slice(0, 120),
       diagnostic: String(parsed.diagnostic || "Sin diagnóstico adicional.").slice(0, 2000),
       actions: Array.isArray(parsed.actions)
         ? parsed.actions.slice(0, 6).map((action: unknown) => String(action).slice(0, 500))
         : [],
-      nextQuestion: parsed.nextQuestion ? String(parsed.nextQuestion).slice(0, 700) : null,
+      nextQuestion: parsed.nextQuestion && /bloque|imprescind|tenant|negocio objetivo|eliminar|producci/i.test(String(parsed.nextQuestion))
+        ? String(parsed.nextQuestion).slice(0, 700)
+        : null,
       riskLevel: risks.includes(parsed.riskLevel) ? parsed.riskLevel : "medium",
       suggestionType: types.includes(parsed.suggestionType) ? parsed.suggestionType : "investigacion",
       changeScope: scopes.includes(parsed.changeScope) ? parsed.changeScope : "analysis",
@@ -248,7 +267,7 @@ async function callAI(message: string, history: HistoryMessage[], context: Archi
     alerts: context.alerts,
     metrics: context.metrics,
   });
-  const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto. Si todavía falta un dato imprescindible, haz una sola pregunta concreta.`;
+  const groundedPrompt = `${SYSTEM_PROMPT}\n\nCONTEXTO REAL DEL SISTEMA (sin secretos):\n${liveContext}\n\nUsa este contexto y el historial para decidir y avanzar. Responde con una recomendación completa; no cierres con una pregunta. Solo usa nextQuestion ante un bloqueo crítico imposible de inferir.`;
 
   if (cfg.mode === "gemini") {
     const conversation = history
