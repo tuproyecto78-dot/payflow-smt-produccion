@@ -20,7 +20,7 @@ interface ChatMessage {
   nextQuestion?: string | null;
   riskLevel?: "low" | "medium" | "high";
   changeScope?: string;
-  executionAction?: "retry_clickup_events" | "queue_clickup_analysis" | "none";
+  executionAction?: "none";
   requiresApproval?: boolean;
   source?: string;
   suggestionId?: string | null;
@@ -109,7 +109,7 @@ export function ArchitectChat() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo consultar al Arquitecto IA");
+      if (!res.ok) throw new Error(data.error || "No se pudo consultar a Arquitecto Hermes");
 
       setMessages((current) => [
         ...current,
@@ -171,7 +171,7 @@ export function ArchitectChat() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Bot className="size-5 text-violet-600" /> Chat con Arquitecto IA
+              <Bot className="size-5 text-violet-600" /> Chat con Arquitecto Hermes
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-1">Te escucha, entiende tu objetivo y convierte la idea en una solución segura.</p>
           </div>

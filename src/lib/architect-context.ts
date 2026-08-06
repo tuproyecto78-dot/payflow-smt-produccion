@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getSafeAIStatus } from "@/lib/ai/config";
-import { getSupabaseAdmin } from "@/lib/clickup";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getPayPhoneConfig } from "@/lib/payphone-config";
 
 export type ModuleStatus = "healthy" | "warning" | "error";
@@ -33,8 +33,6 @@ export interface ArchitectSystemContext {
     failedRuns: number;
     pendingPayments: number;
     failedPayments: number;
-    pendingClickUpEvents: number;
-    failedClickUpEvents: number;
     pendingSuggestions: number;
     whatsappConnections: number;
   };
@@ -61,44 +59,30 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
   const ai = getSafeAIStatus();
   const payphone = getPayPhoneConfig();
   const supabase = getSupabaseAdmin();
-  const [connectionResult, counts] = await Promise.all([
-    supabase
-      .from("clickup_connections")
-      .select("id, workspace_id, status, updated_at")
-      .eq("status", "active")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    Promise.allSettled([
+  const counts = await Promise.allSettled([
       countRows("workflows"),
       countRows("workflow_runs", { column: "status", values: ["failed", "error"] }),
       countRows("payment_transactions", { column: "status", value: "payment_pending" }),
       countRows("payment_transactions", { column: "status", values: ["payment_failed", "failed", "error"] }),
-      countRows("clickup_events", { column: "processing_status", values: ["detected", "pending_analysis"] }),
-      countRows("clickup_events", { column: "processing_status", value: "failed" }),
       countRows("architecture_suggestions", { column: "approval_status", value: "pending" }),
       countRows("whatsapp_connections", { column: "status", value: "active" }),
-    ]),
-  ]);
+    ]);
 
   const metrics = {
     workflows: settledValue(counts[0]),
     failedRuns: settledValue(counts[1]),
     pendingPayments: settledValue(counts[2]),
     failedPayments: settledValue(counts[3]),
-    pendingClickUpEvents: settledValue(counts[4]),
-    failedClickUpEvents: settledValue(counts[5]),
-    pendingSuggestions: settledValue(counts[6]),
-    whatsappConnections: settledValue(counts[7]),
+    pendingSuggestions: settledValue(counts[4]),
+    whatsappConnections: settledValue(counts[5]),
   };
 
   const whatsappConfigured = Boolean(
     process.env.WHATSAPP_ACCESS_TOKEN?.trim() &&
-    (process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || metrics.whatsappConnections > 0)
+    metrics.whatsappConnections > 0
   );
 
   const databaseErrors = counts.filter((item) => item.status === "rejected").length;
-  const clickupConnected = Boolean(connectionResult.data && !connectionResult.error);
   const alerts: ArchitectAlert[] = [];
 
   if (databaseErrors > 0) {
@@ -111,22 +95,12 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
       suggestedPrompt: "Revisa las consultas fallidas de Supabase, identifica tablas o columnas incompatibles y propón cómo corregirlas.",
     });
   }
-  if (!clickupConnected) {
-    alerts.push({
-      id: "clickup-connection",
-      module: "clickup",
-      title: "ClickUp no aparece conectado",
-      detail: connectionResult.error?.message || "No se encontró una conexión activa.",
-      severity: "high",
-      suggestedPrompt: "Revisa la conexión de ClickUp y dime qué falta para dejar el webhook activo.",
-    });
-  }
   if (!payphone.configured) {
     alerts.push({
       id: "payphone-config",
       module: "payphone",
       title: "PayPhone requiere configuración",
-      detail: payphone.message || "Las credenciales o funciones necesarias no están activas.",
+      detail: "Las credenciales o funciones necesarias no están activas.",
       severity: "high",
       suggestedPrompt: "Revisa la configuración real de PayPhone y prepara una propuesta segura para corregir lo que falta.",
     });
@@ -173,26 +147,6 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
       suggestedPrompt: "Revisa los pagos pendientes y propón cómo validar webhook, antigüedad e idempotencia.",
     });
   }
-  if (metrics.failedClickUpEvents > 0) {
-    alerts.push({
-      id: "failed-clickup-events",
-      module: "clickup",
-      title: `${metrics.failedClickUpEvents} eventos de ClickUp fallidos`,
-      detail: "Los eventos pueden reintentarse de forma controlada después de tu aprobación.",
-      severity: "high",
-      suggestedPrompt: "Revisa los eventos fallidos de ClickUp y prepara un reintento seguro para mi aprobación.",
-    });
-  }
-  if (metrics.pendingClickUpEvents > 0) {
-    alerts.push({
-      id: "pending-clickup-events",
-      module: "clickup",
-      title: `${metrics.pendingClickUpEvents} eventos pendientes de análisis`,
-      detail: "El Arquitecto puede ponerlos en la cola de análisis con aprobación humana.",
-      severity: "medium",
-      suggestedPrompt: "Analiza los eventos pendientes de ClickUp y crea propuestas priorizadas.",
-    });
-  }
   if (metrics.failedRuns > 0) {
     alerts.push({
       id: "failed-workflows",
@@ -205,9 +159,8 @@ export async function collectArchitectContext(): Promise<ArchitectSystemContext>
   }
 
   const modules: ArchitectModule[] = [
-    { id: "architect", label: "Arquitecto IA", status: ai.configured ? "healthy" : "warning", detail: ai.configured ? `${ai.provider} · ${ai.model}` : "Modo local", metric: `${alerts.length} alertas` },
+    { id: "architect", label: "Arquitecto Hermes", status: ai.configured ? "healthy" : "warning", detail: ai.configured ? `${ai.provider} · ${ai.model}` : "Modo local", metric: `${alerts.length} alertas` },
     { id: "supabase", label: "Supabase", status: databaseErrors === 0 ? "healthy" : "error", detail: databaseErrors === 0 ? "Datos conectados" : `${databaseErrors} consultas fallidas`, metric: `${metrics.pendingSuggestions} propuestas` },
-    { id: "clickup", label: "ClickUp", status: clickupConnected ? (metrics.failedClickUpEvents ? "error" : "healthy") : "error", detail: clickupConnected ? "Webhook activo" : "Sin conexión activa", metric: `${metrics.pendingClickUpEvents} pendientes` },
     { id: "payphone", label: "PayPhone", status: payphone.configured ? (metrics.failedPayments ? "error" : "healthy") : "warning", detail: payphone.configured ? payphone.env : "Configuración incompleta", metric: `${metrics.pendingPayments} pendientes` },
     {
       id: "whatsapp",
