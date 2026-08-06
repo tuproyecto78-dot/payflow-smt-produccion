@@ -1,11 +1,10 @@
 /**
- * PayFlow SMT — Arquitecto IA module (server-only).
+ * PayFlow SMT — Arquitecto Hermes module (server-only).
  *
  * Detects events, proposes solutions, and waits for admin approval
  * before executing any critical action.
  *
  * SECURITY:
- *   - CLICKUP_API_TOKEN is NEVER exposed to the frontend.
  *   - All sensitive data is masked before display.
  *   - Critical actions require explicit admin approval.
  */
@@ -47,7 +46,7 @@ export interface ArchitectProposal {
   recommendedAction: string;
   actionSteps: string[];
   riskLevel: RiskLevel;
-  zaiPrompt: string;
+  hermesPrompt: string;
   requiresApproval: boolean;
   approvalStatus: ProposalStatus;
   approvedBy: string | null;
@@ -61,8 +60,6 @@ export interface ArchitectAction {
   actionType: string;
   status: "pending" | "executing" | "completed" | "failed";
   result: string | null;
-  clickupTaskId: string | null;
-  clickupTaskUrl: string | null;
   executedBy: string | null;
   executedAt: string | null;
   createdAt: string;
@@ -137,77 +134,77 @@ export function analyzeEvent(event: ArchitectEvent): Omit<ArchitectProposal, "id
     recommendedAction: string;
     actionSteps: string[];
     riskLevel: RiskLevel;
-    zaiPrompt: string;
+    hermesPrompt: string;
   }> = {
     payphone_not_configured: {
       diagnosis: "Credenciales PayPhone faltantes en el servidor.",
       recommendedAction: "Agregar PAYPHONE_TOKEN y PAYPHONE_STORE_ID en Vercel.",
       actionSteps: ["Ir a Vercel > Settings > Environment Variables", "Agregar PAYPHONE_TOKEN y PAYPHONE_STORE_ID", "Hacer redeploy"],
       riskLevel: "high",
-      zaiPrompt: "Generar guía paso a paso para configurar PayPhone API Link en Vercel.",
+      hermesPrompt: "Generar guía paso a paso para configurar PayPhone API Link en Vercel.",
     },
     payment_pending_24h: {
       diagnosis: "Transacción sin confirmación por más de 24 horas.",
       recommendedAction: "Verificar estado en PayPhone y contactar al cliente.",
       actionSteps: ["Consultar estado del pago en PayPhone", "Si fue pagado, actualizar a payment_success vía webhook", "Si no, contactar al cliente por WhatsApp"],
       riskLevel: "medium",
-      zaiPrompt: "Redactar mensaje de seguimiento para cliente con pago pendiente de 24h.",
+      hermesPrompt: "Redactar mensaje de seguimiento para cliente con pago pendiente de 24h.",
     },
     payment_failed: {
       diagnosis: "Pago rechazado por el procesador.",
       recommendedAction: "Notificar al cliente y ofrecer reintentar.",
       actionSteps: ["Enviar mensaje de pago fallido por WhatsApp", "Generar nuevo link PayPhone", "Esperar confirmación"],
       riskLevel: "low",
-      zaiPrompt: "Redactar mensaje empático para cliente cuyo pago fue rechazado.",
+      hermesPrompt: "Redactar mensaje empático para cliente cuyo pago fue rechazado.",
     },
     payment_expired: {
       diagnosis: "Link de pago expiró sin uso.",
       recommendedAction: "Generar nuevo link y reenviar.",
       actionSteps: ["Generar nuevo link PayPhone", "Enviar por WhatsApp", "Actualizar registro"],
       riskLevel: "low",
-      zaiPrompt: "Redactar mensaje ofreciendo nuevo link de pago.",
+      hermesPrompt: "Redactar mensaje ofreciendo nuevo link de pago.",
     },
     chatbot_error: {
       diagnosis: "Asistente IA fallando repetidamente.",
       recommendedAction: "Verificar cuota del proveedor IA y configuración.",
       actionSteps: ["Revisar logs de Vercel", "Verificar cuota de Groq/Gemini", "Cambiar a fallback local si es necesario"],
       riskLevel: "medium",
-      zaiPrompt: "Diagnosticar por qué el chatbot falla y proponer solución.",
+      hermesPrompt: "Diagnosticar por qué el chatbot falla y proponer solución.",
     },
     client_requests_human: {
       diagnosis: "Cliente prefiere atención humana.",
       recommendedAction: "Derivar a asesor humano y pausar automatización.",
       actionSteps: ["Notificar al equipo de soporte", "Pausar bot para este cliente", "Registrar en historial"],
       riskLevel: "low",
-      zaiPrompt: "Redactar mensaje de derivación a humano cordial y profesional.",
+      hermesPrompt: "Redactar mensaje de derivación a humano cordial y profesional.",
     },
     flow_save_error: {
       diagnosis: "Error al guardar configuración de flujo.",
       recommendedAction: "Verificar permisos y almacenamiento.",
       actionSteps: ["Revisar logs de error", "Verificar localStorage", "Reintentar guardado"],
       riskLevel: "medium",
-      zaiPrompt: "Diagnosticar error de guardado de flujo y proponer fix.",
+      hermesPrompt: "Diagnosticar error de guardado de flujo y proponer fix.",
     },
     webhook_error: {
       diagnosis: "Webhook de PayPhone fallando.",
       recommendedAction: "Verificar URL del webhook y headers.",
       actionSteps: ["Verificar URL en PayPhone", "Probar webhook manualmente", "Revisar logs"],
       riskLevel: "high",
-      zaiPrompt: "Diagnosticar fallo de webhook PayPhone y proponer corrección.",
+      hermesPrompt: "Diagnosticar fallo de webhook PayPhone y proponer corrección.",
     },
     supabase_error: {
       diagnosis: "Error de conexión con Supabase.",
       recommendedAction: "Verificar credenciales y conectividad.",
       actionSteps: ["Verificar SUPABASE_URL y SUPABASE_ANON_KEY", "Probar conexión", "Revisar RLS policies"],
       riskLevel: "high",
-      zaiPrompt: "Diagnosticar error de Supabase y proponer solución.",
+      hermesPrompt: "Diagnosticar error de Supabase y proponer solución.",
     },
     client_pending_activation: {
       diagnosis: "Cliente con solicitud pendiente de activación.",
       recommendedAction: "Revisar solicitud y activar o solicitar más información.",
       actionSteps: ["Revisar datos del cliente", "Verificar PayPhone del cliente", "Activar o marcar info faltante"],
       riskLevel: "low",
-      zaiPrompt: "Redactar resumen de cliente pendiente para revisión admin.",
+      hermesPrompt: "Redactar resumen de cliente pendiente para revisión admin.",
     },
   };
 
@@ -216,7 +213,7 @@ export function analyzeEvent(event: ArchitectEvent): Omit<ArchitectProposal, "id
     recommendedAction: "Investigar manualmente.",
     actionSteps: ["Revisar logs", "Contactar soporte"],
     riskLevel: "medium" as RiskLevel,
-    zaiPrompt: "Diagnosticar evento desconocido.",
+    hermesPrompt: "Diagnosticar evento desconocido.",
   };
 
   return {
@@ -297,56 +294,12 @@ export function updateAction(id: string, updates: Partial<ArchitectAction>): voi
   if (action) Object.assign(action, updates);
 }
 
-// ─── ClickUp integration ──────────────────────────────────────────────
-
-export async function createClickUpTask(proposal: ArchitectProposal, event: ArchitectEvent): Promise<{ ok: boolean; taskId?: string; taskUrl?: string; error?: string }> {
-  const token = process.env.CLICKUP_API_TOKEN;
-  const listId = process.env.CLICKUP_LIST_ID;
-
-  if (!token || !listId) {
-    return { ok: false, error: "CLICKUP_API_TOKEN o CLICKUP_LIST_ID no configurados" };
-  }
-
-  try {
-    const res = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
-      method: "POST",
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: `[PayFlow] ${event.title}`,
-        description: `Diagnóstico: ${proposal.diagnosis}\n\nAcción: ${proposal.recommendedAction}\n\nPasos:\n${proposal.actionSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nSeveridad: ${event.severity}\nRiesgo: ${proposal.riskLevel}\nMódulo: ${event.source}\nPrompt Z.ai: ${proposal.zaiPrompt}`,
-        priority: event.severity === "critical" ? 1 : event.severity === "high" ? 2 : event.severity === "medium" ? 3 : 4,
-        tags: [event.eventType, "payflow-architect"],
-      }),
-      cache: "no-store",
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      return { ok: false, error: `ClickUp ${res.status}: ${errText.slice(0, 200)}` };
-    }
-
-    const data = await res.json();
-    return {
-      ok: true,
-      taskId: data.id,
-      taskUrl: data.url,
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
 // ─── Safe status (no secrets) ─────────────────────────────────────────
 
 export function getArchitectStatus() {
   return {
     enabled: (process.env.ARCHITECT_AGENT_ENABLED || "true").toLowerCase() === "true",
     approvalRequired: (process.env.ARCHITECT_APPROVAL_REQUIRED || "true").toLowerCase() === "true",
-    clickupEnabled: (process.env.CLICKUP_ENABLED || "false").toLowerCase() === "true",
-    clickupConfigured: !!(process.env.CLICKUP_API_TOKEN && process.env.CLICKUP_LIST_ID),
     eventsCount: events.length,
     pendingProposals: proposals.filter(p => p.approvalStatus === "pending_approval").length,
     approvedProposals: proposals.filter(p => p.approvalStatus === "approved").length,

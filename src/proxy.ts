@@ -15,7 +15,6 @@ const ACTIVE_API_PREFIXES = [
   "/api/audit-logs",
   "/api/availability",
   "/api/catalog",
-  "/api/clickup/connect",
   "/api/commercial-agent",
   "/api/executions",
   "/api/knowledge",
@@ -29,7 +28,6 @@ const ACTIVE_API_PREFIXES = [
 ];
 
 const PUBLIC_WEBHOOKS = new Set([
-  "/api/clickup/webhook",
   "/api/payments/webhook",
   "/api/payphone/webhook",
   "/api/payphone/NotificacionPago",
@@ -59,7 +57,7 @@ function withSecurityHeaders(response: NextResponse) {
   return response;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isDashboard = pathname.startsWith("/dashboard");
   const isOwnSubscriptionApi =

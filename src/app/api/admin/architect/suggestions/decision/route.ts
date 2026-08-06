@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-server";
-import { getSupabaseAdmin } from "@/lib/clickup";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,39 +30,11 @@ export async function POST(req: Request) {
     let execution = { status: "not_executed", message: "El plan quedó registrado sin realizar cambios." };
     if (decision === "approved") {
       const proposed = data.proposed_actions as { execution_action?: string; change_scope?: string } | unknown[] | null;
-      const action = proposed && !Array.isArray(proposed) ? proposed.execution_action : "none";
       const changeScope = proposed && !Array.isArray(proposed) ? proposed.change_scope : "configuration";
-
-      if (action === "retry_clickup_events") {
-        const { data: events, error: executeError } = await supabase
-          .from("clickup_events")
-          .update({ processing_status: "pending_analysis", processed_at: null, error_message: null })
-          .eq("processing_status", "failed")
-          .select("id");
-        if (executeError) throw executeError;
-        execution = { status: "executed", message: `${events?.length || 0} eventos fallidos fueron enviados nuevamente a análisis.` };
-      } else if (action === "queue_clickup_analysis") {
-        const { data: events, error: executeError } = await supabase
-          .from("clickup_events")
-          .update({ processing_status: "pending_analysis" })
-          .eq("processing_status", "detected")
-          .select("id");
-        if (executeError) throw executeError;
-        execution = { status: "executed", message: `${events?.length || 0} eventos detectados fueron enviados a análisis.` };
-      } else {
-        execution = {
-          status: "approval_recorded",
-          message: `Autorización registrada para el cambio de ${changeScope || "configuración"}. El plan quedó listo para implementación segura; todavía no se modificó código ni configuración.`,
-        };
-      }
-
-      if (execution.status === "executed") {
-        await supabase
-          .from("architecture_suggestions")
-          .update({ approval_status: "executed" })
-          .eq("id", suggestionId);
-        data.approval_status = "executed";
-      }
+      execution = {
+        status: "approval_recorded",
+        message: `Autorización registrada para el cambio de ${changeScope || "configuración"}. Arquitecto Hermes coordinará la implementación segura; todavía no se modificó código ni configuración.`,
+      };
     }
 
     await supabase.from("audit_logs").insert({

@@ -17,7 +17,6 @@ interface ContextResponse { modules: ModuleItem[]; alerts: AlertItem[]; generate
 const POSITIONS: Record<string, { x: number; y: number }> = {
   architect: { x: 360, y: 135 },
   supabase: { x: 80, y: 20 },
-  clickup: { x: 640, y: 20 },
   payphone: { x: 80, y: 250 },
   whatsapp: { x: 640, y: 250 },
   workflows: { x: 270, y: 300 },

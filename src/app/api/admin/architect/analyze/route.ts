@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     if (!event) return NextResponse.json({ error: "Event not found" }, { status: 404 });
 
     const analysis = analyzeEvent(event);
-    const proposal = createProposal({ ...analysis, eventId: event.id });
+    const proposal = createProposal({ ...analysis, eventId: event.id, approvedBy: null, approvedAt: null });
     updateEventStatus(event.id, "analyzed");
 
     return NextResponse.json({ ok: true, proposal });
@@ -28,11 +28,11 @@ export async function POST(req: Request) {
 
   // Analyze all unanalyzed events
   const events = getAllEvents().filter(e => e.status === "detected");
-  const newProposals = [];
+  const newProposals: ReturnType<typeof createProposal>[] = [];
 
   for (const event of events) {
     const analysis = analyzeEvent(event);
-    const proposal = createProposal({ ...analysis, eventId: event.id });
+    const proposal = createProposal({ ...analysis, eventId: event.id, approvedBy: null, approvedAt: null });
     updateEventStatus(event.id, "analyzed");
     newProposals.push(proposal);
   }

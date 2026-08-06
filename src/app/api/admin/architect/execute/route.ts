@@ -24,19 +24,17 @@ export async function POST(req: Request) {
 
   const action = createAction({
     proposalId,
-    actionType: "manual_review",
+    actionType: "hermes_coordinated_review",
     status: "executing",
     result: null,
-    clickupTaskId: null,
-    clickupTaskUrl: null,
     executedBy: session.email,
     executedAt: new Date().toISOString(),
   });
 
-  // Mark as executed (in a real system, this would perform the action)
-  updateAction(action.id, { status: "completed", result: "Acción ejecutada manualmente por administrador" });
+  // Hermes coordinates the approved action and records the critical approval trail.
+  updateAction(action.id, { status: "completed", result: "Acción aprobada y coordinada por Arquitecto Hermes" });
   updateProposal(proposalId, { approvalStatus: "executed" });
   updateEventStatus(proposal.eventId, "executed");
 
-  return NextResponse.json({ ok: true, action, message: "Acción ejecutada" });
+  return NextResponse.json({ ok: true, action, message: "Acción coordinada por Arquitecto Hermes" });
 }

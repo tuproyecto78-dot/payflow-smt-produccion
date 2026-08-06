@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, ExternalLink, Brain, RefreshCw, Play, Link2 } from "lucide-react";
+import { Loader2, AlertTriangle, CheckCircle2, XCircle, Copy, Brain, RefreshCw, Play } from "lucide-react";
 import { toast } from "sonner";
 import { ArchitectChat } from "@/components/dashboard/architect-chat";
 import { ArchitectSystemMap } from "@/components/dashboard/architect-system-map";
@@ -12,8 +12,6 @@ import { ArchitectSystemMap } from "@/components/dashboard/architect-system-map"
 interface ArchitectStatus {
   enabled: boolean;
   approvalRequired: boolean;
-  clickupEnabled: boolean;
-  clickupConfigured: boolean;
   eventsCount: number;
   pendingProposals: number;
   approvedProposals: number;
@@ -28,7 +26,7 @@ interface Proposal {
   recommendedAction: string;
   actionSteps: string[];
   riskLevel: string;
-  zaiPrompt: string;
+  hermesPrompt: string;
   requiresApproval: boolean;
   approvalStatus: string;
   approvedBy: string | null;
@@ -70,7 +68,6 @@ export default function ArquitectoPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
-  const [connectingClickUp, setConnectingClickUp] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,32 +117,6 @@ export default function ArquitectoPage() {
     finally { setAnalyzing(false); }
   }
 
-  async function handleConnectClickUp() {
-    setConnectingClickUp(true);
-    try {
-      const res = await fetch("/api/clickup/connect", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        toast.success(
-          data.already_connected
-            ? `ClickUp ya estaba conectado a ${data.workspace?.name || "tu Workspace"}`
-            : `ClickUp conectado a ${data.workspace?.name || "tu Workspace"}`
-        );
-      } else {
-        toast.error(data.error || "No se pudo conectar ClickUp");
-      }
-    } catch {
-      toast.error("Error de red al conectar ClickUp");
-    } finally {
-      setConnectingClickUp(false);
-    }
-  }
-
   async function handleApprove(proposalId: string) {
     try {
       const res = await fetch("/api/admin/architect/approve", {
@@ -191,23 +162,6 @@ export default function ArquitectoPage() {
     } catch { toast.error("Error de red"); }
   }
 
-  async function handleClickUp(proposalId: string) {
-    try {
-      const res = await fetch("/api/admin/architect/create-clickup-task", {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposalId }),
-      });
-      const data = await res.json();
-      if (data.ok && data.taskUrl) {
-        toast.success("Tarea creada en ClickUp");
-        window.open(data.taskUrl, "_blank");
-      } else {
-        toast.error(data.error || "No se pudo crear tarea en ClickUp");
-      }
-    } catch { toast.error("Error de red"); }
-  }
-
   function copyPrompt(prompt: string) {
     navigator.clipboard.writeText(prompt);
     toast.success("Prompt copiado");
@@ -216,7 +170,7 @@ export default function ArquitectoPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-muted-foreground">
-        <Loader2 className="size-6 animate-spin mr-2" /> Cargando Arquitecto IA…
+        <Loader2 className="size-6 animate-spin mr-2" /> Cargando Arquitecto Hermes…
       </div>
     );
   }
@@ -229,15 +183,11 @@ export default function ArquitectoPage() {
             <Brain className="size-5 text-violet-600 dark:text-violet-300" />
           </div>
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Arquitecto IA</h1>
-            <p className="text-muted-foreground mt-0.5">Centro de control con aprobación humana obligatoria</p>
+            <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Arquitecto Hermes</h1>
+            <p className="text-muted-foreground mt-0.5">Arquitecto Principal y coordinador de AG2, Codex, automatizaciones y aprobaciones críticas</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={handleConnectClickUp} disabled={connectingClickUp}>
-            {connectingClickUp ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Link2 className="size-4 mr-2" />}
-            Conectar ClickUp
-          </Button>
           <Button onClick={handleAnalyze} disabled={analyzing}>
             {analyzing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
             Analizar eventos
@@ -295,7 +245,7 @@ export default function ArquitectoPage() {
       {/* Proposals */}
       {proposals.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold mb-3">Propuestas del Arquitecto IA</h2>
+          <h2 className="text-sm font-semibold mb-3">Propuestas de Arquitecto Hermes</h2>
           <div className="space-y-3">
             {proposals.map((p) => (
               <div key={p.id} className="rounded-xl border bg-card p-4 space-y-3">
@@ -314,8 +264,8 @@ export default function ArquitectoPage() {
                       ))}
                     </div>
                     <div className="mt-2 rounded-md bg-muted/50 p-2">
-                      <p className="text-[10px] font-semibold text-muted-foreground mb-0.5">Prompt Z.ai:</p>
-                      <p className="text-xs font-mono">{p.zaiPrompt}</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-0.5">Instrucción de Hermes:</p>
+                      <p className="text-xs font-mono">{p.hermesPrompt}</p>
                     </div>
                   </div>
                 </div>
@@ -336,12 +286,7 @@ export default function ArquitectoPage() {
                       <Play className="size-3.5 mr-1" /> Ejecutar
                     </Button>
                   )}
-                  {p.approvalStatus === "approved" && status?.clickupConfigured && (
-                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => handleClickUp(p.id)}>
-                      <ExternalLink className="size-3.5 mr-1" /> Crear tarea ClickUp
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => copyPrompt(p.zaiPrompt)}>
+                  <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => copyPrompt(p.hermesPrompt)}>
                     <Copy className="size-3.5 mr-1" /> Copiar prompt
                   </Button>
                 </div>
@@ -355,7 +300,7 @@ export default function ArquitectoPage() {
         <div className="rounded-xl border border-dashed p-12 text-center">
           <Brain className="size-12 mx-auto text-muted-foreground/40 mb-4" />
           <h3 className="text-lg font-semibold mb-1">No hay eventos detectados</h3>
-          <p className="text-muted-foreground text-sm mb-4">El Arquitecto IA monitorea el sistema en busca de problemas.</p>
+          <p className="text-muted-foreground text-sm mb-4">Arquitecto Hermes diagnostica el sistema y coordina las decisiones y automatizaciones.</p>
           <Button onClick={handleAnalyze} disabled={analyzing}>
             {analyzing ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
             Analizar ahora
