@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Bot, CheckCircle2, CircleHelp, Lightbulb, Loader2, Send, ShieldCheck, User, XCircle } from "lucide-react";
+import { Bot, CheckCircle2, CircleAlert, Lightbulb, Loader2, Send, ShieldCheck, User, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,7 @@ export function ArchitectChat() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hola. Soy tu Arquitecto PayFlow SMT. Cuéntame con tus propias palabras qué quieres lograr o qué no está funcionando; no necesitas usar términos técnicos. Voy a entender la idea, revisar el estado real del sistema y explicarte la mejor solución paso a paso.",
+      content: "Hola. Soy Arquitecto Hermes, tu agente 24/7 de ayuda y automatización. Puedes escribirme como hablas: interpretaré el objetivo, revisaré el estado real, elegiré una ruta segura y te entregaré acciones concretas. Solo pediré un dato cuando sea imposible avanzar responsablemente sin él.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -173,7 +173,7 @@ export function ArchitectChat() {
             <CardTitle className="flex items-center gap-2 text-base">
               <Bot className="size-5 text-violet-600" /> Chat con Arquitecto Hermes
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">Te escucha, entiende tu objetivo y convierte la idea en una solución segura.</p>
+            <p className="text-xs text-muted-foreground mt-1">Agente 24/7: entiende el contexto, decide una ruta segura y coordina la automatización.</p>
           </div>
           <Badge variant="outline" className="bg-emerald-50 text-emerald-700">Asistente activo</Badge>
         </div>
@@ -220,11 +220,11 @@ export function ArchitectChat() {
                     {message.nextQuestion && (
                       <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-500/25 dark:bg-blue-500/10">
                         <p className="flex items-center gap-1.5 font-semibold text-blue-900 dark:text-blue-100">
-                          <CircleHelp className="size-4" /> Solo necesito confirmar
+                          <CircleAlert className="size-4" /> Dato imprescindible para continuar
                         </p>
                         <p className="mt-1 text-blue-950 dark:text-blue-50">{message.nextQuestion}</p>
                         <Button type="button" size="sm" variant="outline" className="mt-2 h-7 bg-white/80 text-xs dark:bg-background/80" onClick={() => inputRef.current?.focus()}>
-                          Responder abajo
+                          Completar dato
                         </Button>
                         {message.requiresApproval && !message.suggestionId && (
                           <p className="mt-2 text-xs text-blue-800 dark:text-blue-200">Cuando respondas, prepararé el plan final para que puedas autorizarlo.</p>
